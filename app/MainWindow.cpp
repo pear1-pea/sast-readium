@@ -16,7 +16,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     initConnection();
 }
 
-MainWindow::~MainWindow() {}
+MainWindow::~MainWindow() noexcept{}
 
 // initialize
 void MainWindow::initWindow() { resize(1280, 800); }
