@@ -1,7 +1,6 @@
 #include "Views.h"
-#include "../command/Commands.h"
-#include "../controller/PageController.h"
-#include "../model/PageModel.h"
+#include "controller/PageController.h"
+#include "model/PageModel.h"
 
 Views::Views(WidgetFactory* factory, PageModel* model,
                  PageNavigationDelegate* delegate, QWidget* parent)

@@ -4,6 +4,7 @@
 #include <QFile>
 #include <QFrame>
 #include <QLabel>
+#include "model/RenderModel.h"
 
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     applyTheme("dark");
@@ -14,6 +15,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     initContent();
     
     initConnection();
+
 }
 
 MainWindow::~MainWindow() noexcept{}
@@ -52,8 +54,9 @@ void MainWindow::initContent() {
 }
 
 void MainWindow::initModel() {
-    documentModel = new DocumentModel();
-    pageModel = new PageModel();
+    renderModel = new RenderModel();
+    documentModel = new DocumentModel(renderModel);
+    pageModel = new PageModel(renderModel);
 }
 
 void MainWindow::initController() {
@@ -66,6 +69,9 @@ void MainWindow::initConnection() {
     connect(menuBar, &MenuBar::themeChanged, this, &MainWindow::applyTheme);
 
     connect(menuBar, &MenuBar::onExecuted, documentController, &DocumentController::execute);
+
+    connect(renderModel, &RenderModel::renderPageDone, viewWidget, &ViewWidget::changeImage);
+    connect(renderModel, &RenderModel::documentChanged, pageModel, &PageModel::updateInfo);
 }
 
 // function

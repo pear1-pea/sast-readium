@@ -139,6 +139,32 @@
                 "USE_VCPKG": "ON",
                 "VCPKG_TARGET_TRIPLET": "arm64-windows"
             }
+        },
+        {
+            "name": "Debug-Windows-Ninja",
+            "displayName": "Debug build for Windows (Ninja with vcpkg)",
+            "description": "Debug build using Ninja generator with vcpkg for dependency management on Windows",
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/build/Debug-Windows-Ninja",
+            "cacheVariables": {
+                "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+                "CMAKE_BUILD_TYPE": "Debug",
+                "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+                "USE_VCPKG": "ON"
+            }
+        },
+        {
+            "name": "Release-Windows-Ninja",
+            "displayName": "Release build for Windows (Ninja with vcpkg)",
+            "description": "Release build using Ninja generator with vcpkg for dependency management on Windows",
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/build/Release-Windows-Ninja",
+            "cacheVariables": {
+                "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+                "CMAKE_BUILD_TYPE": "Release",
+                "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+                "USE_VCPKG": "ON"
+            }
         }
     ],
     "buildPresets": [
@@ -211,7 +237,16 @@
             "displayName": "Release build for Windows ARM64",
             "configurePreset": "Release-Windows-ARM64",
             "configuration": "Release"
+        },
+        {
+            "name": "Debug-Windows-Ninja",
+            "displayName": "Debug build for Windows (Ninja with vcpkg)",
+            "configurePreset": "Debug-Windows-Ninja"
+        },
+        {
+            "name": "Release-Windows-Ninja",
+            "displayName": "Release build for Windows (Ninja with vcpkg)",
+            "configurePreset": "Release-Windows-Ninja"
         }
     ]
 }
-

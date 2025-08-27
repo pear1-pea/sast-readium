@@ -1,6 +1,6 @@
 #include "WidgetFactory.h"
-#include "../command/Commands.h"
-#include "../controller/PageController.h"
+#include "command/Commands.h"
+#include "controller/PageController.h"
 
 WidgetFactory::WidgetFactory(PageController* controller, QObject* parent)
     : QObject(parent), _controller(controller) {

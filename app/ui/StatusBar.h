@@ -2,7 +2,8 @@
 
 #include <QLabel>
 #include <QStatusBar>
-#include "../factory/WidgetFactory.h"
+#include "factory/WidgetFactory.h"
+#include <QMessageBox>
 
 class StatusBar : public QStatusBar {
     Q_OBJECT

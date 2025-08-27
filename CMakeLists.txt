@@ -132,29 +132,16 @@ if(CMAKE_EXPORT_COMPILE_COMMANDS AND ENABLE_CLANGD_CONFIG)
         endif()
     endif()
 
-    # Add custom target to update .clangd configuration
+    # Add custom target to update .clangd configuration automatically after compile_commands.json is generated
     if(DEFINED UPDATE_SCRIPT_CMD)
-        add_custom_target(update_clangd_config
+        # 依赖 compile_commands.json，自动在其生成后执行
+        add_custom_target(update_clangd_config ALL
             COMMAND ${UPDATE_SCRIPT_CMD_VERBOSE}
             WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
             COMMENT "Updating .clangd configuration for build directory: ${BUILD_DIR_RELATIVE}"
+            DEPENDS ${CMAKE_BINARY_DIR}/compile_commands.json
             VERBATIM
         )
-
-        # Automatically run the update during configuration
-        execute_process(
-            COMMAND ${UPDATE_SCRIPT_CMD}
-            WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-            RESULT_VARIABLE CLANGD_UPDATE_RESULT
-            OUTPUT_VARIABLE CLANGD_UPDATE_OUTPUT
-            ERROR_VARIABLE CLANGD_UPDATE_ERROR
-        )
-
-        if(CLANGD_UPDATE_RESULT EQUAL 0)
-            message(STATUS "Updated .clangd configuration for build directory: ${BUILD_DIR_RELATIVE}")
-        else()
-            message(WARNING "Failed to update .clangd configuration: ${CLANGD_UPDATE_ERROR}")
-        endif()
     else()
         message(WARNING "No suitable script interpreter found for updating .clangd configuration")
     endif()

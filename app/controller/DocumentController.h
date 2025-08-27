@@ -2,7 +2,7 @@
 
 #include <QStandardPaths>
 #include <QWidget>
-#include "../model/DocumentModel.h"
+#include "model/DocumentModel.h"
 #include "tool.hpp"
 
 class DocumentController : public QObject {

@@ -9,8 +9,8 @@
 #include <QWidget>
 #include <QLabel>
 
-#include "../delegate/PageNavigationDelegate.h"
-#include "../factory/WidgetFactory.h"
+#include "delegate/PageNavigationDelegate.h"
+#include "factory/WidgetFactory.h"
 
 class Controller;
 class Command;

@@ -53,3 +53,5 @@ CMakeLists.txt.user
 .DS_Store
 
 vcpkg_installed
+
+.clangd
