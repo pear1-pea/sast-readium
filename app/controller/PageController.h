@@ -1,8 +1,7 @@
 #pragma once
 
 #include <QObject>
-
-class PageModel;
+#include "../model/PageModel.h"
 
 class PageController : public QObject {
     Q_OBJECT

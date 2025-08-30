@@ -21,6 +21,8 @@ public:
     ~DocumentModel() {};
     bool isNULL();
     bool openFromFile(const QString& filePath);
+
 signals:
     void renderPageDone(QImage image);
+    void pageUpdate(int currentPage, int totalPages);
 };

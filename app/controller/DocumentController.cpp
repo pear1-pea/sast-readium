@@ -11,7 +11,7 @@ void DocumentController::initializeCommandMap() {
                  tr("PDF Files (*.pdf)"));
              pdfDocument->openFromFile(filePath);
          }},
-        {ActionMap::save, [this](QWidget* ctx) { /*....save()....*/ }}};
+        {ActionMap::saveFile, [this](QWidget* ctx) { /*....save()....*/ }}};
 }
 
 DocumentController::DocumentController(DocumentModel* pdf) : pdfDocument(pdf) {

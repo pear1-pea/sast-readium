@@ -19,13 +19,13 @@ void MenuBar::createFileMenu() {
     QAction* saveAction = new QAction(tr("保存"), this);
     saveAction->setShortcut(QKeySequence("Ctrl+S"));
 
-    QAction* exitAction = new QAction(tr("退出"), this);
-    exitAction->setShortcut(QKeySequence("Ctrl+Q"));
+    QAction* closeAction = new QAction(tr("关闭"), this);
+    closeAction->setShortcut(QKeySequence("Ctrl+Q"));
 
     fileMenu->addAction(openAction);
     fileMenu->addAction(saveAction);
     fileMenu->addSeparator();
-    fileMenu->addAction(exitAction);
+    fileMenu->addAction(closeAction);
 
     connect(openAction, &QAction::triggered, this,
             [this]() { emit onExecuted(ActionMap::openFile); });
@@ -37,17 +37,25 @@ void MenuBar::createViewMenu() {
 
     QAction* fullScreenAction = new QAction(tr("全屏"), this);
     fullScreenAction->setShortcut(QKeySequence("Ctrl+Shift+F"));
+    fullScreenAction->setCheckable(true);
 
     QAction* zoomInAction = new QAction(tr("放大"), this);
-    zoomInAction->setShortcut(QKeySequence("Ctrl++"));
+    zoomInAction->setShortcuts({QKeySequence("Ctrl++"), QKeySequence("Ctrl+=")});
 
     QAction* zoomOutAction = new QAction(tr("缩小"), this);
-    zoomOutAction->setShortcut(QKeySequence("Ctrl+-"));
+    zoomOutAction->setShortcuts({QKeySequence("Ctrl+-"), QKeySequence("Ctrl+_")});
 
     viewMenu->addAction(fullScreenAction);
     viewMenu->addSeparator();
     viewMenu->addAction(zoomInAction);
     viewMenu->addAction(zoomOutAction);
+
+    connect(fullScreenAction, &QAction::triggered, this, 
+        [this]() { emit onExecuted(ActionMap::fullScreen); });
+    connect(zoomInAction, &QAction::triggered, this, 
+        [this]() { emit onExecuted(ActionMap::zoomIn); });
+    connect(zoomOutAction, &QAction::triggered, this, 
+        [this]() { emit onExecuted(ActionMap::zoomOut); });
 }
 
 void MenuBar::createThemeMenu() {

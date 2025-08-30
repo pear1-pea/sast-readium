@@ -13,15 +13,15 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     initModel();
     initController();
     initContent();
-    
     initConnection();
-
 }
 
-MainWindow::~MainWindow() noexcept{}
+MainWindow::~MainWindow() noexcept {}
 
 // initialize
-void MainWindow::initWindow() { resize(1280, 800); }
+void MainWindow::initWindow() {
+    resize(1280, 800);
+}
 
 void MainWindow::initContent() {
     WidgetFactory* factory = new WidgetFactory(pageController, this);
@@ -54,7 +54,7 @@ void MainWindow::initContent() {
 }
 
 void MainWindow::initModel() {
-    renderModel = new RenderModel();
+    renderModel = new RenderModel(this->logicalDpiX(), this->logicalDpiY());
     documentModel = new DocumentModel(renderModel);
     pageModel = new PageModel(renderModel);
 }
@@ -65,21 +65,43 @@ void MainWindow::initController() {
 }
 
 void MainWindow::initConnection() {
-
     connect(menuBar, &MenuBar::themeChanged, this, &MainWindow::applyTheme);
 
     connect(menuBar, &MenuBar::onExecuted, documentController, &DocumentController::execute);
+    connect(menuBar, &MenuBar::onExecuted, this, &MainWindow::handleActionExecuted);
 
     connect(renderModel, &RenderModel::renderPageDone, viewWidget, &ViewWidget::changeImage);
     connect(renderModel, &RenderModel::documentChanged, pageModel, &PageModel::updateInfo);
+
+    connect(pageModel, &PageModel::pageUpdate, statusBar, &StatusBar::setPageInfo);
+    connect(documentModel, &DocumentModel::pageUpdate, statusBar, &StatusBar::setPageInfo);
+
+    connect(viewWidget, &ViewWidget::scaleChanged, statusBar, &StatusBar::setZoomInfo);
 }
 
 // function
 void MainWindow::applyTheme(const QString& theme) {
-    auto path =
-        QString("%1/styles/%2.qss").arg(qApp->applicationDirPath(), theme);
+    auto path = QString("%1/styles/%2.qss").arg(qApp->applicationDirPath(), theme);
 
     QFile file(path);
     file.open(QFile::ReadOnly);
     setStyleSheet(QLatin1String(file.readAll()));
+}
+
+void MainWindow::handleActionExecuted(ActionMap id) {
+    switch (id) {
+        case ActionMap::fullScreen:
+            if (isFullScreen()) {
+                showNormal();
+            } else {
+                showFullScreen();
+            }
+            break;
+        case ActionMap::zoomIn:
+            viewWidget->zoomIn();
+            break;
+        case ActionMap::zoomOut:
+            viewWidget->zoomOut();
+            break;
+    }
 }

@@ -12,6 +12,7 @@
 #include "ui/ToolBar.h"
 #include "ui/ViewWidget.h"
 #include "model/RenderModel.h"
+#include "controller/tool.hpp"
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -22,6 +23,7 @@ public:
 
 private slots:
     void applyTheme(const QString& theme);
+    void handleActionExecuted(ActionMap id);
 
 private:
     void initWindow();
