@@ -4,7 +4,7 @@
 
 namespace Ui {
 class Widget;
-}// namespace Ui
+}  // namespace Ui
 
 class Widget : public QWidget {
     Q_OBJECT

@@ -1,5 +1,19 @@
 <!DOCTYPE RCC>
 <RCC version="1.0">
+    <qresource prefix="/images">
+        <file alias="icon">../assets/images/icon.ico</file>
+        <file alias="logo">../assets/images/logo.svg</file>
+        <file alias="logo-dark">../assets/images/logo-dark.svg</file>
+    </qresource>
+
+    <qresource prefix="/images/filetypes">
+        <file alias="pdf">../assets/images/filetypes/pdf.svg</file>
+        <file alias="epub">../assets/images/filetypes/epub.svg</file>
+        <file alias="txt">../assets/images/filetypes/txt.svg</file>
+        <file alias="doc">../assets/images/filetypes/doc.svg</file>
+        <file alias="default">../assets/images/filetypes/default.svg</file>
+    </qresource>
+
     <qresource prefix="/images/dark">
         <file alias="theme">../assets/images/dark/theme.png</file>
     </qresource>

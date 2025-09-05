@@ -1,0 +1,124 @@
+# MkDocs configuration for SAST Readium Documentation
+
+# Project information
+site_name: SAST Readium Documentation
+site_description: Comprehensive documentation for SAST Readium, a Qt6-based PDF reader application
+site_author: SAST Team
+site_url: https://sast-readium.github.io/sast-readium/
+
+# Repository information
+repo_name: SAST-Readium/sast-readium
+repo_url: https://github.com/SAST-Readium/sast-readium
+edit_uri: edit/main/docs/
+
+# Copyright
+copyright: Copyright &copy; 2024 SAST Team
+
+# Configuration
+theme:
+  name: material
+  language: en
+  palette:
+    # Palette toggle for light mode
+    - scheme: default
+      primary: blue
+      accent: blue
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    # Palette toggle for dark mode
+    - scheme: slate
+      primary: blue
+      accent: blue
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.expand
+    - navigation.path
+    - navigation.top
+    - search.highlight
+    - search.share
+    - toc.follow
+    - content.code.copy
+    - content.action.edit
+
+# Extensions
+markdown_extensions:
+  - abbr
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - md_in_html
+  - toc:
+      permalink: true
+  - pymdownx.arithmatex:
+      generic: true
+  - pymdownx.betterem:
+      smart_enable: all
+  - pymdownx.caret
+  - pymdownx.details
+  - pymdownx.emoji:
+      emoji_generator: !!python/name:materialx.emoji.to_svg
+      emoji_index: !!python/name:materialx.emoji.twemoji
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.keys
+  - pymdownx.magiclink:
+      repo_url_shorthand: true
+      user: SAST-Readium
+      repo: sast-readium
+  - pymdownx.mark
+  - pymdownx.smartsymbols
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - pymdownx.tilde
+
+# Plugins
+plugins:
+  - search:
+      lang: en
+  - git-revision-date-localized:
+      enable_creation_date: true
+
+# Navigation
+nav:
+  - Home: index.md
+  - Getting Started:
+    - Overview: getting-started/index.md
+    - Dependency Management: getting-started/dependency-management.md
+    - Platform Support: getting-started/platform-support.md
+  - Build Systems:
+    - Overview: build-systems/index.md
+    - Build System Comparison: build-systems/build-system-comparison.md
+    - Xmake:
+      - Overview: build-systems/xmake/index.md
+      - Build Guide: build-systems/xmake/xmake-build.md
+      - Status Report: build-systems/xmake/xmake-status.md
+      - Final Report: build-systems/xmake/xmake-final-report.md
+  - Setup & Configuration:
+    - Overview: setup/index.md
+    - MSYS2 Build Setup: setup/msys2-build.md
+    - clangd IDE Setup: setup/clangd-setup.md
+  - Features:
+    - Overview: features/index.md
+    - Thumbnail System: features/thumbnail-system.md
+
+# Extra
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/SAST-Readium/sast-readium
+  version:
+    provider: mike

@@ -1,7 +1,8 @@
 #pragma once
 
-#include <QObject>
 #include <QMessageBox>
+#include <QObject>
+
 
 class PageController;
 
@@ -20,7 +21,8 @@ class PrevPageCommand : public Command {
     Q_OBJECT
 
 public:
-    explicit PrevPageCommand(PageController* controller, QObject* parent = nullptr);
+    explicit PrevPageCommand(PageController* controller,
+                             QObject* parent = nullptr);
 
 public slots:
     void execute() override;
@@ -33,7 +35,8 @@ class NextPageCommand : public Command {
     Q_OBJECT
 
 public:
-    explicit NextPageCommand(PageController* controller, QObject* parent = nullptr);
+    explicit NextPageCommand(PageController* controller,
+                             QObject* parent = nullptr);
 
 public slots:
     void execute() override;

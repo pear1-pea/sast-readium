@@ -13,7 +13,11 @@ A Qt6-based PDF reader application with comprehensive build support for multiple
 
 ## Build Environments
 
-The project uses a **tiered dependency management approach** that prioritizes system packages for better performance and reliability. See [Dependency Management Guide](docs/DEPENDENCY_MANAGEMENT.md) for detailed information.
+The project supports **multiple build systems** for maximum flexibility:
+- **CMake** (primary) - Comprehensive build system with extensive configuration
+- **Xmake** (alternative) - Modern Lua-based build system with simpler syntax
+
+The project uses a **tiered dependency management approach** that prioritizes system packages for better performance and reliability. See [Dependency Management Guide](docs/getting-started/dependency-management.md) for detailed information.
 
 ### Linux/macOS (Recommended - System Packages)
 
@@ -24,7 +28,7 @@ sudo apt install cmake ninja-build qt6-base-dev qt6-svg-dev qt6-tools-dev libpop
 
 # macOS:
 brew install cmake ninja qt@6
-# Note: poppler-qt6 needs to be built from source (see docs/DEPENDENCY_MANAGEMENT.md)
+# Note: poppler-qt6 needs to be built from source (see docs/getting-started/dependency-management.md)
 
 # Configure and build
 cmake --preset=Release-Unix
@@ -42,7 +46,7 @@ cmake --build --preset=Release-Unix
 ./scripts/build-msys2.sh          # Build with system packages
 ```
 
-For detailed MSYS2 setup and build instructions, see [MSYS2 Build Guide](docs/MSYS2-BUILD.md).
+For detailed MSYS2 setup and build instructions, see [MSYS2 Build Guide](docs/setup/msys2-build.md).
 
 ### Windows with vcpkg (Fallback)
 
@@ -54,9 +58,43 @@ cmake --build --preset=Release-Windows
 
 **Note**: vcpkg builds are slower but provide consistent dependency versions across platforms. Use when system packages are unavailable or insufficient.
 
+### Xmake Build System (Experimental)
+
+An alternative xmake build system is available but currently has compatibility issues:
+
+```bash
+# Install xmake first (see docs/build-systems/xmake/xmake-build.md for installation)
+
+# Note: Currently has Qt detection issues in MSYS2 environment
+# Use CMake for production builds
+```
+
+**Status**: 🟡 Partially implemented - Qt integration pending
+
+**Benefits when complete**:
+- Simpler configuration syntax
+- Built-in package management
+- Faster builds with automatic caching
+- Cross-platform consistency
+
+See [Xmake Status](docs/build-systems/xmake/xmake-status.md) for current implementation status and [Xmake Build Guide](docs/build-systems/xmake/xmake-build.md) for detailed instructions.
+
 ## Quick Start
 
-### Option 1: MSYS2 (Windows, Unix-like experience)
+### Option 1: Xmake (Recommended for new users)
+
+1. Install [xmake](https://xmake.io/)
+2. Build and run:
+
+   ```bash
+   git clone <repository-url>
+   cd sast-readium
+   xmake f -m release  # Configure release build
+   xmake               # Build
+   xmake run           # Run application
+   ```
+
+### Option 2: MSYS2 (Windows, Unix-like experience)
 
 1. Install [MSYS2](https://www.msys2.org/)
 2. Open MSYS2 MINGW64 terminal
@@ -141,11 +179,15 @@ make dev            # Setup development environment
 
 ## Documentation
 
-- [MSYS2 Build Guide](docs/MSYS2-BUILD.md) - Comprehensive MSYS2 setup and build instructions
-- [clangd Setup Guide](docs/CLANGD-SETUP.md) - IDE integration and clangd configuration
-- [clangd Troubleshooting](docs/CLANGD-TROUBLESHOOTING.md) - Solutions for common clangd issues
-- [clangd Configuration Options](docs/CLANGD-CONFIG-OPTIONS.md) - Advanced configuration control
-- [Build Troubleshooting](docs/MSYS2-BUILD.md#troubleshooting) - Common build issues and solutions
+- [MSYS2 Build Guide](docs/setup/msys2-build.md) - Comprehensive MSYS2 setup and build instructions (Recommended)
+- [Dependency Management Guide](docs/getting-started/dependency-management.md) - Detailed dependency management information
+- [Xmake Status](docs/build-systems/xmake/xmake-status.md) - Current xmake implementation status and issues
+- [Xmake Build Guide](docs/build-systems/xmake/xmake-build.md) - Modern Lua-based build system instructions (Experimental)
+- [Build System Comparison](docs/build-systems/build-system-comparison.md) - CMake vs xmake feature comparison
+- [clangd Setup Guide](docs/setup/clangd-setup.md) - IDE integration and clangd configuration
+- [clangd Troubleshooting](docs/setup/clangd-troubleshooting.md) - Solutions for common clangd issues
+- [clangd Configuration Options](docs/setup/clangd-config-options.md) - Advanced configuration control
+- [Build Troubleshooting](docs/setup/msys2-build.md#troubleshooting) - Common build issues and solutions
 
 ## Dependencies
 

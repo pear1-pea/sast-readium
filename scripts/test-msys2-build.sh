@@ -143,16 +143,7 @@ test_build_config() {
         fi
         test_executable "$main_exe" "Main application"
     fi
-    
-    # Test controls library
-    local controls_lib="$build_dir/controls/libcontrols.a"
-    if [[ -f "$controls_lib" ]]; then
-        print_success "Controls library found: $controls_lib"
-        local size=$(du -h "$controls_lib" | cut -f1)
-        print_status "Library size: $size"
-    else
-        print_warning "Controls library not found: $controls_lib"
-    fi
+
     
     # Check for Qt deployment
     local qt_libs_dir="$build_dir/app"

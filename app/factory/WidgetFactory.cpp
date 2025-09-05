@@ -8,10 +8,12 @@ WidgetFactory::WidgetFactory(PageController* controller, QObject* parent)
     _actionMap[actionID::prev] = new PrevPageCommand(_controller, this);
 }
 
-QPushButton* WidgetFactory::createButton(actionID actionID, const QString& text){
-    if(_actionMap.contains(actionID)){
+QPushButton* WidgetFactory::createButton(actionID actionID,
+                                         const QString& text) {
+    if (_actionMap.contains(actionID)) {
         QPushButton* button = new QPushButton(text);
-        connect(button, &QPushButton::clicked, _actionMap[actionID], &Command::execute);
+        connect(button, &QPushButton::clicked, _actionMap[actionID],
+                &Command::execute);
         return button;
     }
     return nullptr;

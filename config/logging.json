@@ -1,0 +1,114 @@
+{
+  "global": {
+    "globalLevel": "info",
+    "globalPattern": "[%Y-%m-%d %H:%M:%S.%e] [%n] [%^%l%$] %v",
+    "asyncLogging": false,
+    "asyncQueueSize": 8192,
+    "flushIntervalSeconds": 5,
+    "autoFlushOnWarning": true,
+    "enableSourceLocation": false,
+    "enableThreadId": false,
+    "enableProcessId": false,
+    "redirectQtMessages": true,
+    "enableQtCategoryFiltering": true,
+    "enablePerformanceLogging": false,
+    "performanceThresholdMs": 100,
+    "enableMemoryLogging": false,
+    "memoryLoggingIntervalSeconds": 60
+  },
+  "sinks": [
+    {
+      "name": "console",
+      "type": "console",
+      "level": "info",
+      "pattern": "[%Y-%m-%d %H:%M:%S.%e] [%^%l%$] %v",
+      "enabled": true,
+      "colorEnabled": true
+    },
+    {
+      "name": "file",
+      "type": "rotating_file",
+      "level": "info",
+      "pattern": "[%Y-%m-%d %H:%M:%S.%e] [%n] [%l] %v",
+      "enabled": true,
+      "filename": "logs/sast-readium.log",
+      "maxFileSize": 10485760,
+      "maxFiles": 5,
+      "rotateOnStartup": false
+    }
+  ],
+  "categories": [
+    {
+      "name": "main",
+      "level": "info",
+      "enabled": true,
+      "enabledSinks": ["console", "file"]
+    },
+    {
+      "name": "ui",
+      "level": "info",
+      "enabled": true,
+      "enabledSinks": ["console", "file"]
+    },
+    {
+      "name": "pdf",
+      "level": "info",
+      "enabled": true,
+      "enabledSinks": ["console", "file"]
+    },
+    {
+      "name": "performance",
+      "level": "warning",
+      "enabled": true,
+      "enabledSinks": ["file"]
+    },
+    {
+      "name": "memory",
+      "level": "warning",
+      "enabled": true,
+      "enabledSinks": ["file"]
+    },
+    {
+      "name": "network",
+      "level": "info",
+      "enabled": true,
+      "enabledSinks": ["console", "file"]
+    },
+    {
+      "name": "plugin",
+      "level": "info",
+      "enabled": true,
+      "enabledSinks": ["console", "file"]
+    },
+    {
+      "name": "cache",
+      "level": "warning",
+      "enabled": true,
+      "enabledSinks": ["file"]
+    },
+    {
+      "name": "thumbnail",
+      "level": "info",
+      "enabled": true,
+      "enabledSinks": ["file"]
+    },
+    {
+      "name": "qt",
+      "level": "warning",
+      "enabled": true,
+      "enabledSinks": ["console", "file"]
+    },
+    {
+      "name": "managers",
+      "level": "info",
+      "enabled": true,
+      "enabledSinks": ["console", "file"]
+    },
+    {
+      "name": "utils",
+      "level": "info",
+      "enabled": true,
+      "enabledSinks": ["console", "file"]
+    }
+  ]
+}

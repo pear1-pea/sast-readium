@@ -1,0 +1,55 @@
+﻿CompileFlags:
+  CompilationDatabase: build
+  Remove:
+    # Remove C++20 modules flags that clangd doesn't support yet
+    - "-fmodules-ts"
+    - "-fmodule-mapper=*"
+    - "-fdeps-format=*"
+    # Remove other potentially problematic flags
+    - "-MD"
+    - "-x"
+
+# Additional clangd configuration
+Index:
+  Background: Build
+
+Diagnostics:
+  UnusedIncludes: Strict
+  MissingIncludes: Strict
+
+InlayHints:
+  Enabled: true
+  ParameterNames: true
+  DeducedTypes: true
+
+Hover:
+  ShowAKA: true
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -34,7 +34,6 @@ QMenu {
     border-radius: 4px;
     padding: 4px;
     color: #333333;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
 }
 
 QMenu::item {
@@ -102,6 +101,69 @@ QStatusBar {
 QWidget#SideBar {
     background-color: #f0f0f0;
     border-right: 1px solid #d0d0d0;
+}
+
+/* 缩略图样式 - Chrome风格 */
+ThumbnailListView {
+    background-color: #ffffff;
+    border: none;
+    outline: none;
+    padding: 8px;
+}
+
+ThumbnailListView::item {
+    background-color: transparent;
+    border: none;
+    padding: 0px;
+    margin: 4px;
+}
+
+ThumbnailListView::item:selected {
+    background-color: transparent;
+    border: 2px solid #1a73e8;
+    border-radius: 8px;
+}
+
+ThumbnailListView::item:hover {
+    background-color: transparent;
+    border: 1px solid #4285f4;
+    border-radius: 8px;
+}
+
+/* 缩略图滚动条 */
+ThumbnailListView QScrollBar:vertical {
+    border: none;
+    background-color: transparent;
+    width: 12px;
+    margin: 0px;
+    border-radius: 6px;
+}
+
+ThumbnailListView QScrollBar::handle:vertical {
+    background-color: rgba(0, 0, 0, 0.2);
+    min-height: 20px;
+    border-radius: 6px;
+    margin: 0px 2px;
+}
+
+ThumbnailListView QScrollBar::handle:vertical:hover {
+    background-color: rgba(0, 0, 0, 0.4);
+}
+
+ThumbnailListView QScrollBar::handle:vertical:pressed {
+    background-color: rgba(0, 0, 0, 0.6);
+}
+
+ThumbnailListView QScrollBar::add-line:vertical,
+ThumbnailListView QScrollBar::sub-line:vertical {
+    height: 0px;
+    border: none;
+    background: transparent;
+}
+
+ThumbnailListView QScrollBar::add-page:vertical,
+ThumbnailListView QScrollBar::sub-page:vertical {
+    background: transparent;
 }
 
 QTabWidget::pane {
@@ -304,4 +366,184 @@ QScrollBar::sub-page:horizontal {
 /* ViewWidget 背景 */
 QGraphicsView {
 background-color: #f0f0f0;
+}
+
+/* WelcomeWidget 样式 */
+WelcomeWidget {
+    background-color: #f6f6f7;
+    border: none;
+}
+
+/* WelcomeWidget 滚动区域 */
+WelcomeWidget QScrollArea {
+    background-color: transparent;
+    border: none;
+}
+
+/* WelcomeWidget 内容区域 */
+WelcomeWidget QWidget#WelcomeContentWidget {
+    background-color: transparent;
+    border: none;
+}
+
+/* WelcomeWidget 标题标签 */
+WelcomeWidget QLabel#WelcomeTitleLabel {
+    color: #333333;
+    font-size: 24px;
+    font-weight: bold;
+    margin: 0px;
+}
+
+/* WelcomeWidget 版本标签 */
+WelcomeWidget QLabel#WelcomeVersionLabel {
+    color: #606060;
+    font-size: 12px;
+    margin: 0px;
+}
+
+/* Enhanced WelcomeWidget 最近文件标题 with improved typography and visual hierarchy */
+WelcomeWidget QLabel#WelcomeRecentFilesTitle {
+    color: #1a202c;
+    font-size: 18px;
+    font-weight: 700;
+    margin: 24px 0px 16px 0px;
+    padding: 0px;
+    letter-spacing: -0.025em;
+    line-height: 1.2;
+}
+
+/* WelcomeWidget 无最近文件标签 - VSCode style */
+WelcomeWidget QLabel#WelcomeNoRecentFilesLabel {
+    color: #8e8e93;
+    font-size: 12px;
+    font-weight: 400;
+    margin: 16px;
+    padding: 8px;
+}
+
+/* WelcomeWidget 分隔线 */
+WelcomeWidget QFrame#WelcomeSeparatorLine {
+    background-color: #e0e0e0;
+    border: none;
+}
+
+/* Enhanced Recent Files List Components with Modern Styling */
+RecentFileListWidget {
+    background-color: transparent;
+    border: none;
+}
+
+RecentFileListWidget QScrollArea#RecentFileListScrollArea {
+    background-color: transparent;
+    border: none;
+}
+
+RecentFileListWidget QWidget#RecentFileListContentWidget {
+    background-color: transparent;
+    border: none;
+}
+
+RecentFileListWidget QLabel#RecentFileListEmptyLabel {
+    color: #8e8e93;
+    font-size: 13px;
+    font-weight: 400;
+    background-color: #fafafa;
+    border: 1px solid #f0f0f0;
+    border-radius: 8px;
+    padding: 24px;
+    margin: 16px 0px;
+}
+
+/* Enhanced Recent File Item Components with Modern Card Design and Shadows */
+RecentFileItemWidget {
+    background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
+                                stop: 0 #ffffff, stop: 1 #fafbfc);
+    border: 1px solid #e1e5e9;
+    border-radius: 12px;
+    padding: 16px 20px;
+    margin: 6px 0px;
+    /* Enhanced card with subtle shadow simulation */
+}
+
+RecentFileItemWidget:hover {
+    background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
+                                stop: 0 #f8f9fa, stop: 1 #f1f3f4);
+    border-color: #d1d9e0;
+    /* Enhanced hover effect with elevated appearance */
+}
+
+RecentFileItemWidget QLabel#RecentFileNameLabel {
+    color: #1a1a1a;
+    font-size: 14px;
+    font-weight: 600;
+    background-color: transparent;
+    border: none;
+    padding: 0px;
+    margin: 0px 0px 2px 0px;
+}
+
+RecentFileItemWidget QLabel#RecentFilePathLabel {
+    color: #6c757d;
+    font-size: 12px;
+    font-weight: 400;
+    background-color: transparent;
+    border: none;
+    padding: 0px;
+    margin: 0px 0px 4px 0px;
+}
+
+RecentFileItemWidget QLabel#RecentFileLastOpenedLabel {
+    color: #9ca3af;
+    font-size: 11px;
+    font-weight: 400;
+    background-color: transparent;
+    border: none;
+    padding: 2px 8px;
+    margin: 0px;
+    background-color: #f1f3f4;
+    border-radius: 12px;
+}
+
+RecentFileItemWidget QPushButton#RecentFileRemoveButton {
+    background-color: transparent;
+    border: none;
+    color: #9ca3af;
+    font-size: 16px;
+    font-weight: bold;
+    border-radius: 12px;
+    padding: 4px;
+    min-width: 24px;
+    min-height: 24px;
+}
+
+RecentFileItemWidget QPushButton#RecentFileRemoveButton:hover {
+    background-color: #fee2e2;
+    color: #dc2626;
+}
+
+/* Enhanced WelcomeWidget Buttons with Modern Design */
+WelcomeWidget QPushButton {
+    background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
+                                stop: 0 #ffffff, stop: 1 #f8f9fa);
+    color: #495057;
+    border: 1px solid #dee2e6;
+    border-radius: 8px;
+    padding: 12px 24px;
+    font-size: 14px;
+    font-weight: 500;
+    min-width: 120px;
+    min-height: 40px;
+}
+
+WelcomeWidget QPushButton:hover {
+    background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
+                                stop: 0 #f8f9fa, stop: 1 #e9ecef);
+    border-color: #adb5bd;
+    color: #212529;
+}
+
+WelcomeWidget QPushButton:pressed {
+    background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
+                                stop: 0 #e9ecef, stop: 1 #dee2e6);
+    border-color: #6c757d;
 }

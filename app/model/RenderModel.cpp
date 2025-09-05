@@ -1,6 +1,7 @@
 #include "RenderModel.h"
 #include "qimage.h"
 #include "qlogging.h"
+#include "utils/LoggingMacros.h"
 
 RenderModel::RenderModel(double dpiX, double dpiY,
                          Poppler::Document *_document,
@@ -9,17 +10,17 @@ RenderModel::RenderModel(double dpiX, double dpiY,
 
 QImage RenderModel::renderPage(int pageNum, double xres, double yres, int x, int y, int w, int h) {
     if(!document){
-        qDebug() << "Document not loaded";
+        LOG_WARNING("Document not loaded");
         return QImage();
     }
     std::unique_ptr<Poppler::Page> pdfPage = document->page(pageNum);
     if (!pdfPage) {
-        qDebug() << "Page not found";
+        LOG_WARNING("Page not found: {}", pageNum);
         return QImage();
     }
     QImage image = pdfPage->renderToImage(dpiX*2, dpiY*2);
     if(image.isNull()){
-        qDebug() << "Failed to render page";
+        LOG_ERROR("Failed to render page: {}", pageNum);
         return QImage();
     }
     emit renderPageDone(image);

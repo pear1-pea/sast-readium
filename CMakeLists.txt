@@ -47,10 +47,11 @@ if(USE_VCPKG_INTERNAL)
     # vcpkg mode - use CONFIG mode for all packages
     find_package(
         Qt6
-        COMPONENTS Core Gui Widgets Svg LinguistTools
+        COMPONENTS Core Gui Widgets Svg LinguistTools Concurrent TextToSpeech
         CONFIG
         REQUIRED
     )
+    find_package(spdlog CONFIG REQUIRED)
     find_package(PkgConfig REQUIRED)
     pkg_check_modules(POPPLER_QT6 REQUIRED IMPORTED_TARGET poppler-qt6)
 else()
@@ -66,7 +67,10 @@ else()
         endif()
 
         # Find Qt6 using system installation
-        find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Svg LinguistTools)
+        find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Svg LinguistTools Concurrent TextToSpeech)
+
+        # Find spdlog using system installation
+        find_package(spdlog REQUIRED)
 
         # Find poppler-qt6 using pkg-config
         find_package(PkgConfig REQUIRED)
@@ -79,7 +83,8 @@ else()
         endif()
     else()
         # Generic system package finding
-        find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Svg LinguistTools)
+        find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Svg LinguistTools Concurrent TextToSpeech)
+        find_package(spdlog REQUIRED)
         find_package(PkgConfig REQUIRED)
         pkg_check_modules(POPPLER_QT6 REQUIRED IMPORTED_TARGET poppler-qt6)
     endif()
@@ -87,7 +92,6 @@ endif()
 
 qt_standard_project_setup(I18N_TRANSLATED_LANGUAGES zh)
 
-add_subdirectory(controls)
 add_subdirectory(app)
 
 # Auto-update .clangd configuration for the current build directory

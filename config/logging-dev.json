@@ -1,0 +1,128 @@
+{
+  "global": {
+    "globalLevel": "debug",
+    "globalPattern": "[%Y-%m-%d %H:%M:%S.%e] [%n] [%^%l%$] [%s:%#] %v",
+    "asyncLogging": false,
+    "asyncQueueSize": 8192,
+    "flushIntervalSeconds": 1,
+    "autoFlushOnWarning": true,
+    "enableSourceLocation": true,
+    "enableThreadId": true,
+    "enableProcessId": false,
+    "redirectQtMessages": true,
+    "enableQtCategoryFiltering": true,
+    "enablePerformanceLogging": true,
+    "performanceThresholdMs": 50,
+    "enableMemoryLogging": true,
+    "memoryLoggingIntervalSeconds": 30
+  },
+  "sinks": [
+    {
+      "name": "console",
+      "type": "console",
+      "level": "debug",
+      "pattern": "[%Y-%m-%d %H:%M:%S.%e] [%^%l%$] %v",
+      "enabled": true,
+      "colorEnabled": true
+    },
+    {
+      "name": "file",
+      "type": "rotating_file",
+      "level": "trace",
+      "pattern": "[%Y-%m-%d %H:%M:%S.%e] [%n] [%l] [%t] [%s:%#] %v",
+      "enabled": true,
+      "filename": "logs/sast-readium-dev.log",
+      "maxFileSize": 52428800,
+      "maxFiles": 10,
+      "rotateOnStartup": true
+    },
+    {
+      "name": "debug_file",
+      "type": "basic_file",
+      "level": "debug",
+      "pattern": "[%Y-%m-%d %H:%M:%S.%e] [%l] %v",
+      "enabled": true,
+      "filename": "logs/debug.log"
+    }
+  ],
+  "categories": [
+    {
+      "name": "main",
+      "level": "debug",
+      "enabled": true,
+      "enabledSinks": ["console", "file"]
+    },
+    {
+      "name": "ui",
+      "level": "debug",
+      "enabled": true,
+      "enabledSinks": ["console", "file"]
+    },
+    {
+      "name": "pdf",
+      "level": "debug",
+      "enabled": true,
+      "enabledSinks": ["console", "file"]
+    },
+    {
+      "name": "performance",
+      "level": "debug",
+      "enabled": true,
+      "enabledSinks": ["console", "file"]
+    },
+    {
+      "name": "memory",
+      "level": "debug",
+      "enabled": true,
+      "enabledSinks": ["console", "file"]
+    },
+    {
+      "name": "network",
+      "level": "debug",
+      "enabled": true,
+      "enabledSinks": ["console", "file"]
+    },
+    {
+      "name": "plugin",
+      "level": "debug",
+      "enabled": true,
+      "enabledSinks": ["console", "file"]
+    },
+    {
+      "name": "cache",
+      "level": "debug",
+      "enabled": true,
+      "enabledSinks": ["console", "file"]
+    },
+    {
+      "name": "thumbnail",
+      "level": "debug",
+      "enabled": true,
+      "enabledSinks": ["console", "file"]
+    },
+    {
+      "name": "qt",
+      "level": "debug",
+      "enabled": true,
+      "enabledSinks": ["console", "file"]
+    },
+    {
+      "name": "test",
+      "level": "trace",
+      "enabled": true,
+      "enabledSinks": ["console", "file", "debug_file"]
+    },
+    {
+      "name": "managers",
+      "level": "debug",
+      "enabled": true,
+      "enabledSinks": ["console", "file", "debug_file"]
+    },
+    {
+      "name": "utils",
+      "level": "debug",
+      "enabled": true,
+      "enabledSinks": ["console", "file", "debug_file"]
+    }
+  ]
+}

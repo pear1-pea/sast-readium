@@ -1,11 +1,10 @@
 #include "Widget.h"
-#include "ui_Widget.h"
 #include <QActionGroup>
 #include <QApplication>
 #include <QDebug>
 #include <QFile>
 #include <QTranslator>
-
+#include "ui_Widget.h"
 
 Widget::Widget(QWidget *parent) : QWidget(parent), UI(new Ui::Widget) {
     UI->setupUi(this);
@@ -22,12 +21,14 @@ Widget::Widget(QWidget *parent) : QWidget(parent), UI(new Ui::Widget) {
     actionGroup->addAction(ActionDarkTheme);
 
     connect(ActionLightTheme, &QAction::triggered, this, [this](bool checked) {
-        if (!checked) return;
+        if (!checked)
+            return;
         applyTheme("light");
     });
 
     connect(ActionDarkTheme, &QAction::triggered, this, [this](bool checked) {
-        if (!checked) return;
+        if (!checked)
+            return;
         applyTheme("dark");
     });
 
@@ -41,12 +42,14 @@ void Widget::exitApp() {
 }
 
 void Widget::applyEnglishLang(bool enable) {
-    if (!enable) return;
+    if (!enable)
+        return;
     applyLang(0);
 }
 
 void Widget::applyChineseLang(bool enable) {
-    if (!enable) return;
+    if (!enable)
+        return;
     applyLang(1);
 }
 
@@ -67,9 +70,21 @@ void Widget::applyLang(int langId) {
 }
 
 void Widget::applyTheme(const QString &theme) {
-    auto path = QString("%1/styles/%2.qss").arg(qApp->applicationDirPath(), theme);
+    auto path =
+        QString("%1/styles/%2.qss").arg(qApp->applicationDirPath(), theme);
 
     QFile file(path);
-    file.open(QFile::ReadOnly);
-    setStyleSheet(QLatin1String(file.readAll()));
+    if (file.exists() && file.open(QFile::ReadOnly)) {
+        QString styleSheet = QLatin1String(file.readAll());
+        file.close();
+
+        if (!styleSheet.isEmpty()) {
+            setStyleSheet(styleSheet);
+            return;
+        }
+    }
+
+    // 如果外部文件不可用，使用基本样式
+    qWarning() << "External theme file not found or empty:" << path;
+    setStyleSheet("");  // 使用默认样式
 }
