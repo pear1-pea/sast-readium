@@ -1,4 +1,5 @@
 #include "LoggingManager.h"
+#include "LoggingMacros.h"
 #include <QStandardPaths>
 #include <QDir>
 #include <QCoreApplication>
@@ -335,6 +336,13 @@ void LoggingManager::onLogMessage(const QString& message, int level)
 void LoggingManager::onPeriodicFlush()
 {
     flushLogs();
+}
+
+void LoggingManager::onConfigurationChanged()
+{
+    // Handle configuration changes
+    // This could trigger a reload or update of the logging configuration
+    emit configurationChanged();
 }
 
 void LoggingManager::updateStatistics()

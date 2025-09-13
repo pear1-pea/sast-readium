@@ -1,5 +1,5 @@
 #include "ThumbnailContextMenu.h"
-#include "ThumbnailModel.h"
+#include "../../model/ThumbnailModel.h"
 #include <QApplication>
 #include <QClipboard>
 #include <QFileDialog>

@@ -245,18 +245,19 @@ private:
 #define SCOPED_LOG_LEVEL(level) ScopedLoggingConfig _scoped_log_config(level)
 
 // Category-based logging (for migration from QLoggingCategory)
-#define LOG_CATEGORY_DEBUG(category, message) \
+// Note: These macros are renamed to avoid conflicts with LoggingMacros.h
+#define LOGGING_CATEGORY_DEBUG(category, message) \
     if (LOGGING_MANAGER.getLoggingCategoryLevel(category) <= Logger::LogLevel::Debug) \
         LOG_DEBUG("[{}] {}", category.toStdString(), message)
 
-#define LOG_CATEGORY_INFO(category, message) \
+#define LOGGING_CATEGORY_INFO(category, message) \
     if (LOGGING_MANAGER.getLoggingCategoryLevel(category) <= Logger::LogLevel::Info) \
         LOG_INFO("[{}] {}", category.toStdString(), message)
 
-#define LOG_CATEGORY_WARNING(category, message) \
+#define LOGGING_CATEGORY_WARNING(category, message) \
     if (LOGGING_MANAGER.getLoggingCategoryLevel(category) <= Logger::LogLevel::Warning) \
         LOG_WARNING("[{}] {}", category.toStdString(), message)
 
-#define LOG_CATEGORY_ERROR(category, message) \
+#define LOGGING_CATEGORY_ERROR(category, message) \
     if (LOGGING_MANAGER.getLoggingCategoryLevel(category) <= Logger::LogLevel::Error) \
         LOG_ERROR("[{}] {}", category.toStdString(), message)

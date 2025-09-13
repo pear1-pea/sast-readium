@@ -475,33 +475,40 @@ QPixmap ThumbnailGenerator::generatePixmap(const GenerationRequest& request)
 
 QPixmap ThumbnailGenerator::renderPageToPixmap(Poppler::Page* page, const QSize& size, double quality)
 {
+    // 使用优化版本
+    return renderPageToPixmapOptimized(page, size, quality);
+}
+
+QPixmap ThumbnailGenerator::renderPageToPixmapOptimized(Poppler::Page* page, const QSize& size, double quality)
+{
     if (!page) {
         return QPixmap();
     }
 
     try {
         QSizeF pageSize = page->pageSizeF();
-        double dpi = calculateOptimalDPI(size, pageSize, quality);
+        double dpi = getCachedDPI(size, pageSize, quality);
 
-        // 渲染页面
+        // 渲染页面 - 直接渲染到目标尺寸附近以减少缩放
         QImage image = page->renderToImage(dpi, dpi, -1, -1, -1, -1, Poppler::Page::Rotate0);
 
         if (image.isNull()) {
             return QPixmap();
         }
 
-        // 缩放到目标尺寸
+        // 优化缩放操作
         if (image.size() != size) {
-            image = image.scaled(size, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+            Qt::TransformationMode mode = getOptimalTransformationMode(image.size(), size);
+            image = image.scaled(size, Qt::KeepAspectRatio, mode);
         }
 
         return QPixmap::fromImage(image);
 
     } catch (const std::exception& e) {
-        qWarning() << "Exception in renderPageToPixmap:" << e.what();
+        qWarning() << "Exception in renderPageToPixmapOptimized:" << e.what();
         return QPixmap();
     } catch (...) {
-        qWarning() << "Unknown exception in renderPageToPixmap";
+        qWarning() << "Unknown exception in renderPageToPixmapOptimized";
         return QPixmap();
     }
 }
@@ -517,8 +524,8 @@ double ThumbnailGenerator::calculateOptimalDPI(const QSize& targetSize, const QS
     double scaleY = targetSize.height() / pageSize.height();
     double scale = qMin(scaleX, scaleY);
 
-    // 基础DPI
-    double baseDPI = MIN_DPI;
+    // 基础DPI - 优化：根据目标尺寸调整基础DPI
+    double baseDPI = (targetSize.width() <= 150) ? 72.0 : 96.0;
 
     // 根据质量和缩放比例计算DPI
     double dpi = baseDPI * scale * quality;
@@ -529,6 +536,56 @@ double ThumbnailGenerator::calculateOptimalDPI(const QSize& targetSize, const QS
 
     // 限制DPI范围
     return qBound(MIN_DPI, dpi, MAX_DPI);
+}
+
+double ThumbnailGenerator::getCachedDPI(const QSize& targetSize, const QSizeF& pageSize, double quality)
+{
+    QString cacheKey = QString("%1x%2_%3x%4_%5")
+                      .arg(targetSize.width()).arg(targetSize.height())
+                      .arg(static_cast<int>(pageSize.width())).arg(static_cast<int>(pageSize.height()))
+                      .arg(static_cast<int>(quality * 100));
+
+    QMutexLocker locker(&m_dpiCacheMutex);
+    auto it = m_dpiCache.find(cacheKey);
+    if (it != m_dpiCache.end()) {
+        return it.value();
+    }
+
+    locker.unlock();
+
+    double dpi = calculateOptimalDPI(targetSize, pageSize, quality);
+    cacheDPI(targetSize, pageSize, quality, dpi);
+    return dpi;
+}
+
+void ThumbnailGenerator::cacheDPI(const QSize& targetSize, const QSizeF& pageSize, double quality, double dpi)
+{
+    QString cacheKey = QString("%1x%2_%3x%4_%5")
+                      .arg(targetSize.width()).arg(targetSize.height())
+                      .arg(static_cast<int>(pageSize.width())).arg(static_cast<int>(pageSize.height()))
+                      .arg(static_cast<int>(quality * 100));
+
+    QMutexLocker locker(&m_dpiCacheMutex);
+    m_dpiCache[cacheKey] = dpi;
+
+    // 限制缓存大小
+    if (m_dpiCache.size() > 100) {
+        auto it = m_dpiCache.begin();
+        m_dpiCache.erase(it);
+    }
+}
+
+Qt::TransformationMode ThumbnailGenerator::getOptimalTransformationMode(const QSize& sourceSize, const QSize& targetSize)
+{
+    // 如果缩放比例较小或目标尺寸较小，使用快速变换
+    double scaleRatio = qMin(static_cast<double>(targetSize.width()) / sourceSize.width(),
+                            static_cast<double>(targetSize.height()) / sourceSize.height());
+
+    if (scaleRatio > 0.8 || targetSize.width() <= 150) {
+        return Qt::FastTransformation;
+    }
+
+    return Qt::SmoothTransformation;
 }
 
 void ThumbnailGenerator::updateStatistics()

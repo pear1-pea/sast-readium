@@ -133,10 +133,20 @@ private:
     
     void updateStatistics();
     void logPerformance(const GenerationRequest& request, qint64 duration);
-    
+
+    // 优化方法
+    QPixmap renderPageToPixmapOptimized(Poppler::Page* page, const QSize& size, double quality);
+    double getCachedDPI(const QSize& targetSize, const QSizeF& pageSize, double quality);
+    void cacheDPI(const QSize& targetSize, const QSizeF& pageSize, double quality, double dpi);
+    Qt::TransformationMode getOptimalTransformationMode(const QSize& sourceSize, const QSize& targetSize);
+
     // 数据成员
     std::shared_ptr<Poppler::Document> m_document;
     mutable QMutex m_documentMutex;
+
+    // DPI缓存优化
+    mutable QHash<QString, double> m_dpiCache;
+    mutable QMutex m_dpiCacheMutex;
     
     // 队列管理
     QQueue<GenerationRequest> m_requestQueue;
@@ -167,15 +177,15 @@ private:
     int m_totalErrors;
     qint64 m_totalTime;
     
-    // 常量
+    // 常量 - 优化后的默认值
     static constexpr int DEFAULT_THUMBNAIL_WIDTH = 120;
     static constexpr int DEFAULT_THUMBNAIL_HEIGHT = 160;
     static constexpr double DEFAULT_QUALITY = 1.0;
-    static constexpr int DEFAULT_MAX_CONCURRENT_JOBS = 3;
+    static constexpr int DEFAULT_MAX_CONCURRENT_JOBS = 6; // 增加并发数
     static constexpr int DEFAULT_MAX_RETRIES = 2;
-    static constexpr int DEFAULT_BATCH_SIZE = 5;
-    static constexpr int DEFAULT_BATCH_INTERVAL = 100; // ms
-    static constexpr int QUEUE_PROCESS_INTERVAL = 50; // ms
+    static constexpr int DEFAULT_BATCH_SIZE = 8; // 增加批处理大小
+    static constexpr int DEFAULT_BATCH_INTERVAL = 50; // 减少批处理间隔
+    static constexpr int QUEUE_PROCESS_INTERVAL = 25; // 减少队列处理间隔
     static constexpr double MIN_DPI = 72.0;
-    static constexpr double MAX_DPI = 300.0;
+    static constexpr double MAX_DPI = 200.0; // 降低最大DPI以提升性能
 };

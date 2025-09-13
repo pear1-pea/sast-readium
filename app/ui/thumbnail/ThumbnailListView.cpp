@@ -1,6 +1,6 @@
 #include "ThumbnailListView.h"
-#include "ThumbnailModel.h"
-#include "ThumbnailDelegate.h"
+#include "../../model/ThumbnailModel.h"
+#include "../../delegate/ThumbnailDelegate.h"
 #include <QtCore>
 #include <QtGui>
 #include <QtWidgets>
@@ -48,6 +48,9 @@ ThumbnailListView::ThumbnailListView(QWidget* parent)
     , m_contextMenu(nullptr)
     , m_contextMenuPage(-1)
     , m_currentPage(-1)
+    , m_viewportUpdatePending(false)
+    , m_lastVisibleStart(-1)
+    , m_lastVisibleEnd(-1)
 {
     setupUI();
     setupScrollBars();
@@ -128,6 +131,12 @@ void ThumbnailListView::setupAnimations()
     m_preloadTimer->setInterval(PRELOAD_TIMER_INTERVAL);
     m_preloadTimer->setSingleShot(true);
     connect(m_preloadTimer, &QTimer::timeout, this, &ThumbnailListView::onPreloadTimer);
+
+    // 视口更新定时器 - 性能优化
+    m_viewportUpdateTimer = new QTimer(this);
+    m_viewportUpdateTimer->setSingleShot(true);
+    m_viewportUpdateTimer->setInterval(50); // 50ms延迟
+    connect(m_viewportUpdateTimer, &QTimer::timeout, this, &ThumbnailListView::optimizedUpdateVisibleRange);
     
     // 淡入效果定时器
     m_fadeInTimer = new QTimer(this);
@@ -686,7 +695,11 @@ void ThumbnailListView::showEvent(QShowEvent* event)
 void ThumbnailListView::scrollContentsBy(int dx, int dy)
 {
     QListView::scrollContentsBy(dx, dy);
-    updateVisibleRange();
+
+    m_isScrolling = true;
+
+    // 使用优化的视口更新
+    scheduleViewportUpdate();
 }
 
 void ThumbnailListView::updateScrollBarStyle()
@@ -875,4 +888,47 @@ void ThumbnailListView::exportPageToFile(int pageNumber)
     } else {
         QMessageBox::critical(this, "错误", "保存文件失败");
     }
+}
+
+void ThumbnailListView::scheduleViewportUpdate()
+{
+    if (!m_viewportUpdatePending && m_viewportUpdateTimer) {
+        m_viewportUpdatePending = true;
+        m_viewportUpdateTimer->start();
+    }
+}
+
+void ThumbnailListView::optimizedUpdateVisibleRange()
+{
+    m_viewportUpdatePending = false;
+
+    ThumbnailModel* thumbnailModel = qobject_cast<ThumbnailModel*>(model());
+    if (!thumbnailModel) return;
+
+    QRect viewportRect = viewport()->rect();
+    int firstVisible = indexAt(viewportRect.topLeft()).row();
+    int lastVisible = indexAt(viewportRect.bottomRight()).row();
+
+    if (firstVisible < 0) firstVisible = 0;
+    if (lastVisible < 0) lastVisible = thumbnailModel->rowCount() - 1;
+
+    // 只有当可见范围发生显著变化时才更新
+    if (qAbs(firstVisible - m_lastVisibleStart) > 1 || qAbs(lastVisible - m_lastVisibleEnd) > 1) {
+        m_visibleRange = qMakePair(firstVisible, lastVisible);
+        m_lastVisibleStart = firstVisible;
+        m_lastVisibleEnd = lastVisible;
+
+        // 更新模型的视口范围（用于懒加载）
+        thumbnailModel->setViewportRange(firstVisible, lastVisible, m_preloadMargin);
+
+        // 请求可见范围的缩略图
+        for (int i = firstVisible; i <= lastVisible; ++i) {
+            QModelIndex index = thumbnailModel->index(i, 0);
+            if (index.isValid()) {
+                thumbnailModel->requestThumbnail(i);
+            }
+        }
+    }
+
+    m_isScrolling = false;
 }

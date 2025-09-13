@@ -18,6 +18,12 @@ option(FORCE_VCPKG "Force vcpkg usage even in MSYS2" OFF)
 # clangd configuration
 option(ENABLE_CLANGD_CONFIG "Enable automatic clangd configuration updates" ON)
 
+# QGraphics PDF support
+option(ENABLE_QGRAPHICS_PDF_SUPPORT "Enable QGraphics-based PDF rendering support" OFF)
+
+# Testing support
+option(BUILD_TESTING "Build tests" ON)
+
 # Detect MSYS2 environment
 if(WIN32 AND DEFINED ENV{MSYSTEM})
     set(MSYS2_DETECTED TRUE)
@@ -93,6 +99,12 @@ endif()
 qt_standard_project_setup(I18N_TRANSLATED_LANGUAGES zh)
 
 add_subdirectory(app)
+
+# Add tests if enabled
+if(BUILD_TESTING)
+    enable_testing()
+    add_subdirectory(tests)
+endif()
 
 # Auto-update .clangd configuration for the current build directory
 if(CMAKE_EXPORT_COMPILE_COMMANDS AND ENABLE_CLANGD_CONFIG)

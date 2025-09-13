@@ -1,7 +1,7 @@
 #include "SideBar.h"
 #include "../thumbnail/ThumbnailListView.h"
-#include "../thumbnail/ThumbnailModel.h"
-#include "../thumbnail/ThumbnailDelegate.h"
+#include "../../model/ThumbnailModel.h"
+#include "../../delegate/ThumbnailDelegate.h"
 #include <QtCore>
 #include <QtGui>
 #include <QtWidgets>

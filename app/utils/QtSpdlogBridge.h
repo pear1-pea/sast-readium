@@ -155,10 +155,14 @@ SpdlogQDebug spdlogCritical();
 */
 
 // Option 2: Gradual migration macros (default)
+// Note: These macros are commented out to avoid conflicts with spdlog's own macros
+// Use the functions directly: spdlogDebug(), spdlogInfo(), etc.
+/*
 #define SPDLOG_DEBUG() spdlogDebug()
 #define SPDLOG_INFO() spdlogInfo()
 #define SPDLOG_WARNING() spdlogWarning()
 #define SPDLOG_CRITICAL() spdlogCritical()
+*/
 
 /**
  * @brief QLoggingCategory compatibility for spdlog

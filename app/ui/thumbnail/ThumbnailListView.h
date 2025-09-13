@@ -118,6 +118,8 @@ private slots:
     void onPreloadTimer();
     void onFadeInTimer();
     void updateVisibleRange();
+    void scheduleViewportUpdate();
+    void optimizedUpdateVisibleRange();
 
 private:
     void setupUI();
@@ -175,9 +177,15 @@ private:
     int m_lastFirstVisible;
     int m_lastLastVisible;
 
-    // 可见范围跟踪
+    // 可见范围跟踪 - 优化版本
     QPair<int, int> m_visibleRange;
     bool m_isScrolling;
+
+    // 性能优化
+    QTimer* m_viewportUpdateTimer;
+    bool m_viewportUpdatePending;
+    int m_lastVisibleStart;
+    int m_lastVisibleEnd;
     
     // 淡入效果
     QTimer* m_fadeInTimer;

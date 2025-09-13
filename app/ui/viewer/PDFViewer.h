@@ -48,6 +48,10 @@
 #include "../../model/DocumentModel.h"
 #include "../../model/SearchModel.h"
 #include "PDFAnimations.h"
+
+#ifdef ENABLE_QGRAPHICS_PDF_SUPPORT
+#include "QGraphicsPDFViewer.h"
+#endif
 #include "PDFPrerenderer.h"
 #include "../widgets/SearchWidget.h"
 
@@ -130,7 +134,7 @@ class PDFViewer : public QWidget {
     Q_OBJECT
 
 public:
-    PDFViewer(QWidget* parent = nullptr);
+    PDFViewer(QWidget* parent = nullptr, bool enableStyling = true);
     ~PDFViewer() = default;
     
     // 文档操作
@@ -196,6 +200,14 @@ public:
 
     // 消息显示
     void setMessage(const QString& message);
+
+#ifdef ENABLE_QGRAPHICS_PDF_SUPPORT
+    // QGraphics rendering mode
+    void setQGraphicsRenderingEnabled(bool enabled);
+    bool isQGraphicsRenderingEnabled() const;
+    void setQGraphicsHighQualityRendering(bool enabled);
+    void setQGraphicsViewMode(int mode); // 0=SinglePage, 1=ContinuousPage, etc.
+#endif
 
 protected:
     void setupUI();
@@ -306,6 +318,9 @@ private:
     double pendingZoomFactor;
     bool isZoomPending;
 
+    // 测试支持
+    bool m_enableStyling;
+
     // 虚拟化渲染
     int visiblePageStart;
     int visiblePageEnd;
@@ -344,6 +359,12 @@ private:
 
     // 预渲染器
     PDFPrerenderer* prerenderer;
+
+#ifdef ENABLE_QGRAPHICS_PDF_SUPPORT
+    // QGraphics-based PDF viewer (when enabled)
+    QGraphicsPDFViewer* qgraphicsViewer;
+    bool useQGraphicsViewer;
+#endif
 
     // Search highlighting members
     QList<SearchResult> m_allSearchResults;

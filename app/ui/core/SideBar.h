@@ -6,8 +6,8 @@
 #include <QSettings>
 #include "../viewer/PDFOutlineWidget.h"
 #include "../thumbnail/ThumbnailListView.h"
-#include "../thumbnail/ThumbnailModel.h"
-#include "../thumbnail/ThumbnailDelegate.h"
+#include "../../model/ThumbnailModel.h"
+#include "../../delegate/ThumbnailDelegate.h"
 #include "../../model/PDFOutlineModel.h"
 #include <memory>
 

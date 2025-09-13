@@ -248,11 +248,15 @@ private:
 };
 
 // Convenience macros for easy migration from Qt logging
+// Note: These macros are commented out to avoid conflicts with LoggingMacros.h
+// Use the macros from LoggingMacros.h instead
+/*
 #define LOG_TRACE(...) Logger::instance().trace(__VA_ARGS__)
 #define LOG_DEBUG(...) Logger::instance().debug(__VA_ARGS__)
 #define LOG_INFO(...) Logger::instance().info(__VA_ARGS__)
 #define LOG_WARNING(...) Logger::instance().warning(__VA_ARGS__)
 #define LOG_ERROR(...) Logger::instance().error(__VA_ARGS__)
 #define LOG_CRITICAL(...) Logger::instance().critical(__VA_ARGS__)
+*/
 
 // Qt-style compatibility macros removed to avoid conflicts with Qt's own macros

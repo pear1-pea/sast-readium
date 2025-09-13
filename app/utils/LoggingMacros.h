@@ -18,38 +18,42 @@
 // ============================================================================
 // Core Logging Macros (spdlog-style with format strings)
 // ============================================================================
+// Note: These macros are commented out to avoid conflicts with spdlog's own macros
+// Use the LOG_* macros below instead, or call Logger methods directly
 
+/*
 #define SPDLOG_TRACE(...)    Logger::instance().trace(__VA_ARGS__)
 #define SPDLOG_DEBUG(...)    Logger::instance().debug(__VA_ARGS__)
 #define SPDLOG_INFO(...)     Logger::instance().info(__VA_ARGS__)
 #define SPDLOG_WARNING(...)  Logger::instance().warning(__VA_ARGS__)
 #define SPDLOG_ERROR(...)    Logger::instance().error(__VA_ARGS__)
 #define SPDLOG_CRITICAL(...) Logger::instance().critical(__VA_ARGS__)
+*/
 
 // Short aliases
-#define LOG_T(...) SPDLOG_TRACE(__VA_ARGS__)
-#define LOG_D(...) SPDLOG_DEBUG(__VA_ARGS__)
-#define LOG_I(...) SPDLOG_INFO(__VA_ARGS__)
-#define LOG_W(...) SPDLOG_WARNING(__VA_ARGS__)
-#define LOG_E(...) SPDLOG_ERROR(__VA_ARGS__)
-#define LOG_C(...) SPDLOG_CRITICAL(__VA_ARGS__)
+#define LOG_T(...) Logger::instance().trace(__VA_ARGS__)
+#define LOG_D(...) Logger::instance().debug(__VA_ARGS__)
+#define LOG_I(...) Logger::instance().info(__VA_ARGS__)
+#define LOG_W(...) Logger::instance().warning(__VA_ARGS__)
+#define LOG_E(...) Logger::instance().error(__VA_ARGS__)
+#define LOG_C(...) Logger::instance().critical(__VA_ARGS__)
 
 // Full name aliases for easier migration
-#define LOG_TRACE(...) SPDLOG_TRACE(__VA_ARGS__)
-#define LOG_DEBUG(...) SPDLOG_DEBUG(__VA_ARGS__)
-#define LOG_INFO(...) SPDLOG_INFO(__VA_ARGS__)
-#define LOG_WARNING(...) SPDLOG_WARNING(__VA_ARGS__)
-#define LOG_ERROR(...) SPDLOG_ERROR(__VA_ARGS__)
-#define LOG_CRITICAL(...) SPDLOG_CRITICAL(__VA_ARGS__)
+#define LOG_TRACE(...) Logger::instance().trace(__VA_ARGS__)
+#define LOG_DEBUG(...) Logger::instance().debug(__VA_ARGS__)
+#define LOG_INFO(...) Logger::instance().info(__VA_ARGS__)
+#define LOG_WARNING(...) Logger::instance().warning(__VA_ARGS__)
+#define LOG_ERROR(...) Logger::instance().error(__VA_ARGS__)
+#define LOG_CRITICAL(...) Logger::instance().critical(__VA_ARGS__)
 
 // ============================================================================
 // Qt-Style Streaming Macros (for gradual migration)
 // ============================================================================
 
-#define SPDLOG_DEBUG_STREAM()    spdlogDebug()
-#define SPDLOG_INFO_STREAM()     spdlogInfo()
-#define SPDLOG_WARNING_STREAM()  spdlogWarning()
-#define SPDLOG_CRITICAL_STREAM() spdlogCritical()
+#define LOG_DEBUG_STREAM()    spdlogDebug()
+#define LOG_INFO_STREAM()     spdlogInfo()
+#define LOG_WARNING_STREAM()  spdlogWarning()
+#define LOG_CRITICAL_STREAM() spdlogCritical()
 
 // ============================================================================
 // Conditional Logging Macros
@@ -58,7 +62,7 @@
 #define LOG_IF(condition, level, ...) \
     do { \
         if (condition) { \
-            SPDLOG_##level(__VA_ARGS__); \
+            LOG_##level(__VA_ARGS__); \
         } \
     } while(0)
 
@@ -117,11 +121,11 @@
     do { \
         auto _perf_end = std::chrono::high_resolution_clock::now(); \
         auto _perf_duration = std::chrono::duration_cast<std::chrono::milliseconds>(_perf_end - _perf_start_##name).count(); \
-        SPDLOG_DEBUG("Performance [{}]: {}ms - " __VA_ARGS__, #name, _perf_duration); \
+        LOG_DEBUG("Performance [{}]: {}ms - " __VA_ARGS__, #name, _perf_duration); \
     } while(0)
 
-#define LOG_FUNCTION_ENTRY() SPDLOG_TRACE("Entering function: {}", __FUNCTION__)
-#define LOG_FUNCTION_EXIT()  SPDLOG_TRACE("Exiting function: {}", __FUNCTION__)
+#define LOG_FUNCTION_ENTRY() LOG_TRACE("Entering function: {}", __FUNCTION__)
+#define LOG_FUNCTION_EXIT()  LOG_TRACE("Exiting function: {}", __FUNCTION__)
 
 // RAII performance logger
 #define LOG_PERFORMANCE_SCOPE(name) \
@@ -132,8 +136,8 @@
 // ============================================================================
 
 #ifdef QT_DEBUG
-    #define LOG_DEBUG_ONLY(...) SPDLOG_DEBUG(__VA_ARGS__)
-    #define LOG_TRACE_ONLY(...) SPDLOG_TRACE(__VA_ARGS__)
+    #define LOG_DEBUG_ONLY(...) LOG_DEBUG(__VA_ARGS__)
+    #define LOG_TRACE_ONLY(...) LOG_TRACE(__VA_ARGS__)
 #else
     #define LOG_DEBUG_ONLY(...) do {} while(0)
     #define LOG_TRACE_ONLY(...) do {} while(0)
@@ -270,7 +274,7 @@ private:
     LOG_DEBUG("Thread ID: {}", QThread::currentThreadId())
 
 #define LOG_WITH_THREAD(level, ...) \
-    SPDLOG_##level("[Thread:{}] " __VA_ARGS__, QThread::currentThreadId())
+    LOG_##level("[Thread:{}] " __VA_ARGS__, QThread::currentThreadId())
 
 // ============================================================================
 // File and Line Information Macros
