@@ -116,18 +116,18 @@ void PDFBookmarkWidget::setBookmarkModel(BookmarkModel* model) {
 
 void PDFBookmarkWidget::refreshBookmarks() {
     // TODO: 实现书签刷新逻辑
-    
+
     if (!bookmarkModel) {
         showEmptyState();
         return;
     }
-    
+
     buildBookmarkList();
 }
 
 void PDFBookmarkWidget::clearBookmarks() {
     // TODO: 实现清空书签逻辑
-    
+
     bookmarkList->clear();
     currentHighlightedItem = nullptr;
     showEmptyState();
@@ -169,8 +169,8 @@ void PDFBookmarkWidget::onBookmarkUpdated(const Bookmark& bookmark) {
 }
 
 void PDFBookmarkWidget::contextMenuEvent(QContextMenuEvent* event) {
-    QListWidgetItem* item = bookmarkList->itemAt(
-        bookmarkList->mapFromParent(event->pos()));
+    QListWidgetItem* item =
+        bookmarkList->itemAt(bookmarkList->mapFromParent(event->pos()));
 
     // 根据是否有选中项目启用/禁用菜单项
     editBookmarkAction->setEnabled(item != nullptr);
@@ -233,19 +233,22 @@ void PDFBookmarkWidget::buildBookmarkList() {
     // TODO: 实现构建书签列表逻辑
 }
 
-QListWidgetItem* PDFBookmarkWidget::createBookmarkItem(const Bookmark& bookmark) {
+QListWidgetItem* PDFBookmarkWidget::createBookmarkItem(
+    const Bookmark& bookmark) {
     // TODO: 实现创建书签项逻辑
     Q_UNUSED(bookmark)
     return nullptr;
 }
 
-void PDFBookmarkWidget::setItemStyle(QListWidgetItem* item, const Bookmark& bookmark) {
+void PDFBookmarkWidget::setItemStyle(QListWidgetItem* item,
+                                     const Bookmark& bookmark) {
     // TODO: 实现设置项目样式逻辑
     Q_UNUSED(item)
     Q_UNUSED(bookmark)
 }
 
-QListWidgetItem* PDFBookmarkWidget::findItemByBookmarkId(const QString& bookmarkId) {
+QListWidgetItem* PDFBookmarkWidget::findItemByBookmarkId(
+    const QString& bookmarkId) {
     // TODO: 实现查找书签项逻辑
     Q_UNUSED(bookmarkId)
     return nullptr;
@@ -273,7 +276,7 @@ void PDFBookmarkWidget::searchItemsRecursive(const QString& searchText) {
 
 void PDFBookmarkWidget::showEmptyState() {
     bookmarkList->clear();
-    
+
     QListWidgetItem* emptyItem = new QListWidgetItem(bookmarkList);
     emptyItem->setText("暂无书签");
     emptyItem->setFlags(Qt::NoItemFlags);

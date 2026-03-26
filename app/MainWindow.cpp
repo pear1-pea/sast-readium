@@ -15,13 +15,13 @@
 #include "managers/StyleManager.h"
 #include "model/RenderModel.h"
 #include "ui/managers/WelcomeScreenManager.h"
-#include "ui/widgets/WelcomeWidget.h"
 #include "ui/thumbnail/ThumbnailListView.h"
+#include "ui/widgets/WelcomeWidget.h"
 #include "utils/LoggingMacros.h"
 
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     LOG_DEBUG("MainWindow: Starting initialization...");
-    
+
     initWindow();
     LOG_DEBUG("MainWindow: Window initialized");
     initModel();
@@ -41,25 +41,32 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     // 在所有组件初始化完成后应用初始主题
     QString defaultTheme =
         (STYLE.currentTheme() == Theme::Light) ? "light" : "dark";
-    
-    LOG_DEBUG("MainWindow: Constructor completed, scheduling initial theme application");
-    
+
+    LOG_DEBUG(
+        "MainWindow: Constructor completed, scheduling initial theme "
+        "application");
+
     // 延迟应用主题，确保窗口完全准备好，并强制应用到MainWindow
     QTimer::singleShot(0, this, [this, defaultTheme]() {
-        LOG_DEBUG("MainWindow: Applying initial theme: {}", defaultTheme.toStdString());
-        
+        LOG_DEBUG("MainWindow: Applying initial theme: {}",
+                  defaultTheme.toStdString());
+
         // 应用主题
         loadAndApplyTheme(defaultTheme);
-        
+
         // 额外检查：如果主窗口样式表仍然为空，使用备用方法
         if (this->styleSheet().isEmpty()) {
-            LOG_WARNING("MainWindow: StyleSheet is empty after loadAndApplyTheme, forcing fallback theme application");
+            LOG_WARNING(
+                "MainWindow: StyleSheet is empty after loadAndApplyTheme, "
+                "forcing fallback theme application");
             QString fallbackStyleSheet = STYLE.getApplicationStyleSheet();
             STYLE.forceApplyTheme(this, fallbackStyleSheet);
         }
-        
-        LOG_DEBUG("MainWindow: Theme application completed ({}), stylesheet length: {}", 
-                  defaultTheme.toStdString(), this->styleSheet().length());
+
+        LOG_DEBUG(
+            "MainWindow: Theme application completed ({}), stylesheet length: "
+            "{}",
+            defaultTheme.toStdString(), this->styleSheet().length());
     });
 
     // 启动异步初始化以避免阻塞UI
@@ -196,10 +203,11 @@ void MainWindow::initWelcomeScreen() {
 
 void MainWindow::initConnection() {
     // 监听 StyleManager 的主题变更信号，确保从任何地方切换主题都能立即生效
-    connect(&StyleManager::instance(), &StyleManager::themeChanged, this, [this](Theme theme) {
-        QString themeStr = (theme == Theme::Dark) ? "dark" : "light";
-        loadAndApplyTheme(themeStr);
-    });
+    connect(&StyleManager::instance(), &StyleManager::themeChanged, this,
+            [this](Theme theme) {
+                QString themeStr = (theme == Theme::Dark) ? "dark" : "light";
+                loadAndApplyTheme(themeStr);
+            });
 
     connect(menuBar, &MenuBar::onExecuted, documentController,
             &DocumentController::execute);
@@ -246,11 +254,11 @@ void MainWindow::initConnection() {
     // 连接文档模型信号以同步目录
     connect(documentModel, &DocumentModel::currentDocumentChanged, this,
             &MainWindow::onCurrentDocumentChangedForOutline);
-    
+
     // 连接ViewWidget的目录模型变化信号
     connect(viewWidget, &ViewWidget::currentOutlineModelChanged, this,
             &MainWindow::onOutlineModelChanged);
-    
+
     // 连接页面变化信号以更新目录高亮
     connect(viewWidget, &ViewWidget::currentViewerPageChanged, this,
             &MainWindow::onPageChangedForOutlineHighlight);
@@ -315,7 +323,7 @@ void MainWindow::initConnection() {
                 statusBar->setPageInfo(pageNumber, totalPages);
                 toolBar->updatePageInfo(pageNumber, totalPages);
             });
-    
+
     // 连接页面变化信号以同步缩略图高光
     connect(viewWidget, &ViewWidget::currentViewerPageChanged, this,
             &MainWindow::onPageChangedForThumbnailSync);
@@ -573,7 +581,8 @@ void MainWindow::loadAndApplyTheme(const QString& theme) {
     QString fallbackStyleSheet = STYLE.getApplicationStyleSheet();
     STYLE.applyThemeStyleSheet(fallbackStyleSheet);
     m_currentAppliedTheme = theme;
-    LOG_DEBUG("Applied fallback theme: {} via StyleManager", theme.toStdString());
+    LOG_DEBUG("Applied fallback theme: {} via StyleManager",
+              theme.toStdString());
 }
 
 void MainWindow::initWelcomeScreenConnections() {
@@ -686,21 +695,22 @@ void MainWindow::onOutlineModelChanged(PDFOutlineModel* model) {
     // 当ViewWidget发出目录模型变化信号时，更新侧边栏的目录
     if (sideBar) {
         sideBar->setOutlineModel(model);
-        
+
         // 重新建立连接
         setupOutlineConnections();
-        
+
         // 更新目录高亮（如果有当前页面信息）
         if (viewWidget && viewWidget->hasDocuments()) {
             int currentPage = viewWidget->getCurrentPage();
             updateOutlineHighlight(currentPage);
         }
-        
+
         qDebug() << "Outline model changed and updated, model:" << model;
     }
 }
 
-void MainWindow::onPageChangedForOutlineHighlight(int pageNumber, int totalPages) {
+void MainWindow::onPageChangedForOutlineHighlight(int pageNumber,
+                                                  int totalPages) {
     // 当页面变化时，更新目录高亮
     Q_UNUSED(totalPages)
     updateOutlineHighlight(pageNumber);
@@ -709,36 +719,40 @@ void MainWindow::onPageChangedForOutlineHighlight(int pageNumber, int totalPages
 void MainWindow::setupOutlineConnections() {
     // 重新建立目录点击跳转信号连接
     if (sideBar && sideBar->getOutlineWidget()) {
-        qDebug() << "Setting up outline connections - sidebar and outline widget exist";
-        
+        qDebug() << "Setting up outline connections - sidebar and outline "
+                    "widget exist";
+
         // 断开之前的连接，避免重复连接
         disconnect(sideBar->getOutlineWidget(),
                    &PDFOutlineWidget::pageNavigationRequested, nullptr,
                    nullptr);
 
         // 连接到当前PDF查看器的页面跳转
-        connect(sideBar->getOutlineWidget(),
-                &PDFOutlineWidget::pageNavigationRequested, this,
-                [this](int pageNumber) {
-                    qDebug() << "Outline navigation requested to page:" << pageNumber + 1;
-                    
-                    // 通过ViewWidget获取当前的PDF查看器并跳转页面
-                    if (viewWidget) {
-                        viewWidget->goToPage(pageNumber);
-                        
-                        // 显示状态消息
-                        if (statusBar) {
-                            statusBar->setMessage(
-                                QString("从目录跳转到第 %1 页").arg(pageNumber + 1));
-                        }
+        connect(
+            sideBar->getOutlineWidget(),
+            &PDFOutlineWidget::pageNavigationRequested, this,
+            [this](int pageNumber) {
+                qDebug() << "Outline navigation requested to page:"
+                         << pageNumber + 1;
+
+                // 通过ViewWidget获取当前的PDF查看器并跳转页面
+                if (viewWidget) {
+                    viewWidget->goToPage(pageNumber);
+
+                    // 显示状态消息
+                    if (statusBar) {
+                        statusBar->setMessage(QString("从目录跳转到第 %1 页")
+                                                  .arg(pageNumber + 1));
                     }
-                });
-        
+                }
+            });
+
         qDebug() << "Outline navigation connections established";
     } else {
-        qDebug() << "Cannot setup outline connections - sidebar:" << 
-                    (sideBar != nullptr) << ", outline widget:" << 
-                    (sideBar ? (sideBar->getOutlineWidget() != nullptr) : false);
+        qDebug() << "Cannot setup outline connections - sidebar:"
+                 << (sideBar != nullptr) << ", outline widget:"
+                 << (sideBar ? (sideBar->getOutlineWidget() != nullptr)
+                             : false);
     }
 }
 
@@ -746,11 +760,12 @@ void MainWindow::updateOutlineHighlight(int pageNumber) {
     // 更新目录中对应页面的高亮显示
     if (sideBar && sideBar->getOutlineWidget()) {
         sideBar->getOutlineWidget()->highlightPageItem(pageNumber);
-        
-        qDebug() << "Updated outline highlight for page" << pageNumber + 1 
+
+        qDebug() << "Updated outline highlight for page" << pageNumber + 1
                  << "(0-based:" << pageNumber << ")";
     } else {
-        qDebug() << "Cannot update outline highlight: sidebar or outline widget is null";
+        qDebug() << "Cannot update outline highlight: sidebar or outline "
+                    "widget is null";
     }
 }
 
@@ -758,14 +773,17 @@ void MainWindow::onPageChangedForThumbnailSync(int pageNumber, int totalPages) {
     // 同步缩略图的当前页面高光和滚动位置
     if (sideBar && sideBar->getThumbnailView()) {
         ThumbnailListView* thumbnailView = sideBar->getThumbnailView();
-        
+
         // 设置当前页面（这会自动更新高光并滚动到当前页面）
         thumbnailView->setCurrentPage(pageNumber, true);  // true表示使用动画
-        
-        LOG_DEBUG("MainWindow: Synchronized thumbnail highlight to page {}", pageNumber + 1);
+
+        LOG_DEBUG("MainWindow: Synchronized thumbnail highlight to page {}",
+                  pageNumber + 1);
     } else {
-        LOG_DEBUG("MainWindow: Cannot sync thumbnail highlight: sidebar or thumbnail view is null");
+        LOG_DEBUG(
+            "MainWindow: Cannot sync thumbnail highlight: sidebar or thumbnail "
+            "view is null");
     }
-    
+
     Q_UNUSED(totalPages)  // 避免未使用参数的警告
 }

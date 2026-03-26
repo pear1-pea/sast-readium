@@ -35,10 +35,10 @@ RightSideBar::RightSideBar(QWidget* parent)
     initAnimation();
     restoreState();
 
-    // Connect to theme changes - monitor StyleManager's styleSheetApplied signal
-    connect(&STYLE, &StyleManager::styleSheetApplied, this, [this]() {
-        applyTheme();
-    });
+    // Connect to theme changes - monitor StyleManager's styleSheetApplied
+    // signal
+    connect(&STYLE, &StyleManager::styleSheetApplied, this,
+            [this]() { applyTheme(); });
 
     // Apply initial theme
     applyTheme();

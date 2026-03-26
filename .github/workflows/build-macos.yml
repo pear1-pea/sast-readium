@@ -64,12 +64,12 @@ jobs:
 
           # Update library cache
           sudo update_dyld_shared_cache || true
-          
+
           # Verify installation
           echo "Verifying poppler-qt6 installation..."
           pkg-config --modversion poppler-qt6 || echo "Warning: poppler-qt6 not found in pkg-config"
           ls -la /usr/local/lib/libpoppler-qt6.* || true
-          
+
           # Set PKG_CONFIG_PATH for subsequent steps
           echo "PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:$PKG_CONFIG_PATH" >> $GITHUB_ENV
 
@@ -78,21 +78,21 @@ jobs:
         run: |
           # Build poppler with Qt6 support
           echo "Building poppler from source with Qt6 support (cache miss)..."
-          
+
           # Set Qt6 path
           export Qt6_DIR=$(brew --prefix qt@6)
           export PATH="$Qt6_DIR/bin:$PATH"
           export PKG_CONFIG_PATH="$Qt6_DIR/lib/pkgconfig:$PKG_CONFIG_PATH"
-          
+
           # Clone poppler repository (latest stable release)
           git clone --filter=blob:none https://gitlab.freedesktop.org/poppler/poppler.git /tmp/poppler
           cd /tmp/poppler
           git fetch --filter=blob:none --depth 1 origin refs/tags/poppler-${{ env['poppler-version'] }}:refs/tags/poppler-${{ env['poppler-version'] }}
           git checkout -q refs/tags/poppler-${{ env['poppler-version'] }}
-          
+
           # Create build directory
           mkdir build && cd build
-          
+
           # Configure poppler with Qt6 support
           cmake .. \
             -G Ninja \
@@ -110,19 +110,19 @@ jobs:
             -DBUILD_QT6_TESTS=OFF \
             -DBUILD_CPP_TESTS=OFF \
             -DENABLE_BOOST=OFF
-          
+
           # Build and install
           ninja
           sudo ninja install
-          
+
           # Update library cache
           sudo update_dyld_shared_cache || true
-          
+
           # Verify installation
           echo "Verifying poppler-qt6 installation..."
           pkg-config --modversion poppler-qt6 || echo "Warning: poppler-qt6 not found in pkg-config"
           ls -la /usr/local/lib/libpoppler-qt6.* || true
-          
+
           # Set PKG_CONFIG_PATH for subsequent steps
           echo "PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:$PKG_CONFIG_PATH" >> $GITHUB_ENV
 
@@ -133,34 +133,34 @@ jobs:
       - name: Build
         run: |
           cmake --build --preset=Release-Unix --target app
-      
+
       - name: Deploy runtime
         run: |
           echo "Creating macOS .app bundle..."
-          
+
           # Set variables
           APP_NAME="sast-readium"
           APP_DISPLAY_NAME="Sast-Readium"
           BUILD_DIR="build/Release"
           PUBLISH_DIR="build/Publish"
           APP_BUNDLE="${PUBLISH_DIR}/${APP_DISPLAY_NAME}.app"
-          
+
           # Create .app bundle structure
           mkdir -p "${PUBLISH_DIR}"
           mkdir -p "${APP_BUNDLE}/Contents/MacOS"
           mkdir -p "${APP_BUNDLE}/Contents/Resources"
           mkdir -p "${APP_BUNDLE}/Contents/Frameworks"
-          
+
           # Copy executable
           echo "Copying executable..."
           cp "${BUILD_DIR}/app/app" "${APP_BUNDLE}/Contents/MacOS/${APP_NAME}"
           chmod +x "${APP_BUNDLE}/Contents/MacOS/${APP_NAME}"
-          
+
           # Copy resources
           echo "Copying resources..."
           [ -d "${BUILD_DIR}/app/styles" ] && cp -r "${BUILD_DIR}/app/styles" "${APP_BUNDLE}/Contents/Resources/"
           [ -d "assets" ] && cp -r assets "${APP_BUNDLE}/Contents/Resources/"
-          
+
           # Create app icon
           if [ -f "assets/images/1024x1024.png" ]; then
             echo "Creating app icon..."
@@ -178,7 +178,7 @@ jobs:
             iconutil -c icns icon.iconset -o "${APP_BUNDLE}/Contents/Resources/app.icns"
             rm -rf icon.iconset
           fi
-          
+
           # Create Info.plist
           cat > "${APP_BUNDLE}/Contents/Info.plist" << 'EOF'
           <?xml version="1.0" encoding="UTF-8"?>
@@ -225,12 +225,12 @@ jobs:
           </dict>
           </plist>
           EOF
-          
+
           # Deploy Qt dependencies
           echo "Deploying Qt dependencies..."
           export Qt6_DIR=$(brew --prefix qt@6)
           "${Qt6_DIR}/bin/macdeployqt" "${APP_BUNDLE}" -verbose=2
-          
+
           # Fix symlinks - replace with actual files
           echo ""
           echo "Fixing symlinks in Frameworks..."
@@ -239,13 +239,13 @@ jobs:
               lib_name=$(basename "$lib")
               # Resolve the full chain of symlinks to get actual file
               actual_file=$(readlink -f "$lib" 2>/dev/null || echo "")
-              
+
               # If readlink -f doesn't work, manually resolve
               if [ -z "$actual_file" ] || [ ! -f "$actual_file" ]; then
                 # Try to find in /usr/local/lib
                 actual_file=$(find /usr/local/lib -name "${lib_name%.dylib}*.dylib" -type f 2>/dev/null | head -1)
               fi
-              
+
               if [ -n "$actual_file" ] && [ -f "$actual_file" ]; then
                 actual_size=$(stat -f%z "$actual_file")
                 echo "Replacing symlink: $lib_name -> $(basename "$actual_file") ($(numfmt --to=iec-i --suffix=B $actual_size 2>/dev/null || echo "${actual_size} bytes"))"
@@ -258,7 +258,7 @@ jobs:
 
           rm -rf "${APP_BUNDLE}/Contents/Frameworks"/libpoppler-qt6.3.dylib
           cp /usr/local/lib/libpoppler-qt6.3.8.0.dylib "${APP_BUNDLE}/Contents/Frameworks/libpoppler-qt6.3.dylib"
-          
+
           echo ""
           echo "App bundle created at: ${APP_BUNDLE}"
           du -sh "${APP_BUNDLE}"

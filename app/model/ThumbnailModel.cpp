@@ -1,11 +1,11 @@
 #include "ThumbnailModel.h"
-#include <poppler-qt6.h>
+#include <poppler/qt6/poppler-qt6.h>
 #include <QApplication>
 #include <QDateTime>
 #include <QDebug>
 #include <QMutexLocker>
-#include "utils/LoggingMacros.h"
 #include "ui/thumbnail/ThumbnailGenerator.h"
+#include "utils/LoggingMacros.h"
 
 ThumbnailModel::ThumbnailModel(QObject* parent)
     : QAbstractListModel(parent),
@@ -193,8 +193,10 @@ void ThumbnailModel::setThumbnailSize(const QSize& size) {
             m_generator->setThumbnailSize(size);
         }
 
-        LOG_DEBUG("ThumbnailModel: Thumbnail size changed from {}x{} to {}x{}, clearing cache selectively", 
-                  oldSize.width(), oldSize.height(), size.width(), size.height());
+        LOG_DEBUG(
+            "ThumbnailModel: Thumbnail size changed from {}x{} to {}x{}, "
+            "clearing cache selectively",
+            oldSize.width(), oldSize.height(), size.width(), size.height());
 
         // 渐进式清除缓存：只清除pixmap数据，保留其他信息
         {
@@ -214,7 +216,8 @@ void ThumbnailModel::setThumbnailSize(const QSize& size) {
 
         // 只通知数据变化，让视图按需重新请求
         if (rowCount() > 0) {
-            emit dataChanged(index(0), index(rowCount() - 1), {PixmapRole, LoadingRole});
+            emit dataChanged(index(0), index(rowCount() - 1),
+                             {PixmapRole, LoadingRole});
         }
     }
 }
@@ -228,8 +231,10 @@ void ThumbnailModel::setThumbnailQuality(double quality) {
             m_generator->setQuality(quality);
         }
 
-        LOG_DEBUG("ThumbnailModel: Thumbnail quality changed from {:.2f} to {:.2f}, clearing cache selectively", 
-                  oldQuality, quality);
+        LOG_DEBUG(
+            "ThumbnailModel: Thumbnail quality changed from {:.2f} to {:.2f}, "
+            "clearing cache selectively",
+            oldQuality, quality);
 
         // 渐进式清除缓存：只清除pixmap数据，保留其他信息
         {
@@ -249,7 +254,8 @@ void ThumbnailModel::setThumbnailQuality(double quality) {
 
         // 只通知数据变化，让视图按需重新请求
         if (rowCount() > 0) {
-            emit dataChanged(index(0), index(rowCount() - 1), {PixmapRole, LoadingRole});
+            emit dataChanged(index(0), index(rowCount() - 1),
+                             {PixmapRole, LoadingRole});
         }
     }
 }
@@ -306,19 +312,23 @@ void ThumbnailModel::requestThumbnail(int pageNumber) {
         if (!it->pixmap.isNull()) {
             it->lastAccessed = QDateTime::currentMSecsSinceEpoch();
             updateAccessFrequency(pageNumber);
-            LOG_DEBUG("ThumbnailModel: Page {} already cached, skip request", pageNumber);
+            LOG_DEBUG("ThumbnailModel: Page {} already cached, skip request",
+                      pageNumber);
             return;
         }
-        
+
         // 如果正在加载中，也直接返回
         if (it->isLoading) {
-            LOG_DEBUG("ThumbnailModel: Page {} is already loading, skip request", pageNumber);
+            LOG_DEBUG(
+                "ThumbnailModel: Page {} is already loading, skip request",
+                pageNumber);
             return;
         }
-        
+
         // 如果之前出错了，清除错误状态准备重新加载
         if (it->hasError) {
-            LOG_DEBUG("ThumbnailModel: Page {} had error, retrying", pageNumber);
+            LOG_DEBUG("ThumbnailModel: Page {} had error, retrying",
+                      pageNumber);
             it->hasError = false;
             it->errorMessage.clear();
         }
@@ -331,7 +341,8 @@ void ThumbnailModel::requestThumbnail(int pageNumber) {
     item.errorMessage.clear();
     item.lastAccessed = QDateTime::currentMSecsSinceEpoch();
 
-    LOG_DEBUG("ThumbnailModel: Requesting thumbnail generation for page {}", pageNumber);
+    LOG_DEBUG("ThumbnailModel: Requesting thumbnail generation for page {}",
+              pageNumber);
 
     locker.unlock();
 
@@ -362,19 +373,21 @@ void ThumbnailModel::requestThumbnailRange(int startPage, int endPage) {
     for (int i = startPage; i <= endPage; ++i) {
         QMutexLocker locker(&m_thumbnailsMutex);
         auto it = m_thumbnails.find(i);
-        bool needRequest = (it == m_thumbnails.end() || 
-                           (it->pixmap.isNull() && !it->isLoading));
+        bool needRequest = (it == m_thumbnails.end() ||
+                            (it->pixmap.isNull() && !it->isLoading));
         locker.unlock();
-        
+
         if (needRequest) {
             requestThumbnail(i);
             requestCount++;
         }
     }
-    
+
     if (requestCount > 0) {
-        LOG_DEBUG("ThumbnailModel: Requested {} thumbnails in range {}~{} (total range size: {})", 
-                  requestCount, startPage, endPage, endPage - startPage + 1);
+        LOG_DEBUG(
+            "ThumbnailModel: Requested {} thumbnails in range {}~{} (total "
+            "range size: {})",
+            requestCount, startPage, endPage, endPage - startPage + 1);
     }
 }
 
@@ -468,10 +481,12 @@ void ThumbnailModel::onThumbnailGenerated(int pageNumber,
     it->memorySize = calculatePixmapMemory(pixmap);
 
     m_currentMemory += it->memorySize;
-    
-    LOG_DEBUG("ThumbnailModel: Generated thumbnail for page {} (size: {}x{}, memory: {} KB, cache: {}/{} items, total memory: {} MB)",
-              pageNumber, pixmap.width(), pixmap.height(), it->memorySize / 1024,
-              m_thumbnails.size(), m_maxCacheSize, m_currentMemory / (1024 * 1024));
+
+    LOG_DEBUG(
+        "ThumbnailModel: Generated thumbnail for page {} (size: {}x{}, memory: "
+        "{} KB, cache: {}/{} items, total memory: {} MB)",
+        pageNumber, pixmap.width(), pixmap.height(), it->memorySize / 1024,
+        m_thumbnails.size(), m_maxCacheSize, m_currentMemory / (1024 * 1024));
 
     // 检查内存限制 - 使用自适应策略
     while (m_currentMemory > m_maxMemory && m_thumbnails.size() > 1) {
@@ -642,9 +657,11 @@ void ThumbnailModel::setLazyLoadingEnabled(bool enabled) {
 }
 
 void ThumbnailModel::setViewportRange(int start, int end, int margin) {
-    LOG_DEBUG("ThumbnailModel: Set viewport range to {}~{} with margin {} (lazy loading: {})",
-              start, end, margin, m_lazyLoadingEnabled);
-    
+    LOG_DEBUG(
+        "ThumbnailModel: Set viewport range to {}~{} with margin {} (lazy "
+        "loading: {})",
+        start, end, margin, m_lazyLoadingEnabled);
+
     m_visibleStart = start;
     m_visibleEnd = end;
     m_viewportMargin = margin;
@@ -684,11 +701,13 @@ void ThumbnailModel::updateViewportPriorities() {
         m_pagePriorities[i] = 1;
         preloadCount++;
     }
-    
-    LOG_DEBUG("ThumbnailModel: Updated priorities - visible: {} pages ({}~{}), preload: {} pages ({}~{}, {}~{}), total: {} (was: {})",
-              visibleCount, m_visibleStart, m_visibleEnd, preloadCount,
-              preloadStart, m_visibleStart - 1, m_visibleEnd + 1, preloadEnd,
-              m_pagePriorities.size(), oldPriorityCount);
+
+    LOG_DEBUG(
+        "ThumbnailModel: Updated priorities - visible: {} pages ({}~{}), "
+        "preload: {} pages ({}~{}, {}~{}), total: {} (was: {})",
+        visibleCount, m_visibleStart, m_visibleEnd, preloadCount, preloadStart,
+        m_visibleStart - 1, m_visibleEnd + 1, preloadEnd,
+        m_pagePriorities.size(), oldPriorityCount);
 }
 
 bool ThumbnailModel::shouldGenerateThumbnail(int pageNumber) const {
@@ -784,9 +803,11 @@ void ThumbnailModel::evictByAdaptivePolicy() {
     }
 
     double efficiency = calculateCacheEfficiency();
-    LOG_DEBUG("ThumbnailModel: Cache efficiency: {:.2f}%, memory usage: {:.1f} MB / {:.1f} MB, cache size: {} / {}",
-              efficiency * 100, m_currentMemory / (1024.0 * 1024.0), m_maxMemory / (1024.0 * 1024.0),
-              m_thumbnails.size(), m_maxCacheSize);
+    LOG_DEBUG(
+        "ThumbnailModel: Cache efficiency: {:.2f}%, memory usage: {:.1f} MB / "
+        "{:.1f} MB, cache size: {} / {}",
+        efficiency * 100, m_currentMemory / (1024.0 * 1024.0),
+        m_maxMemory / (1024.0 * 1024.0), m_thumbnails.size(), m_maxCacheSize);
 
     // 根据缓存效率选择逐出策略
     if (efficiency > 0.7) {

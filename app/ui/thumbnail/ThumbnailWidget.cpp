@@ -177,7 +177,8 @@ void ThumbnailWidget::setLoading(bool loading) {
 }
 
 void ThumbnailWidget::setError(const QString& errorMessage) {
-    LOG_WARNING("ThumbnailWidget: Page {} error - {}", m_pageNumber, errorMessage.toStdString());
+    LOG_WARNING("ThumbnailWidget: Page {} error - {}", m_pageNumber,
+                errorMessage.toStdString());
     m_errorMessage = errorMessage;
     setState(Error);
 }

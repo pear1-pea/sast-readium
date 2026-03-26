@@ -8,10 +8,10 @@
 
 // PDF目录节点数据结构
 struct PDFOutlineNode {
-    QString title;                                    // 目录项标题
-    int pageNumber;                                   // 目标页面号（0-based）
-    int level;                                        // 层级深度（0为根级）
-    bool hasChildren;                                 // 是否有子节点
+    QString title;     // 目录项标题
+    int pageNumber;    // 目标页面号（0-based）
+    int level;         // 层级深度（0为根级）
+    bool hasChildren;  // 是否有子节点
     QList<std::shared_ptr<PDFOutlineNode>> children;  // 子节点列表
 
     PDFOutlineNode(const QString& title = "", int page = -1, int level = 0)

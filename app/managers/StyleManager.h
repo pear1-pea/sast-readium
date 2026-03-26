@@ -3,10 +3,10 @@
 #include <QApplication>
 #include <QColor>
 #include <QFont>
+#include <QList>
 #include <QObject>
 #include <QString>
 #include <QWidget>
-#include <QList>
 
 class QMainWindow;
 
@@ -20,9 +20,9 @@ public:
 
     // 主题管理
     void setTheme(Theme theme);
-    void toggleTheme();  // 在亮色/暗色间切换
-    void setLightTheme(); // 直接设置亮色主题
-    void setDarkTheme();  // 直接设置暗色主题
+    void toggleTheme();    // 在亮色/暗色间切换
+    void setLightTheme();  // 直接设置亮色主题
+    void setDarkTheme();   // 直接设置暗色主题
     Theme currentTheme() const { return m_currentTheme; }
 
     // 统一主题应用
@@ -64,7 +64,7 @@ public:
 
 signals:
     void themeChanged(Theme theme);
-    void styleSheetApplied(); // 新增：样式表应用完成信号
+    void styleSheetApplied();  // 新增：样式表应用完成信号
 
 private:
     StyleManager();

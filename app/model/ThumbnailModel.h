@@ -89,7 +89,7 @@ public:
     bool isLoading(int pageNumber) const;
     bool hasError(int pageNumber) const;
     QString errorMessage(int pageNumber) const;
-    
+
     // 智能缓存查询
     bool hasCachedThumbnail(int pageNumber) const;
     bool isThumbnailLoading(int pageNumber) const;

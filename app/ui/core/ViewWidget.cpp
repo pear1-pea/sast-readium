@@ -278,7 +278,7 @@ void ViewWidget::onDocumentOpened(int index, const QString& fileName) {
     // 切换到新文档
     hideEmptyState();
     updateCurrentViewer();
-    
+
     // 发出目录模型变化信号
     if (getCurrentDocumentIndex() == index) {
         emit currentOutlineModelChanged(docOutlineModel);

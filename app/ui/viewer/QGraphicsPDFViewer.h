@@ -2,7 +2,7 @@
 
 #ifdef ENABLE_QGRAPHICS_PDF_SUPPORT
 
-#include <poppler-qt6.h>
+#include <poppler/qt6/poppler-qt6.h>
 #include <QFutureWatcher>
 #include <QGraphicsEffect>
 #include <QGraphicsPixmapItem>

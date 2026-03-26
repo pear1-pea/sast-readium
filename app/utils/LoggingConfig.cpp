@@ -701,7 +701,8 @@ LoggingConfigBuilder& LoggingConfigBuilder::setGlobalLevel(
 
 LoggingConfigBuilder& LoggingConfigBuilder::setGlobalPattern(
     const QString& pattern) {
-    LoggingConfig::GlobalConfiguration globalConfig = m_config->getGlobalConfig();
+    LoggingConfig::GlobalConfiguration globalConfig =
+        m_config->getGlobalConfig();
     globalConfig.globalPattern = pattern;
     m_config->setGlobalConfig(globalConfig);
     return *this;
@@ -726,7 +727,7 @@ LoggingConfigBuilder& LoggingConfigBuilder::addFileSink(
 }
 
 LoggingConfigBuilder& LoggingConfigBuilder::addRotatingFileSink(
-    const QString& name, const QString& filename, size_t maxSize, 
+    const QString& name, const QString& filename, size_t maxSize,
     size_t maxFiles, Logger::LogLevel level) {
     LoggingConfig::SinkConfiguration sinkConfig;
     sinkConfig.name = name;

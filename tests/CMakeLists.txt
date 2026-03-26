@@ -6,7 +6,8 @@ cmake_minimum_required(VERSION 3.16)
 find_package(Qt6 REQUIRED COMPONENTS Core Widgets Test Network)
 find_package(spdlog REQUIRED)
 find_package(PkgConfig REQUIRED)
-pkg_check_modules(POPPLER_QT6 REQUIRED IMPORTED_TARGET poppler-qt6)
+
+# Note: POPPLER_QT6 target is created in parent CMakeLists.txt with correct include paths
 
 # Enable testing
 enable_testing()
@@ -17,12 +18,12 @@ set(CMAKE_AUTORCC ON)
 set(CMAKE_AUTOUIC ON)
 
 # Common include directories
+# Note: PkgConfig::POPPLER_QT6 provides poppler includes via target_include_directories
 set(COMMON_INCLUDE_DIRS
     ${CMAKE_CURRENT_SOURCE_DIR}/../app
     ${Qt6Core_INCLUDE_DIRS}
     ${Qt6Widgets_INCLUDE_DIRS}
     ${Qt6Test_INCLUDE_DIRS}
-    ${POPPLER_QT6_INCLUDE_DIRS}
 )
 
 # Common libraries

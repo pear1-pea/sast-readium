@@ -291,7 +291,7 @@ void DocumentMetadataDialog::populateSecurityInfo() {
 
     // 简化的权限检查 - 对于基本的元数据显示，这些就足够了
     m_canExtractTextEdit->setText(
-        tr("是"));                       // 如果能打开文档，通常可以提取文本
+        tr("是"));  // 如果能打开文档，通常可以提取文本
     m_canPrintEdit->setText(tr("是"));   // 简化处理
     m_canModifyEdit->setText(tr("否"));  // PDF查看器通常不允许修改
 }

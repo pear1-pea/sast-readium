@@ -1,7 +1,7 @@
 #include "StyleManager.h"
+#include <QApplication>
 #include <QFontDatabase>
 #include <QWidget>
-#include <QApplication>
 #include "utils/Logger.h"
 
 StyleManager& StyleManager::instance() {
@@ -29,17 +29,14 @@ void StyleManager::setTheme(Theme theme) {
 }
 
 void StyleManager::toggleTheme() {
-    Theme newTheme = (m_currentTheme == Theme::Light) ? Theme::Dark : Theme::Light;
+    Theme newTheme =
+        (m_currentTheme == Theme::Light) ? Theme::Dark : Theme::Light;
     setTheme(newTheme);
 }
 
-void StyleManager::setLightTheme() {
-    setTheme(Theme::Light);
-}
+void StyleManager::setLightTheme() { setTheme(Theme::Light); }
 
-void StyleManager::setDarkTheme() {
-    setTheme(Theme::Dark);
-}
+void StyleManager::setDarkTheme() { setTheme(Theme::Dark); }
 
 void StyleManager::updateColors() {
     Logger::instance().debug("[managers] Updating colors for theme: {}",
@@ -226,14 +223,15 @@ QString StyleManager::getStatusBarStyleSheet() const {
 
 QString StyleManager::getPDFViewerStyleSheet() const {
     // 根据主题动态设置PDF查看器背景色
-    QColor pdfBackgroundColor = (m_currentTheme == Theme::Light) 
-                                ? QColor(245, 245, 245)  // 亮色主题使用浅灰
-                                : QColor(30, 30, 30);    // 暗色主题使用深灰
-    
-    QColor pageBackgroundColor = (m_currentTheme == Theme::Light) 
-                                ? QColor(255, 255, 255)  // 亮色主题PDF页面白色
-                                : QColor(45, 45, 48);    // 暗色主题PDF页面深灰
-    
+    QColor pdfBackgroundColor = (m_currentTheme == Theme::Light)
+                                    ? QColor(245, 245, 245)  // 亮色主题使用浅灰
+                                    : QColor(30, 30, 30);  // 暗色主题使用深灰
+
+    QColor pageBackgroundColor =
+        (m_currentTheme == Theme::Light)
+            ? QColor(255, 255, 255)  // 亮色主题PDF页面白色
+            : QColor(45, 45, 48);    // 暗色主题PDF页面深灰
+
     return QString(R"(
         QScrollArea#singlePageScrollArea {
             background-color: %1;
@@ -269,10 +267,10 @@ QString StyleManager::getScrollBarStyleSheet() const {
 void StyleManager::applyThemeStyleSheet(const QString& styleSheet) {
     // 获取主窗口并应用样式表
     QWidget* mainWindow = nullptr;
-    
+
     // 首先尝试获取活动窗口
     mainWindow = QApplication::activeWindow();
-    
+
     // 如果没有活动窗口，尝试获取所有顶级窗口中的第一个
     if (!mainWindow) {
         QWidgetList topLevelWidgets = QApplication::topLevelWidgets();
@@ -283,7 +281,7 @@ void StyleManager::applyThemeStyleSheet(const QString& styleSheet) {
             }
         }
     }
-    
+
     // 最后的备选方案：获取任何顶级窗口
     if (!mainWindow) {
         QWidgetList topLevelWidgets = QApplication::topLevelWidgets();
@@ -291,15 +289,18 @@ void StyleManager::applyThemeStyleSheet(const QString& styleSheet) {
             mainWindow = topLevelWidgets.first();
         }
     }
-    
+
     if (mainWindow) {
         mainWindow->setStyleSheet(styleSheet);
-        Logger::instance().debug("[StyleManager] Applied theme stylesheet to window: {}, stylesheet length: {}", 
-                                mainWindow->metaObject()->className(), styleSheet.length());
+        Logger::instance().debug(
+            "[StyleManager] Applied theme stylesheet to window: {}, stylesheet "
+            "length: {}",
+            mainWindow->metaObject()->className(), styleSheet.length());
     } else {
-        Logger::instance().warning("[StyleManager] No main window found to apply stylesheet");
+        Logger::instance().warning(
+            "[StyleManager] No main window found to apply stylesheet");
     }
-    
+
     // 发出样式表应用完成信号
     emit styleSheetApplied();
 }
@@ -307,11 +308,13 @@ void StyleManager::applyThemeStyleSheet(const QString& styleSheet) {
 void StyleManager::forceApplyTheme(QWidget* widget, const QString& styleSheet) {
     if (widget) {
         widget->setStyleSheet(styleSheet);
-        Logger::instance().debug("[StyleManager] Force applied theme to widget: {}",
-                               widget->metaObject()->className());
+        Logger::instance().debug(
+            "[StyleManager] Force applied theme to widget: {}",
+            widget->metaObject()->className());
         emit styleSheetApplied();
     } else {
-        Logger::instance().warning("[StyleManager] Cannot force apply theme to null widget");
+        Logger::instance().warning(
+            "[StyleManager] Cannot force apply theme to null widget");
     }
 }
 

@@ -239,7 +239,8 @@ private:
 
     void createLogger();
     void setLogLevelInternal(LogLevel level);  // Internal version without mutex
-    void setPatternInternal(const QString& pattern);  // Internal version without mutex
+    void setPatternInternal(
+        const QString& pattern);  // Internal version without mutex
     spdlog::level::level_enum toSpdlogLevel(LogLevel level) const;
     LogLevel fromSpdlogLevel(spdlog::level::level_enum level) const;
 

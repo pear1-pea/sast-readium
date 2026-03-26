@@ -15,8 +15,8 @@
 #include <QtGui>
 #include <QtWidgets>
 #include "../../delegate/ThumbnailDelegate.h"
-#include "../../model/ThumbnailModel.h"
 #include "../../managers/StyleManager.h"
+#include "../../model/ThumbnailModel.h"
 #include "../thumbnail/ThumbnailListView.h"
 
 // 定义静态常量
@@ -45,9 +45,8 @@ SideBar::SideBar(QWidget* parent)
     restoreState();
 
     // 监听StyleManager的样式表应用信号，确保在主题样式表应用后再更新组件
-    connect(&StyleManager::instance(), &StyleManager::styleSheetApplied, this, [this]() {
-        updateThemeUI();
-    });
+    connect(&StyleManager::instance(), &StyleManager::styleSheetApplied, this,
+            [this]() { updateThemeUI(); });
 }
 
 void SideBar::initWindow() {
@@ -267,7 +266,7 @@ void SideBar::refreshThumbnails() {
 void SideBar::updateThemeUI() {
     // 清除所有内联样式，让QSS文件中的主题样式生效
     // 不直接设置滚动条样式，让QSS文件中的样式来控制
-    
+
     // 更新ThumbnailDelegate的主题
     if (thumbnailDelegate) {
         Theme currentTheme = StyleManager::instance().currentTheme();
@@ -277,11 +276,11 @@ void SideBar::updateThemeUI() {
             thumbnailDelegate->setLightTheme();
         }
     }
-    
+
     if (tabWidget) {
         tabWidget->setStyleSheet("");
     }
-    
+
     if (thumbnailView) {
         // 清除缩略图视图的内联样式，让CSS主题样式生效
         thumbnailView->setStyleSheet("");
@@ -295,7 +294,7 @@ void SideBar::updateThemeUI() {
         // 触发重绘
         thumbnailView->viewport()->update();
     }
-    
+
     // 递归更新所有子控件的样式
     QList<QWidget*> allWidgets = findChildren<QWidget*>();
     for (QWidget* widget : allWidgets) {
@@ -304,10 +303,10 @@ void SideBar::updateThemeUI() {
         widget->style()->polish(widget);
         widget->update();
     }
-    
+
     // 最后清除侧边栏的内联样式，让QSS文件中的样式生效
     setStyleSheet("");
-    
+
     // 强制重绘
     update();
     repaint();

@@ -10,15 +10,16 @@ int main(int argc, char** argv) {
 
     // Initialize logging system
     LoggingConfigBuilder configBuilder;
-    auto loggingConfigPtr = configBuilder
-        .useDevelopmentPreset()
-        .setGlobalLevel(Logger::LogLevel::Debug)
-        .setGlobalPattern("[%Y-%m-%d %H:%M:%S.%e] [%n] [%^%l%$] %v")
-        .addConsoleSink("console", Logger::LogLevel::Debug)
-        .addRotatingFileSink("file", "sast-readium.log", 10 * 1024 * 1024, 5, Logger::LogLevel::Info)
-        .addCategory("main", Logger::LogLevel::Debug)
-        .addCategory("ui", Logger::LogLevel::Info)
-        .buildUnique();
+    auto loggingConfigPtr =
+        configBuilder.useDevelopmentPreset()
+            .setGlobalLevel(Logger::LogLevel::Debug)
+            .setGlobalPattern("[%Y-%m-%d %H:%M:%S.%e] [%n] [%^%l%$] %v")
+            .addConsoleSink("console", Logger::LogLevel::Debug)
+            .addRotatingFileSink("file", "sast-readium.log", 10 * 1024 * 1024,
+                                 5, Logger::LogLevel::Info)
+            .addCategory("main", Logger::LogLevel::Debug)
+            .addCategory("ui", Logger::LogLevel::Info)
+            .buildUnique();
 
     // Convert to LoggingManager configuration
     auto loggingConfig = LoggingManager::fromLoggingConfig(*loggingConfigPtr);

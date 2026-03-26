@@ -225,13 +225,14 @@ void ThumbnailDelegate::paintThumbnail(
 
     if (!pixmap.isNull()) {
         // 缩放图片填满整个rect，不保持宽高比
-        QPixmap displayPixmap = pixmap.scaled(rect.size(), Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
-        
+        QPixmap displayPixmap = pixmap.scaled(
+            rect.size(), Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+
         // 直接绘制填满整个rect
         painter->drawPixmap(rect, displayPixmap);
     } else {
         // 没有缩略图时，不绘制背景（保持透明）
-        
+
         // 绘制占位符图标
         painter->setPen(QColor(120, 120, 120));
         QFont font = painter->font();

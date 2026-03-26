@@ -22,8 +22,8 @@
 #include <QtGui>
 #include <QtWidgets>
 #include "delegate/ThumbnailDelegate.h"
-#include "model/ThumbnailModel.h"
 #include "managers/StyleManager.h"
+#include "model/ThumbnailModel.h"
 #include "utils/LoggingMacros.h"
 
 ThumbnailListView::ThumbnailListView(QWidget* parent)
@@ -284,14 +284,14 @@ void ThumbnailListView::scrollToPage(int pageNumber, bool animated) {
     if (animated && m_animationEnabled) {
         // 首先获取当前滚动条值
         int currentValue = verticalScrollBar()->value();
-        
+
         // 临时禁用动画，获取目标页面居中的准确位置
         scrollTo(index, QAbstractItemView::PositionAtCenter);
         int targetValue = verticalScrollBar()->value();
-        
+
         // 恢复原始位置
         verticalScrollBar()->setValue(currentValue);
-        
+
         // 现在可以安全地进行动画滚动
         if (targetValue != currentValue) {
             animateScrollTo(targetValue);
@@ -324,7 +324,8 @@ void ThumbnailListView::setCurrentPage(int pageNumber, bool animated) {
         return;
     }
 
-    LOG_INFO("ThumbnailListView: Current page changed from {} to {}", m_currentPage + 1, pageNumber + 1);
+    LOG_INFO("ThumbnailListView: Current page changed from {} to {}",
+             m_currentPage + 1, pageNumber + 1);
     m_currentPage = pageNumber;
 
     if (pageNumber >= 0) {
@@ -569,28 +570,32 @@ void ThumbnailListView::onScrollBarValueChanged(int value) {
 void ThumbnailListView::onScrollBarRangeChanged(int min, int max) {
     Q_UNUSED(min);
     Q_UNUSED(max);
-    
+
     // 防抖逻辑：检查是否是由于样式更新导致的微小变化
     // 如果可见范围没有实质性变化，就不触发更新
     ThumbnailModel* thumbnailModel = qobject_cast<ThumbnailModel*>(model());
     if (!thumbnailModel) {
         return;
     }
-    
+
     QRect viewportRect = viewport()->rect();
     int firstVisible = indexAt(viewportRect.topLeft()).row();
     int lastVisible = indexAt(viewportRect.bottomRight()).row();
-    
-    if (firstVisible < 0) firstVisible = 0;
-    if (lastVisible < 0) lastVisible = thumbnailModel->rowCount() - 1;
-    
+
+    if (firstVisible < 0)
+        firstVisible = 0;
+    if (lastVisible < 0)
+        lastVisible = thumbnailModel->rowCount() - 1;
+
     // 如果可见范围没有变化，就不需要更新
-    if (m_visibleRange.first == firstVisible && m_visibleRange.second == lastVisible) {
+    if (m_visibleRange.first == firstVisible &&
+        m_visibleRange.second == lastVisible) {
         return;
     }
-    
-    LOG_DEBUG("ThumbnailListView: Range changed ({}~{} -> {}~{})", 
-              m_visibleRange.first, m_visibleRange.second, firstVisible, lastVisible);
+
+    LOG_DEBUG("ThumbnailListView: Range changed ({}~{} -> {}~{})",
+              m_visibleRange.first, m_visibleRange.second, firstVisible,
+              lastVisible);
     updateVisibleRange();
 }
 
@@ -647,10 +652,11 @@ void ThumbnailListView::updateVisibleRange() {
         lastVisible = thumbnailModel->rowCount() - 1;
 
     // 防抖逻辑：如果可见范围没有变化，就不重复请求缩略图
-    if (m_visibleRange.first == firstVisible && m_visibleRange.second == lastVisible) {
+    if (m_visibleRange.first == firstVisible &&
+        m_visibleRange.second == lastVisible) {
         return;
     }
-    
+
     QPair<int, int> oldRange = m_visibleRange;
     m_visibleRange = qMakePair(firstVisible, lastVisible);
 
@@ -660,7 +666,7 @@ void ThumbnailListView::updateVisibleRange() {
         QModelIndex index = thumbnailModel->index(i, 0);
         if (index.isValid()) {
             // 检查是否已经有缓存或正在加载
-            if (!thumbnailModel->hasCachedThumbnail(i) && 
+            if (!thumbnailModel->hasCachedThumbnail(i) &&
                 !thumbnailModel->isThumbnailLoading(i)) {
                 thumbnailModel->requestThumbnail(i);
                 requestCount++;
@@ -705,7 +711,7 @@ void ThumbnailListView::updateScrollBarStyle() {
     // 使用和PDF显示界面相同的动态滚动条样式
     auto& styleManager = StyleManager::instance();
     QString scrollBarStyle = styleManager.getScrollBarStyleSheet();
-    
+
     if (verticalScrollBar()) {
         verticalScrollBar()->setStyleSheet(scrollBarStyle);
     }
@@ -732,12 +738,11 @@ void ThumbnailListView::animateScrollTo(int position) {
     if (m_scrollAnimation->state() == QPropertyAnimation::Running) {
         m_scrollAnimation->stop();
     }
-    
+
     // 设置目标位置并启动动画
-    m_targetScrollPosition = qBound(verticalScrollBar()->minimum(), 
-                                   position, 
-                                   verticalScrollBar()->maximum());
-    
+    m_targetScrollPosition = qBound(verticalScrollBar()->minimum(), position,
+                                    verticalScrollBar()->maximum());
+
     m_scrollAnimation->setStartValue(verticalScrollBar()->value());
     m_scrollAnimation->setEndValue(m_targetScrollPosition);
     m_scrollAnimation->start();
@@ -752,7 +757,8 @@ void ThumbnailListView::animateScrollToPage(int pageNumber) {
 }
 
 void ThumbnailListView::stopScrollAnimation() {
-    if (m_scrollAnimation && m_scrollAnimation->state() == QPropertyAnimation::Running) {
+    if (m_scrollAnimation &&
+        m_scrollAnimation->state() == QPropertyAnimation::Running) {
         m_scrollAnimation->stop();
         m_isScrollAnimating = false;
     }
@@ -797,9 +803,9 @@ void ThumbnailListView::updatePreloadRange() {
         if (i >= m_visibleRange.first && i <= m_visibleRange.second) {
             continue;
         }
-        
+
         // 检查是否需要预加载
-        if (!thumbnailModel->hasCachedThumbnail(i) && 
+        if (!thumbnailModel->hasCachedThumbnail(i) &&
             !thumbnailModel->isThumbnailLoading(i)) {
             thumbnailModel->requestThumbnail(i);
             preloadRequestCount++;
@@ -947,7 +953,7 @@ void ThumbnailListView::optimizedUpdateVisibleRange() {
             QModelIndex index = thumbnailModel->index(i, 0);
             if (index.isValid()) {
                 // 检查是否已经有缓存或正在加载
-                if (!thumbnailModel->hasCachedThumbnail(i) && 
+                if (!thumbnailModel->hasCachedThumbnail(i) &&
                     !thumbnailModel->isThumbnailLoading(i)) {
                     thumbnailModel->requestThumbnail(i);
                     requestCount++;

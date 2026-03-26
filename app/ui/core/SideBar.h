@@ -7,9 +7,9 @@
 #include <memory>
 #include "delegate/ThumbnailDelegate.h"
 #include "model/PDFOutlineModel.h"
-#include "ui/viewer/PDFBookmarkWidget.h"
 #include "model/ThumbnailModel.h"
 #include "ui/thumbnail/ThumbnailListView.h"
+#include "ui/viewer/PDFBookmarkWidget.h"
 #include "ui/viewer/PDFOutlineWidget.h"
 
 // 前向声明

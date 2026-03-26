@@ -856,9 +856,8 @@ void PDFViewer::setupConnections() {
             &PDFViewer::onScaleChanged);
 
     // 监听 StyleManager 的样式表应用信号，确保在主题样式表应用后再更新组件
-    connect(&StyleManager::instance(), &StyleManager::styleSheetApplied, this, [this]() {
-        updateThemeUI();
-    });
+    connect(&StyleManager::instance(), &StyleManager::styleSheetApplied, this,
+            [this]() { updateThemeUI(); });
 }
 
 void PDFViewer::setupShortcuts() {
@@ -1699,7 +1698,7 @@ void PDFViewer::onScrollChanged() {
 }
 
 void PDFViewer::scrollToPageInContinuousView(int pageNumber) {
-    if (!document || currentViewMode != PDFViewMode::ContinuousScroll || 
+    if (!document || currentViewMode != PDFViewMode::ContinuousScroll ||
         pageNumber < 0 || pageNumber >= document->numPages()) {
         return;
     }
@@ -1716,17 +1715,19 @@ void PDFViewer::scrollToPageInContinuousView(int pageNumber) {
     }
 
     QWidget* pageWidget = item->widget();
-    
+
     // 计算滚动位置，将页面滚动到视口中央
-    int targetY = pageWidget->y() - (continuousScrollArea->viewport()->height() - pageWidget->height()) / 2;
-    
+    int targetY =
+        pageWidget->y() -
+        (continuousScrollArea->viewport()->height() - pageWidget->height()) / 2;
+
     // 限制在有效范围内
     QScrollBar* scrollBar = continuousScrollArea->verticalScrollBar();
     targetY = qBound(scrollBar->minimum(), targetY, scrollBar->maximum());
-    
+
     // 平滑滚动到目标位置
     scrollBar->setValue(targetY);
-    
+
     // 确保目标页面被渲染
     updateVisiblePages();
 }
@@ -1798,14 +1799,14 @@ void PDFViewer::cleanupCache() {
 
 void PDFViewer::toggleTheme() {
     STYLE.toggleTheme();
-    
+
     setMessage(QString("已切换到%1主题")
                    .arg(STYLE.currentTheme() == Theme::Dark ? "暗色" : "亮色"));
 }
 
 void PDFViewer::updateThemeUI() {
     Theme currentTheme = STYLE.currentTheme();
-    
+
     // 更新主题按钮图标
     if (currentTheme == Theme::Dark) {
         themeToggleBtn->setText("☀");
@@ -1825,24 +1826,38 @@ void PDFViewer::updateThemeUI() {
 
     // 更新所有按钮的样式
     QString buttonStyle = STYLE.getButtonStyleSheet();
-    if (firstPageBtn) firstPageBtn->setStyleSheet(buttonStyle);
-    if (prevPageBtn) prevPageBtn->setStyleSheet(buttonStyle);
-    if (nextPageBtn) nextPageBtn->setStyleSheet(buttonStyle);
-    if (lastPageBtn) lastPageBtn->setStyleSheet(buttonStyle);
-    if (zoomOutBtn) zoomOutBtn->setStyleSheet(buttonStyle);
-    if (zoomInBtn) zoomInBtn->setStyleSheet(buttonStyle);
-    if (fitWidthBtn) fitWidthBtn->setStyleSheet(buttonStyle);
-    if (fitHeightBtn) fitHeightBtn->setStyleSheet(buttonStyle);
-    if (fitPageBtn) fitPageBtn->setStyleSheet(buttonStyle);
-    if (rotateLeftBtn) rotateLeftBtn->setStyleSheet(buttonStyle);
-    if (rotateRightBtn) rotateRightBtn->setStyleSheet(buttonStyle);
-    if (themeToggleBtn) themeToggleBtn->setStyleSheet(buttonStyle);
+    if (firstPageBtn)
+        firstPageBtn->setStyleSheet(buttonStyle);
+    if (prevPageBtn)
+        prevPageBtn->setStyleSheet(buttonStyle);
+    if (nextPageBtn)
+        nextPageBtn->setStyleSheet(buttonStyle);
+    if (lastPageBtn)
+        lastPageBtn->setStyleSheet(buttonStyle);
+    if (zoomOutBtn)
+        zoomOutBtn->setStyleSheet(buttonStyle);
+    if (zoomInBtn)
+        zoomInBtn->setStyleSheet(buttonStyle);
+    if (fitWidthBtn)
+        fitWidthBtn->setStyleSheet(buttonStyle);
+    if (fitHeightBtn)
+        fitHeightBtn->setStyleSheet(buttonStyle);
+    if (fitPageBtn)
+        fitPageBtn->setStyleSheet(buttonStyle);
+    if (rotateLeftBtn)
+        rotateLeftBtn->setStyleSheet(buttonStyle);
+    if (rotateRightBtn)
+        rotateRightBtn->setStyleSheet(buttonStyle);
+    if (themeToggleBtn)
+        themeToggleBtn->setStyleSheet(buttonStyle);
 
     // 更新滚动区域样式
     QString scrollStyle =
         STYLE.getPDFViewerStyleSheet() + STYLE.getScrollBarStyleSheet();
-    if (singlePageScrollArea) singlePageScrollArea->setStyleSheet(scrollStyle);
-    if (continuousScrollArea) continuousScrollArea->setStyleSheet(scrollStyle);
+    if (singlePageScrollArea)
+        singlePageScrollArea->setStyleSheet(scrollStyle);
+    if (continuousScrollArea)
+        continuousScrollArea->setStyleSheet(scrollStyle);
 
     // 递归更新所有子控件的样式，强制重新绘制
     QList<QWidget*> allWidgets = findChildren<QWidget*>();
@@ -1852,7 +1867,7 @@ void PDFViewer::updateThemeUI() {
         widget->style()->polish(widget);
         widget->update();
     }
-    
+
     // 强制整体重绘
     update();
     repaint();

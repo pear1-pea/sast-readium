@@ -1,5 +1,4 @@
 #include "LoggingMacros.h"
-#include "LoggingManager.h"
 #include <QCoreApplication>
 #include <QFileInfo>
 #include <QMutex>
@@ -7,6 +6,7 @@
 #include <QProcess>
 #include <QThread>
 #include <chrono>
+#include "LoggingManager.h"
 
 // ============================================================================
 // Platform-specific includes for memory usage

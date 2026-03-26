@@ -123,9 +123,8 @@ DebugLogPanel::DebugLogPanel(QWidget* parent)
             this, &DebugLogPanel::onLogMessageDetailed, Qt::QueuedConnection);
 
     // Connect to theme changes
-    connect(&STYLE, &StyleManager::styleSheetApplied, this, [this]() {
-        applyTheme();
-    });
+    connect(&STYLE, &StyleManager::styleSheetApplied, this,
+            [this]() { applyTheme(); });
 
     // Apply initial theme
     applyTheme();

@@ -41,8 +41,8 @@
 #include <QWheelEvent>
 #include <QWidget>
 #include <QtGlobal>
-#include "model/SearchModel.h"
 #include "PDFAnimations.h"
+#include "model/SearchModel.h"
 
 #ifdef ENABLE_QGRAPHICS_PDF_SUPPORT
 #include "QGraphicsPDFViewer.h"
@@ -111,7 +111,7 @@ private:
     double currentScaleFactor;
     int currentRotation;
     QPixmap renderedPixmap;
-    QPixmap originalPixmap;      // 保存原始渲染的pixmap，用于快速缩放
+    QPixmap originalPixmap;  // 保存原始渲染的pixmap，用于快速缩放
     double originalScaleFactor;  // 原始pixmap的缩放因子
     bool isDragging;
     QPoint lastPanPoint;

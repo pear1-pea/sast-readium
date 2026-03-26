@@ -1,5 +1,5 @@
 #include "ThumbnailContextMenu.h"
-#include <poppler-qt6.h>
+#include <poppler/qt6/poppler-qt6.h>
 #include <QApplication>
 #include <QClipboard>
 #include <QDateTime>
@@ -327,7 +327,8 @@ void ThumbnailContextMenu::onShowPageInfo() {
 
 void ThumbnailContextMenu::onSetAsBookmark() {
     if (m_currentPage >= 0) {
-        LOG_INFO("ThumbnailContextMenu: User added bookmark at page {}", m_currentPage + 1);
+        LOG_INFO("ThumbnailContextMenu: User added bookmark at page {}",
+                 m_currentPage + 1);
         // Emit signal to notify the application to add bookmark
         emit bookmarkRequested(m_currentPage);
 
@@ -346,7 +347,10 @@ void ThumbnailContextMenu::copyPageToClipboard(int pageNumber) {
     try {
         std::unique_ptr<Poppler::Page> page(m_document->page(pageNumber));
         if (!page) {
-            LOG_WARNING("ThumbnailContextMenu: Failed to get page content for copying - page {}", pageNumber);
+            LOG_WARNING(
+                "ThumbnailContextMenu: Failed to get page content for copying "
+                "- page {}",
+                pageNumber);
             QMessageBox::warning(parentWidget(), "错误", "无法获取页面内容");
             return;
         }
@@ -354,7 +358,9 @@ void ThumbnailContextMenu::copyPageToClipboard(int pageNumber) {
         // 渲染页面为图像
         QImage image = page->renderToImage(COPY_DPI, COPY_DPI);
         if (image.isNull()) {
-            LOG_WARNING("ThumbnailContextMenu: Failed to render page image - page {}", pageNumber);
+            LOG_WARNING(
+                "ThumbnailContextMenu: Failed to render page image - page {}",
+                pageNumber);
             QMessageBox::warning(parentWidget(), "错误", "无法渲染页面图像");
             return;
         }
@@ -369,7 +375,9 @@ void ThumbnailContextMenu::copyPageToClipboard(int pageNumber) {
             QString("第 %1 页图像已复制到剪贴板").arg(pageNumber + 1));
 
     } catch (const std::exception& e) {
-        LOG_ERROR("ThumbnailContextMenu: Exception while copying page {} - error: {}", pageNumber, e.what());
+        LOG_ERROR(
+            "ThumbnailContextMenu: Exception while copying page {} - error: {}",
+            pageNumber, e.what());
         QMessageBox::critical(parentWidget(), "错误",
                               QString("复制页面时发生错误: %1").arg(e.what()));
     }
@@ -408,7 +416,10 @@ void ThumbnailContextMenu::exportPageToFile(int pageNumber) {
             // 导出为图像格式
             QImage image = page->renderToImage(EXPORT_DPI, EXPORT_DPI);
             if (image.isNull()) {
-                LOG_WARNING("ThumbnailContextMenu: Failed to render page image for export - page {}", pageNumber);
+                LOG_WARNING(
+                    "ThumbnailContextMenu: Failed to render page image for "
+                    "export - page {}",
+                    pageNumber);
                 QMessageBox::warning(parentWidget(), "错误",
                                      "无法渲染页面图像");
                 return;
@@ -417,20 +428,29 @@ void ThumbnailContextMenu::exportPageToFile(int pageNumber) {
             QString format =
                 (extension == "jpg" || extension == "jpeg") ? "JPEG" : "PNG";
             if (!image.save(filePath, format.toUtf8().constData())) {
-                LOG_ERROR("ThumbnailContextMenu: Failed to save file - page {}, path: {}", pageNumber, filePath.toStdString());
+                LOG_ERROR(
+                    "ThumbnailContextMenu: Failed to save file - page {}, "
+                    "path: {}",
+                    pageNumber, filePath.toStdString());
                 QMessageBox::critical(parentWidget(), "错误", "保存文件失败");
                 return;
             }
         }
 
-        LOG_INFO("ThumbnailContextMenu: Page exported successfully - page {}, path: {}", pageNumber + 1, filePath.toStdString());
+        LOG_INFO(
+            "ThumbnailContextMenu: Page exported successfully - page {}, path: "
+            "{}",
+            pageNumber + 1, filePath.toStdString());
         QMessageBox::information(parentWidget(), "导出成功",
                                  QString("第 %1 页已成功导出到:\n%2")
                                      .arg(pageNumber + 1)
                                      .arg(filePath));
 
     } catch (const std::exception& e) {
-        LOG_ERROR("ThumbnailContextMenu: Exception while exporting page {} - error: {}", pageNumber, e.what());
+        LOG_ERROR(
+            "ThumbnailContextMenu: Exception while exporting page {} - error: "
+            "{}",
+            pageNumber, e.what());
         QMessageBox::critical(parentWidget(), "错误",
                               QString("导出页面时发生错误: %1").arg(e.what()));
     }

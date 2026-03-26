@@ -118,10 +118,9 @@ public:
         const QString& pattern = "[%Y-%m-%d %H:%M:%S.%e] [%n] [%^%l%$] %v",
         Logger::LogLevel consoleLevel = Logger::LogLevel::Debug,
         const QString& fileName = "sast-readium.log",
-        size_t maxFileSize = 10 * 1024 * 1024,
-        size_t maxFiles = 5,
+        size_t maxFileSize = 10 * 1024 * 1024, size_t maxFiles = 5,
         Logger::LogLevel fileLevel = Logger::LogLevel::Info);
-    
+
     // Convert from LoggingConfig to LoggingConfiguration
     static LoggingConfiguration fromLoggingConfig(const LoggingConfig& config);
 
