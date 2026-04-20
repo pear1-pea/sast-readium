@@ -81,7 +81,7 @@ LoggingConfigBuilder configBuilder;
 configBuilder.useDevelopmentPreset()
              .setGlobalLevel(Logger::LogLevel::Debug)
              .addConsoleSink("console", Logger::LogLevel::Debug)
-             .addFileSink("file", "logs/debug.log", Logger::LogLevel::Info);
+             .addRotatingFileSink("file", "logs/debug.log", 10 * 1024 * 1024, 5, Logger::LogLevel::Info);
 
 LoggingManager::instance().initialize(configBuilder.build());
 ```
@@ -92,7 +92,7 @@ LoggingManager::instance().initialize(configBuilder.build());
 LoggingConfigBuilder configBuilder;
 configBuilder.useProductionPreset()
              .setGlobalLevel(Logger::LogLevel::Warning)
-             .addFileSink("file", "logs/app.log", Logger::LogLevel::Warning);
+             .addRotatingFileSink("file", "logs/app.log", 10 * 1024 * 1024, 5, Logger::LogLevel::Warning);
 
 LoggingManager::instance().initialize(configBuilder.build());
 ```
@@ -105,7 +105,7 @@ LoggingManager::instance().setGlobalLogLevel(Logger::LogLevel::Debug);
 
 // Enable/disable specific sinks
 LoggingManager::instance().enableConsoleLogging(Logger::LogLevel::Info);
-LoggingManager::instance().enableFileLogging("logs/runtime.log", Logger::LogLevel::Warning);
+LoggingManager::instance().enableRotatingFileLogging("logs/runtime.log", Logger::LogLevel::Warning);
 ```
 
 ## Qt Integration

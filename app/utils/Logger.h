@@ -2,7 +2,6 @@
 
 #include <fmt/format.h>
 #include <spdlog/fmt/fmt.h>
-#include <spdlog/sinks/basic_file_sink.h>
 #include <spdlog/sinks/qt_sinks.h>
 #include <spdlog/sinks/rotating_file_sink.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
@@ -35,7 +34,7 @@ public:
         Off = 6
     };
 
-    enum class SinkType { Console, File, RotatingFile, QtWidget };
+    enum class SinkType { Console, RotatingFile, QtWidget };
 
     struct LoggerConfig {
         LogLevel level;
@@ -44,7 +43,7 @@ public:
         size_t maxFileSize;
         size_t maxFiles;
         bool enableConsole;
-        bool enableFile;
+        bool enableRotatingFile;
         bool enableQtWidget;
         QTextEdit* qtWidget;
 
@@ -54,7 +53,7 @@ public:
             const QString& logFileName = "sast-readium.log",
             size_t maxFileSize = 1024 * 1024 * 10,  // 10MB
             size_t maxFiles = 3, bool enableConsole = true,
-            bool enableFile = true, bool enableQtWidget = false,
+            bool enableRotatingFile = true, bool enableQtWidget = false,
             QTextEdit* qtWidget = nullptr)
             : level(level),
               pattern(pattern),
@@ -62,7 +61,7 @@ public:
               maxFileSize(maxFileSize),
               maxFiles(maxFiles),
               enableConsole(enableConsole),
-              enableFile(enableFile),
+              enableRotatingFile(enableRotatingFile),
               enableQtWidget(enableQtWidget),
               qtWidget(qtWidget) {}
     };
@@ -77,7 +76,6 @@ public:
 
     // Sink management
     void addConsoleSink();
-    void addFileSink(const QString& filename);
     void addRotatingFileSink(const QString& filename, size_t maxSize,
                              size_t maxFiles);
     void addQtWidgetSink(QTextEdit* widget);

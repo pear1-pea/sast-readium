@@ -209,7 +209,7 @@ void LoggingManager::initializeLogger() {
     loggerConfig.level = m_config.globalLogLevel;
     loggerConfig.pattern = m_config.logPattern;
     loggerConfig.enableConsole = m_config.enableConsoleLogging;
-    loggerConfig.enableFile = m_config.enableFileLogging;
+    loggerConfig.enableRotatingFile = m_config.enableFileLogging;
     loggerConfig.enableQtWidget = m_config.enableQtWidgetLogging;
     loggerConfig.qtWidget = m_qtLogWidget;
     loggerConfig.logFileName = getLogFilePath();

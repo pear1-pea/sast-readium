@@ -1,5 +1,4 @@
 #include "Logger.h"
-#include <spdlog/sinks/basic_file_sink.h>
 #include <spdlog/sinks/qt_sinks.h>
 #include <spdlog/sinks/rotating_file_sink.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
@@ -30,8 +29,8 @@ void Logger::initialize(const LoggerConfig& config) {
             addConsoleSink();
         }
 
-        // Add file sink if enabled
-        if (m_config.enableFile) {
+        // Add rotating file sink if enabled
+        if (m_config.enableRotatingFile) {
             // Create logs directory if it doesn't exist
             QString logDir = QStandardPaths::writableLocation(
                                  QStandardPaths::AppDataLocation) +
@@ -116,21 +115,6 @@ void Logger::addConsoleSink() {
     auto console_sink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
     console_sink->set_level(toSpdlogLevel(m_config.level));
     m_sinks.push_back(console_sink);
-}
-
-void Logger::addFileSink(const QString& filename) {
-    try {
-        auto file_sink = std::make_shared<spdlog::sinks::basic_file_sink_mt>(
-            filename.toStdString(), true);
-        file_sink->set_level(toSpdlogLevel(m_config.level));
-        m_sinks.push_back(file_sink);
-    } catch (const std::exception& e) {
-        // If we can't create file sink, log error to console
-        if (m_logger) {
-            error("Failed to create file sink '{}': {}", filename.toStdString(),
-                  e.what());
-        }
-    }
 }
 
 void Logger::addRotatingFileSink(const QString& filename, size_t maxSize,

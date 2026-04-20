@@ -298,8 +298,8 @@ void LoggingConfig::enableConsoleLogging(Logger::LogLevel level, bool colored) {
     addSinkConfiguration(config);
 }
 
-void LoggingConfig::enableFileLogging(const QString& filename,
-                                      Logger::LogLevel level) {
+void LoggingConfig::enableRotatingFileLogging(const QString& filename,
+                                              Logger::LogLevel level) {
     SinkConfiguration config;
     config.name = "file";
     config.type = "rotating_file";
@@ -324,7 +324,8 @@ void LoggingConfig::loadDevelopmentPreset() {
         QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) +
         "/logs";
     QDir().mkpath(logDir);
-    enableFileLogging(logDir + "/sast-readium-dev.log", Logger::LogLevel::Info);
+    enableRotatingFileLogging(logDir + "/sast-readium-dev.log",
+                              Logger::LogLevel::Info);
 
     // Enable performance and memory logging
     m_globalConfig.enablePerformanceLogging = true;
@@ -344,7 +345,8 @@ void LoggingConfig::loadProductionPreset() {
         QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) +
         "/logs";
     QDir().mkpath(logDir);
-    enableFileLogging(logDir + "/sast-readium.log", Logger::LogLevel::Warning);
+    enableRotatingFileLogging(logDir + "/sast-readium.log",
+                              Logger::LogLevel::Warning);
 
     // Production settings
     m_globalConfig.globalLevel = Logger::LogLevel::Warning;
@@ -711,18 +713,6 @@ LoggingConfigBuilder& LoggingConfigBuilder::setGlobalPattern(
 LoggingConfigBuilder& LoggingConfigBuilder::addConsoleSink(
     const QString& name, Logger::LogLevel level) {
     m_config->enableConsoleLogging(level, true);
-    return *this;
-}
-
-LoggingConfigBuilder& LoggingConfigBuilder::addFileSink(
-    const QString& name, const QString& filename, Logger::LogLevel level) {
-    LoggingConfig::SinkConfiguration sinkConfig;
-    sinkConfig.name = name;
-    sinkConfig.type = "file";
-    sinkConfig.level = level;
-    sinkConfig.filename = filename;
-    sinkConfig.enabled = true;
-    m_config->addSinkConfiguration(sinkConfig);
     return *this;
 }
 

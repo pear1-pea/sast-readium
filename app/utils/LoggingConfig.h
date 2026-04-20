@@ -148,8 +148,9 @@ public:
     // Convenience methods for common configurations
     void enableConsoleLogging(Logger::LogLevel level = Logger::LogLevel::Debug,
                               bool colored = true);
-    void enableFileLogging(const QString& filename,
-                           Logger::LogLevel level = Logger::LogLevel::Info);
+    void enableRotatingFileLogging(
+        const QString& filename,
+        Logger::LogLevel level = Logger::LogLevel::Info);
     void enableRotatingFileLogging(
         const QString& filename, size_t maxSize, size_t maxFiles,
         Logger::LogLevel level = Logger::LogLevel::Info);
@@ -285,9 +286,6 @@ public:
     LoggingConfigBuilder& addConsoleSink(
         const QString& name = "console",
         Logger::LogLevel level = Logger::LogLevel::Debug);
-    LoggingConfigBuilder& addFileSink(
-        const QString& name, const QString& filename,
-        Logger::LogLevel level = Logger::LogLevel::Info);
     LoggingConfigBuilder& addRotatingFileSink(
         const QString& name, const QString& filename, size_t maxSize,
         size_t maxFiles, Logger::LogLevel level = Logger::LogLevel::Info);
