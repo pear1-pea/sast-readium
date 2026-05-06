@@ -48,9 +48,15 @@ public:
 
     /**
      * @brief Add Qt logging category mapping to spdlog logger
+     *
+     * @param category   Qt logging category name
+     * @param spdlogLogger  Target spdlog logger name (empty = use category)
+     * @param minLevel   Minimum log level for this category
+     *                   Messages below this level will be filtered out
      */
-    void addCategoryMapping(const QString& category,
-                            const QString& spdlogLogger = "");
+    void addCategoryMapping(
+        const QString& category, const QString& spdlogLogger = "",
+        Logger::LogLevel minLevel = Logger::LogLevel::Trace);
 
     /**
      * @brief Remove Qt logging category mapping
@@ -81,7 +87,12 @@ private:
     bool m_handlerInstalled = false;
     bool m_categoryFilteringEnabled = true;
     QtMessageHandler m_previousHandler = nullptr;
-    QHash<QString, QString> m_categoryMappings;
+
+    struct CategoryMapping {
+        QString loggerName;
+        Logger::LogLevel minLevel;
+    };
+    QHash<QString, CategoryMapping> m_categoryMappings;
 };
 
 /**
@@ -181,6 +192,14 @@ public:
     bool isInfoEnabled() const;
     bool isWarningEnabled() const;
     bool isCriticalEnabled() const;
+
+    /**
+     * @brief Set the minimum enabled log level for this category
+     *
+     * Messages below this level will be filtered out by isXxxEnabled() checks.
+     */
+    void setEnabledLevel(Logger::LogLevel level) { m_enabledLevel = level; }
+    Logger::LogLevel enabledLevel() const { return m_enabledLevel; }
 
     SpdlogQDebug debug() const;
     SpdlogQDebug info() const;

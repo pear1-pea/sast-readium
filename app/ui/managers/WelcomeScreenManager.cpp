@@ -11,11 +11,14 @@ const QString WelcomeScreenManager::SETTINGS_ENABLED_KEY = "showWelcomeScreen";
 const QString WelcomeScreenManager::SETTINGS_SHOW_ON_STARTUP_KEY =
     "showWelcomeScreenOnStartup";
 
-WelcomeScreenManager::WelcomeScreenManager(QObject* parent)
+WelcomeScreenManager::WelcomeScreenManager(MainWindow* mainWindow,
+                                           WelcomeWidget* welcomeWidget,
+                                           DocumentModel* documentModel,
+                                           QObject* parent)
     : QObject(parent),
-      m_mainWindow(nullptr),
-      m_welcomeWidget(nullptr),
-      m_documentModel(nullptr),
+      m_mainWindow(mainWindow),
+      m_welcomeWidget(welcomeWidget),
+      m_documentModel(documentModel),
       m_settings(nullptr),
       m_welcomeScreenEnabled(DEFAULT_ENABLED),
       m_welcomeScreenVisible(false),
@@ -32,6 +35,9 @@ WelcomeScreenManager::WelcomeScreenManager(QObject* parent)
     connect(m_visibilityCheckTimer, &QTimer::timeout, this,
             &WelcomeScreenManager::onDelayedVisibilityCheck);
 
+    // 立即建立所有连接
+    setupConnections();
+
     m_isInitialized = true;
     qDebug() << "WelcomeScreenManager: Initialization completed";
 }
@@ -39,64 +45,6 @@ WelcomeScreenManager::WelcomeScreenManager(QObject* parent)
 WelcomeScreenManager::~WelcomeScreenManager() {
     qDebug() << "WelcomeScreenManager: Destroying...";
     saveSettings();
-}
-
-void WelcomeScreenManager::setMainWindow(MainWindow* mainWindow) {
-    if (m_mainWindow == mainWindow)
-        return;
-
-    // 断开旧连接
-    if (m_mainWindow) {
-        // 这里可以添加断开连接的代码
-    }
-
-    m_mainWindow = mainWindow;
-
-    // 建立新连接
-    if (m_mainWindow) {
-        setupConnections();
-    }
-
-    qDebug() << "WelcomeScreenManager: MainWindow set";
-}
-
-void WelcomeScreenManager::setWelcomeWidget(WelcomeWidget* welcomeWidget) {
-    if (m_welcomeWidget == welcomeWidget)
-        return;
-
-    m_welcomeWidget = welcomeWidget;
-
-    if (m_welcomeWidget) {
-        m_welcomeWidget->setWelcomeScreenManager(this);
-    }
-
-    qDebug() << "WelcomeScreenManager: WelcomeWidget set";
-}
-
-void WelcomeScreenManager::setDocumentModel(DocumentModel* documentModel) {
-    if (m_documentModel == documentModel)
-        return;
-
-    // 断开旧连接
-    if (m_documentModel) {
-        disconnect(m_documentModel, nullptr, this, nullptr);
-    }
-
-    m_documentModel = documentModel;
-
-    // 建立新连接
-    if (m_documentModel) {
-        connect(m_documentModel, &DocumentModel::documentOpened, this,
-                &WelcomeScreenManager::onDocumentOpened);
-        connect(m_documentModel, &DocumentModel::documentClosed, this,
-                &WelcomeScreenManager::onDocumentClosed);
-        connect(m_documentModel, &DocumentModel::currentDocumentChanged, this,
-                &WelcomeScreenManager::onDocumentModelChanged);
-        connect(m_documentModel, &DocumentModel::allDocumentsClosed, this,
-                &WelcomeScreenManager::onDocumentModelChanged);
-    }
-
-    qDebug() << "WelcomeScreenManager: DocumentModel set";
 }
 
 bool WelcomeScreenManager::isWelcomeScreenEnabled() const {
@@ -268,8 +216,17 @@ void WelcomeScreenManager::initializeSettings() {
 }
 
 void WelcomeScreenManager::setupConnections() {
-    // 这里可以添加与MainWindow的连接
-    // 目前MainWindow的信号还没有定义，所以暂时留空
+    // 连接 DocumentModel 信号
+    if (m_documentModel) {
+        connect(m_documentModel, &DocumentModel::documentOpened, this,
+                &WelcomeScreenManager::onDocumentOpened);
+        connect(m_documentModel, &DocumentModel::documentClosed, this,
+                &WelcomeScreenManager::onDocumentClosed);
+        connect(m_documentModel, &DocumentModel::currentDocumentChanged, this,
+                &WelcomeScreenManager::onDocumentModelChanged);
+        connect(m_documentModel, &DocumentModel::allDocumentsClosed, this,
+                &WelcomeScreenManager::onDocumentModelChanged);
+    }
 }
 
 void WelcomeScreenManager::updateWelcomeScreenVisibility() {

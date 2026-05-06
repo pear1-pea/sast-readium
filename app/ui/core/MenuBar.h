@@ -12,7 +12,7 @@ class MenuBar : public QMenuBar {
     Q_OBJECT
 
 public:
-    MenuBar(QWidget* parent = nullptr);
+    MenuBar(RecentFilesManager* recentFilesManager, QWidget* parent = nullptr);
 
 signals:
     void onExecuted(ActionMap id, QWidget* context = nullptr);
@@ -23,7 +23,6 @@ signals:
     void debugPanelExportRequested();
 
 public slots:
-    void setRecentFilesManager(RecentFilesManager* manager);
     void setWelcomeScreenEnabled(bool enabled);
 
 private slots:

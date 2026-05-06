@@ -185,8 +185,9 @@ void DocumentController::initializeCommandMap() {
         {ActionMap::saveFile, [this](QWidget* ctx) { /*....save()....*/ }}};
 }
 
-DocumentController::DocumentController(DocumentModel* model)
-    : documentModel(model), recentFilesManager(nullptr) {
+DocumentController::DocumentController(DocumentModel* model,
+                                       RecentFilesManager* recentFilesManager)
+    : documentModel(model), recentFilesManager(recentFilesManager) {
     initializeCommandMap();
 }
 
@@ -255,10 +256,6 @@ bool DocumentController::closeCurrentDocument() {
 
 void DocumentController::switchToDocument(int index) {
     documentModel->switchToDocument(index);
-}
-
-void DocumentController::setRecentFilesManager(RecentFilesManager* manager) {
-    recentFilesManager = manager;
 }
 
 void DocumentController::showDocumentMetadata(QWidget* parent) {

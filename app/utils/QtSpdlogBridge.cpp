@@ -17,8 +17,9 @@ void QtSpdlogBridge::initialize() {
     installMessageHandler();
 
     // Add some default category mappings
-    addCategoryMapping("qt", "qt");
-    addCategoryMapping("default", "qt.default");
+    // Qt internal messages: only warnings and above by default
+    addCategoryMapping("qt", "qt", Logger::LogLevel::Warning);
+    addCategoryMapping("default", "qt.default", Logger::LogLevel::Trace);
 }
 
 void QtSpdlogBridge::installMessageHandler() {
@@ -50,6 +51,19 @@ void QtSpdlogBridge::handleQtMessage(QtMsgType type,
                                      const QMessageLogContext& context,
                                      const QString& message) {
     Logger::LogLevel level = qtMsgTypeToLogLevel(type);
+    QString category =
+        context.category ? QString::fromUtf8(context.category) : QString();
+
+    // Category-based filtering: skip messages below the mapped minimum level
+    if (m_categoryFilteringEnabled && !category.isEmpty()) {
+        auto it = m_categoryMappings.constFind(category);
+        if (it != m_categoryMappings.constEnd()) {
+            if (level < it->minLevel) {
+                return;  // Filtered out
+            }
+        }
+    }
+
     QString formattedMessage = formatQtMessage(type, context, message);
 
     // Get the logger instance and log the message
@@ -120,9 +134,10 @@ void QtSpdlogBridge::setQtCategoryFilteringEnabled(bool enabled) {
 }
 
 void QtSpdlogBridge::addCategoryMapping(const QString& category,
-                                        const QString& spdlogLogger) {
-    m_categoryMappings[category] =
-        spdlogLogger.isEmpty() ? category : spdlogLogger;
+                                        const QString& spdlogLogger,
+                                        Logger::LogLevel minLevel) {
+    m_categoryMappings[category] = {
+        spdlogLogger.isEmpty() ? category : spdlogLogger, minLevel};
 }
 
 void QtSpdlogBridge::removeCategoryMapping(const QString& category) {

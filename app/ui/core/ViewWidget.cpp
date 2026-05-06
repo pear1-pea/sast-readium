@@ -3,12 +3,31 @@
 #include <QLabel>
 #include "../viewer/PDFViewer.h"
 
-ViewWidget::ViewWidget(QWidget* parent)
+ViewWidget::ViewWidget(DocumentController* controller, DocumentModel* model,
+                       QWidget* parent)
     : QWidget(parent),
-      documentController(nullptr),
-      documentModel(nullptr),
+      documentController(controller),
+      documentModel(model),
       outlineModel(nullptr) {
     setupUI();
+
+    // 立即连接 documentModel 信号（不再需要等 setter 调用）
+    if (documentModel) {
+        connect(documentModel, &DocumentModel::documentOpened, this,
+                &ViewWidget::onDocumentOpened);
+        connect(documentModel, &DocumentModel::documentClosed, this,
+                &ViewWidget::onDocumentClosed);
+        connect(documentModel, &DocumentModel::currentDocumentChanged, this,
+                &ViewWidget::onCurrentDocumentChanged);
+        connect(documentModel, &DocumentModel::allDocumentsClosed, this,
+                &ViewWidget::onAllDocumentsClosed);
+        connect(documentModel, &DocumentModel::loadingStarted, this,
+                &ViewWidget::onDocumentLoadingStarted);
+        connect(documentModel, &DocumentModel::loadingProgressChanged, this,
+                &ViewWidget::onDocumentLoadingProgress);
+        connect(documentModel, &DocumentModel::loadingFailed, this,
+                &ViewWidget::onDocumentLoadingFailed);
+    }
 }
 
 void ViewWidget::setupUI() {
@@ -52,37 +71,6 @@ void ViewWidget::setupConnections() {
             &ViewWidget::onTabMoved);
     connect(tabWidget, &DocumentTabWidget::allTabsClosed, this,
             &ViewWidget::onAllDocumentsClosed);
-}
-
-void ViewWidget::setDocumentController(DocumentController* controller) {
-    documentController = controller;
-}
-
-void ViewWidget::setDocumentModel(DocumentModel* model) {
-    if (documentModel) {
-        // 断开旧模型的连接
-        disconnect(documentModel, nullptr, this, nullptr);
-    }
-
-    documentModel = model;
-
-    if (documentModel) {
-        // 连接新模型的信号
-        connect(documentModel, &DocumentModel::documentOpened, this,
-                &ViewWidget::onDocumentOpened);
-        connect(documentModel, &DocumentModel::documentClosed, this,
-                &ViewWidget::onDocumentClosed);
-        connect(documentModel, &DocumentModel::currentDocumentChanged, this,
-                &ViewWidget::onCurrentDocumentChanged);
-        connect(documentModel, &DocumentModel::allDocumentsClosed, this,
-                &ViewWidget::onAllDocumentsClosed);
-        connect(documentModel, &DocumentModel::loadingStarted, this,
-                &ViewWidget::onDocumentLoadingStarted);
-        connect(documentModel, &DocumentModel::loadingProgressChanged, this,
-                &ViewWidget::onDocumentLoadingProgress);
-        connect(documentModel, &DocumentModel::loadingFailed, this,
-                &ViewWidget::onDocumentLoadingFailed);
-    }
 }
 
 void ViewWidget::setOutlineModel(PDFOutlineModel* model) {

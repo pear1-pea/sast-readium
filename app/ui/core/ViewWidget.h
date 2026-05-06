@@ -13,11 +13,10 @@ class ViewWidget : public QWidget {
     Q_OBJECT
 
 public:
-    ViewWidget(QWidget* parent = nullptr);
+    ViewWidget(DocumentController* controller, DocumentModel* model,
+               QWidget* parent = nullptr);
 
-    // 设置控制器和模型
-    void setDocumentController(DocumentController* controller);
-    void setDocumentModel(DocumentModel* model);
+    // 设置目录模型（保留，因为目录模型是动态变化的）
     void setOutlineModel(PDFOutlineModel* model);
 
     // 文档操作

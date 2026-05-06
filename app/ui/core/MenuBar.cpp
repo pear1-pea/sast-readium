@@ -6,15 +6,22 @@
 #include <QMenu>
 #include "managers/StyleManager.h"
 
-MenuBar::MenuBar(QWidget* parent)
+MenuBar::MenuBar(RecentFilesManager* recentFilesManager, QWidget* parent)
     : QMenuBar(parent),
-      m_recentFilesManager(nullptr),
+      m_recentFilesManager(recentFilesManager),
       m_recentFilesMenu(nullptr),
       m_clearRecentFilesAction(nullptr) {
     createFileMenu();
     createTabMenu();
     createViewMenu();
     createThemeMenu();
+
+    // 立即设置最近文件菜单连接
+    if (m_recentFilesManager) {
+        connect(m_recentFilesManager, &RecentFilesManager::recentFilesChanged,
+                this, &MenuBar::updateRecentFilesMenu);
+        updateRecentFilesMenu();
+    }
 }
 
 void MenuBar::createFileMenu() {
@@ -240,20 +247,6 @@ void MenuBar::createThemeMenu() {
             STYLE.setDarkTheme();
         }
     });
-}
-
-void MenuBar::setRecentFilesManager(RecentFilesManager* manager) {
-    if (m_recentFilesManager) {
-        disconnect(m_recentFilesManager, nullptr, this, nullptr);
-    }
-
-    m_recentFilesManager = manager;
-
-    if (m_recentFilesManager) {
-        connect(m_recentFilesManager, &RecentFilesManager::recentFilesChanged,
-                this, &MenuBar::updateRecentFilesMenu);
-        updateRecentFilesMenu();
-    }
 }
 
 void MenuBar::setWelcomeScreenEnabled(bool enabled) {

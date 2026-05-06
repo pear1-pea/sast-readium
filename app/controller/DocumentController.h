@@ -23,7 +23,8 @@ private:
     void initializeCommandMap();
 
 public:
-    DocumentController(DocumentModel* model);
+    DocumentController(DocumentModel* model,
+                       RecentFilesManager* recentFilesManager = nullptr);
     ~DocumentController() = default;
     void execute(ActionMap actionID, QWidget* context);
 
@@ -39,8 +40,7 @@ public:
     // 文件夹扫描功能
     QStringList scanFolderForPDFs(const QString& folderPath);
 
-    // 最近文件管理
-    void setRecentFilesManager(RecentFilesManager* manager);
+    // 获取最近文件管理器
     RecentFilesManager* getRecentFilesManager() const {
         return recentFilesManager;
     }

@@ -70,9 +70,6 @@ public:
     bool isValidIndex(int index) const;
     bool isNULL();
 
-    // 最近文件管理器设置
-    void setRecentFilesManager(RecentFilesManager* manager);
-
 signals:
     void documentOpened(int index, const QString& fileName);
     void documentClosed(int index);

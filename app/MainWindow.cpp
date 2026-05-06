@@ -99,19 +99,12 @@ void MainWindow::initWindow() { resize(1280, 800); }
 void MainWindow::initContent() {
     WidgetFactory* factory = new WidgetFactory(pageController, this);
 
-    menuBar = new MenuBar(this);
+    menuBar = new MenuBar(recentFilesManager, this);
     toolBar = new ToolBar(this);
     sideBar = new SideBar(this);
     rightSideBar = new RightSideBar(this);
     statusBar = new StatusBar(factory, this);
-    viewWidget = new ViewWidget(this);
-
-    // 设置菜单栏的最近文件管理器
-    menuBar->setRecentFilesManager(recentFilesManager);
-
-    // 设置ViewWidget的控制器和模型
-    viewWidget->setDocumentController(documentController);
-    viewWidget->setDocumentModel(documentModel);
+    viewWidget = new ViewWidget(documentController, documentModel, this);
 
     setMenuBar(menuBar);
     addToolBar(toolBar);
@@ -172,11 +165,9 @@ void MainWindow::initModel() {
 }
 
 void MainWindow::initController() {
-    documentController = new DocumentController(documentModel);
+    documentController =
+        new DocumentController(documentModel, recentFilesManager);
     pageController = new PageController(pageModel);
-
-    // 设置最近文件管理器
-    documentController->setRecentFilesManager(recentFilesManager);
 }
 
 void MainWindow::initWelcomeScreen() {
@@ -189,11 +180,9 @@ void MainWindow::initWelcomeScreen() {
     m_welcomeWidget = new WelcomeWidget(this);
     m_welcomeWidget->setRecentFilesManager(recentFilesManager);
 
-    // 创建欢迎界面管理器
-    m_welcomeScreenManager = new WelcomeScreenManager(this);
-    m_welcomeScreenManager->setMainWindow(this);
-    m_welcomeScreenManager->setWelcomeWidget(m_welcomeWidget);
-    m_welcomeScreenManager->setDocumentModel(documentModel);
+    // 创建欢迎界面管理器，一次性传入所有依赖
+    m_welcomeScreenManager =
+        new WelcomeScreenManager(this, m_welcomeWidget, documentModel, this);
 
     // 设置管理器到欢迎界面
     m_welcomeWidget->setWelcomeScreenManager(m_welcomeScreenManager);

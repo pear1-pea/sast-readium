@@ -16,13 +16,11 @@ class WelcomeScreenManager : public QObject {
     Q_OBJECT
 
 public:
-    explicit WelcomeScreenManager(QObject* parent = nullptr);
+    explicit WelcomeScreenManager(MainWindow* mainWindow,
+                                  WelcomeWidget* welcomeWidget,
+                                  DocumentModel* documentModel,
+                                  QObject* parent = nullptr);
     ~WelcomeScreenManager();
-
-    // 设置相关组件
-    void setMainWindow(MainWindow* mainWindow);
-    void setWelcomeWidget(WelcomeWidget* welcomeWidget);
-    void setDocumentModel(DocumentModel* documentModel);
 
     // 欢迎界面控制
     bool isWelcomeScreenEnabled() const;

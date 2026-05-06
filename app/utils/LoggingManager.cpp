@@ -223,6 +223,54 @@ void LoggingManager::initializeQtBridge() {
     QtSpdlogBridge& bridge = QtSpdlogBridge::instance();
     bridge.initialize();
     bridge.setQtCategoryFilteringEnabled(m_config.enableQtCategoryFiltering);
+
+    // Sync existing category levels to the bridge
+    for (auto it = m_categoryLevels.constBegin();
+         it != m_categoryLevels.constEnd(); ++it) {
+        bridge.addCategoryMapping(it.key(), it.key(), it.value());
+    }
+}
+
+void LoggingManager::addLoggingCategory(const QString& category,
+                                        Logger::LogLevel level) {
+    QMutexLocker locker(&m_mutex);
+    m_categoryLevels[category] = level;
+
+    if (m_initialized) {
+        QtSpdlogBridge::instance().addCategoryMapping(category, category,
+                                                      level);
+    }
+}
+
+void LoggingManager::removeLoggingCategory(const QString& category) {
+    QMutexLocker locker(&m_mutex);
+    m_categoryLevels.remove(category);
+
+    if (m_initialized) {
+        QtSpdlogBridge::instance().removeCategoryMapping(category);
+    }
+}
+
+void LoggingManager::setLoggingCategoryLevel(const QString& category,
+                                             Logger::LogLevel level) {
+    QMutexLocker locker(&m_mutex);
+    m_categoryLevels[category] = level;
+
+    if (m_initialized) {
+        QtSpdlogBridge::instance().addCategoryMapping(category, category,
+                                                      level);
+    }
+}
+
+Logger::LogLevel LoggingManager::getLoggingCategoryLevel(
+    const QString& category) const {
+    QMutexLocker locker(&m_mutex);
+    return m_categoryLevels.value(category, Logger::LogLevel::Debug);
+}
+
+QStringList LoggingManager::getLoggingCategories() const {
+    QMutexLocker locker(&m_mutex);
+    return QStringList(m_categoryLevels.keys());
 }
 
 void LoggingManager::setupPeriodicFlush() {
