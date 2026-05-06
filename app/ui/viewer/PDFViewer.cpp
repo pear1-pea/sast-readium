@@ -42,7 +42,9 @@ PDFPageWidget::PDFPageWidget(QWidget* parent)
       isDragging(false),
       m_currentSearchResultIndex(-1),
       m_normalHighlightColor(QColor(255, 255, 0, 100)),
-      m_currentHighlightColor(QColor(255, 165, 0, 150)) {
+      m_currentHighlightColor(QColor(255, 165, 0, 150)),
+      m_renderTimer(nullptr),
+      m_renderCache(nullptr) {
     setAlignment(Qt::AlignCenter);
     setMinimumSize(200, 200);
     setObjectName("pdfPage");
@@ -83,6 +85,17 @@ PDFPageWidget::PDFPageWidget(QWidget* parent)
     shadowEffect->setColor(QColor(0, 0, 0, 50));
     shadowEffect->setOffset(0, 4);
     setGraphicsEffect(shadowEffect);
+
+    // 设置防抖定时器
+    m_renderTimer = new QTimer(this);
+    m_renderTimer->setSingleShot(true);
+    m_renderTimer->setInterval(RENDER_DELAY_MS);
+    connect(m_renderTimer, &QTimer::timeout, this,
+            &PDFPageWidget::onRenderTimeout);
+}
+
+void PDFPageWidget::setRenderCache(PDFRenderCache* cache) {
+    m_renderCache = cache;
 }
 
 void PDFPageWidget::setPage(Poppler::Page* page, double scaleFactor,
@@ -139,6 +152,33 @@ void PDFPageWidget::renderPage() {
         return;
     }
 
+    // 检查缓存
+    if (m_renderCache) {
+        PDFRenderCache::CacheKey key{currentPage->index(), currentScaleFactor,
+                                     currentRotation};
+
+        if (m_renderCache->contains(key)) {
+            QPixmap cached = m_renderCache->get(key);
+            if (!cached.isNull()) {
+                renderedPixmap = cached;
+                originalPixmap = cached;
+                originalScaleFactor = currentScaleFactor;
+                setPixmap(cached);
+                setFixedSize(cached.size() / cached.devicePixelRatio());
+                return;  // 缓存命中，瞬间返回
+            }
+        }
+    }
+
+    // 缓存未命中，启动防抖定时器
+    m_renderTimer->start();
+}
+
+void PDFPageWidget::onRenderTimeout() {
+    if (!currentPage) {
+        return;
+    }
+
     try {
         // Enhanced rendering with optimized DPI calculation
         double devicePixelRatio = devicePixelRatioF();
@@ -173,6 +213,13 @@ void PDFPageWidget::renderPage() {
 
         setPixmap(renderedPixmap);
         setFixedSize(renderedPixmap.size() / renderedPixmap.devicePixelRatio());
+
+        // 存入缓存
+        if (m_renderCache) {
+            PDFRenderCache::CacheKey key{currentPage->index(),
+                                         currentScaleFactor, currentRotation};
+            m_renderCache->insert(key, renderedPixmap);
+        }
 
     } catch (const std::exception& e) {
         setText(QString("渲染错误: %1").arg(e.what()));
@@ -512,7 +559,8 @@ PDFViewer::PDFViewer(QWidget* parent, bool enableStyling)
       isZoomPending(false),
       isSliderDragging(false),
       m_currentSearchResultIndex(-1),
-      m_enableStyling(enableStyling) {
+      m_enableStyling(enableStyling),
+      m_renderCache(100) {  // 默认 100MB 缓存
     // 初始化动画管理器
     animationManager = new PDFAnimationManager(this);
 
@@ -739,6 +787,7 @@ void PDFViewer::setupViewModes() {
     singlePageScrollArea->setObjectName("singlePageScrollArea");
 
     singlePageWidget = new PDFPageWidget(singlePageScrollArea);
+    singlePageWidget->setRenderCache(&m_renderCache);  // 设置缓存
     singlePageScrollArea->setWidget(singlePageWidget);
     singlePageScrollArea->setWidgetResizable(true);
     singlePageScrollArea->setAlignment(Qt::AlignCenter);
@@ -1027,7 +1076,8 @@ void PDFViewer::setDocument(std::shared_ptr<Poppler::Document> doc) {
     try {
         // 清理旧文档
         if (document) {
-            clearPageCache();  // 清理缓存
+            clearPageCache();       // 清理缓存
+            m_renderCache.clear();  // 清理渲染缓存
         }
 
         document = doc;
@@ -1552,6 +1602,7 @@ void PDFViewer::createContinuousPages() {
     // 创建所有页面占位符（不立即渲染）
     for (int i = 0; i < document->numPages(); ++i) {
         PDFPageWidget* pageWidget = new PDFPageWidget(continuousWidget);
+        pageWidget->setRenderCache(&m_renderCache);  // 设置缓存
 
         // 设置占位符尺寸，但不渲染内容
         pageWidget->setFixedSize(placeholderWidth, placeholderHeight);
@@ -2559,3 +2610,11 @@ bool PDFViewer::hasBookmarkForCurrentPage() const {
     // 目前返回false作为占位符
     return false;
 }
+
+void PDFViewer::setCacheSize(int maxCostMB) {
+    m_renderCache.setMaxCost(maxCostMB);
+}
+
+int PDFViewer::getCacheSize() const { return m_renderCache.maxCost(); }
+
+void PDFViewer::clearCache() { m_renderCache.clear(); }

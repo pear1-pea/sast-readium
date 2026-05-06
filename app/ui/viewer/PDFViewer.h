@@ -42,6 +42,7 @@
 #include <QWidget>
 #include <QtGlobal>
 #include "PDFAnimations.h"
+#include "PDFRenderCache.h"
 #include "model/SearchModel.h"
 
 #ifdef ENABLE_QGRAPHICS_PDF_SUPPORT
@@ -80,6 +81,9 @@ public:
     // 快速缩放：只对已渲染的pixmap进行缩放，不重新渲染PDF
     void quickScale(double factor);
 
+    // 缓存管理
+    void setRenderCache(PDFRenderCache* cache);
+
     // Search highlight management
     void setSearchResults(const QList<SearchResult>& results);
     void clearSearchHighlights();
@@ -106,6 +110,9 @@ protected:
     void dragMoveEvent(QDragMoveEvent* event) override;
     void dropEvent(QDropEvent* event) override;
 
+private slots:
+    void onRenderTimeout();
+
 private:
     Poppler::Page* currentPage;
     double currentScaleFactor;
@@ -121,6 +128,12 @@ private:
     int m_currentSearchResultIndex;
     QColor m_normalHighlightColor;
     QColor m_currentHighlightColor;
+
+    // 渲染优化
+    QTimer* m_renderTimer;          // 防抖定时器
+    PDFRenderCache* m_renderCache;  // 缓存（不持有所有权）
+
+    static constexpr int RENDER_DELAY_MS = 100;  // 防抖延迟
 
     // Helper methods for highlighting
     void drawSearchHighlights(QPainter& painter);
@@ -199,6 +212,11 @@ public:
     int getPageCount() const;
     double getCurrentZoom() const;
     bool hasDocument() const { return document != nullptr; }
+
+    // 缓存管理
+    void setCacheSize(int maxCostMB);
+    int getCacheSize() const;
+    void clearCache();
 
     // 消息显示
     void setMessage(const QString& message);
@@ -373,6 +391,9 @@ private:
     };
     QHash<int, PageCacheItem> pageCache;
     int maxCacheSize;
+
+    // 渲染缓存（新增）
+    PDFRenderCache m_renderCache;
 
     // 动画管理器
     PDFAnimationManager* animationManager;

@@ -61,7 +61,7 @@ function(create_test_executable TEST_NAME TEST_SOURCE)
         # Core viewer sources
         ../app/ui/viewer/PDFViewer.cpp
         ../app/ui/viewer/PDFOutlineWidget.cpp
-        ../app/ui/viewer/PDFViewerEnhancements.cpp
+        ../app/ui/viewer/PDFRenderCache.cpp
         ../app/ui/viewer/PDFAnimations.cpp
         ../app/ui/viewer/PDFPrerenderer.cpp
 
