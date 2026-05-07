@@ -1,7 +1,6 @@
 #pragma once
 
 #include <QAction>
-#include <QButtonGroup>
 #include <QComboBox>
 #include <QLabel>
 #include <QSpinBox>
@@ -17,7 +16,6 @@ public:
 
     // 状态更新接口
     void updatePageInfo(int currentPage, int totalPages);
-    void updateZoomLevel(double zoomFactor);
     void setActionsEnabled(bool enabled);
 
 signals:
@@ -31,7 +29,6 @@ private slots:
 private:
     void setupFileActions();
     void setupNavigationActions();
-    void setupZoomActions();
     void setupViewActions();
     void setupRotationActions();
     void setupThemeActions();
@@ -50,13 +47,6 @@ private:
     QLabel* pageCountLabel;
     QAction* nextPageAction;
     QAction* lastPageAction;
-
-    // 缩放操作
-    QAction* zoomInAction;
-    QAction* zoomOutAction;
-    QAction* fitWidthAction;
-    QAction* fitPageAction;
-    QAction* fitHeightAction;
 
     // 视图操作
     QAction* toggleSidebarAction;

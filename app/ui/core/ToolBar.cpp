@@ -14,8 +14,6 @@ ToolBar::ToolBar(QWidget* parent) : QToolBar(parent) {
     createSeparator();
     setupNavigationActions();
     createSeparator();
-    setupZoomActions();
-    createSeparator();
     setupViewActions();
     createSeparator();
     setupRotationActions();
@@ -109,45 +107,6 @@ void ToolBar::setupNavigationActions() {
             [this]() { emit actionTriggered(ActionMap::lastPage); });
     connect(pageSpinBox, QOverload<int>::of(&QSpinBox::valueChanged), this,
             &ToolBar::onPageSpinBoxChanged);
-}
-
-void ToolBar::setupZoomActions() {
-    // 缩小
-    zoomOutAction = new QAction("🔍-", this);
-    zoomOutAction->setToolTip("缩小 (Ctrl+-)");
-    addAction(zoomOutAction);
-
-    // 放大
-    zoomInAction = new QAction("🔍+", this);
-    zoomInAction->setToolTip("放大 (Ctrl++)");
-    addAction(zoomInAction);
-
-    // 适合宽度
-    fitWidthAction = new QAction("📏", this);
-    fitWidthAction->setToolTip("适合宽度 (Ctrl+1)");
-    addAction(fitWidthAction);
-
-    // 适合页面
-    fitPageAction = new QAction("🗎", this);
-    fitPageAction->setToolTip("适合页面 (Ctrl+0)");
-    addAction(fitPageAction);
-
-    // 适合高度
-    fitHeightAction = new QAction("📐", this);
-    fitHeightAction->setToolTip("适合高度 (Ctrl+2)");
-    addAction(fitHeightAction);
-
-    // 连接信号
-    connect(zoomOutAction, &QAction::triggered, this,
-            [this]() { emit actionTriggered(ActionMap::zoomOut); });
-    connect(zoomInAction, &QAction::triggered, this,
-            [this]() { emit actionTriggered(ActionMap::zoomIn); });
-    connect(fitWidthAction, &QAction::triggered, this,
-            [this]() { emit actionTriggered(ActionMap::fitToWidth); });
-    connect(fitPageAction, &QAction::triggered, this,
-            [this]() { emit actionTriggered(ActionMap::fitToPage); });
-    connect(fitHeightAction, &QAction::triggered, this,
-            [this]() { emit actionTriggered(ActionMap::fitToHeight); });
 }
 
 void ToolBar::setupViewActions() {
@@ -245,12 +204,6 @@ void ToolBar::updatePageInfo(int currentPage, int totalPages) {
     }
 }
 
-void ToolBar::updateZoomLevel(double zoomFactor) {
-    // 可以在这里更新缩放相关的UI状态
-    // 例如禁用/启用缩放按钮基于当前缩放级别
-    Q_UNUSED(zoomFactor)
-}
-
 void ToolBar::setActionsEnabled(bool enabled) {
     // 文件操作始终可用
     openAction->setEnabled(true);
@@ -263,12 +216,6 @@ void ToolBar::setActionsEnabled(bool enabled) {
     nextPageAction->setEnabled(enabled);
     lastPageAction->setEnabled(enabled);
     pageSpinBox->setEnabled(enabled);
-
-    zoomInAction->setEnabled(enabled);
-    zoomOutAction->setEnabled(enabled);
-    fitWidthAction->setEnabled(enabled);
-    fitPageAction->setEnabled(enabled);
-    fitHeightAction->setEnabled(enabled);
 
     viewModeCombo->setEnabled(enabled);
 

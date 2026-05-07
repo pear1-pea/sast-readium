@@ -217,6 +217,16 @@ double ViewWidget::getCurrentZoom() const {
     return 1.0;
 }
 
+void ViewWidget::setCurrentZoom(int percentage) {
+    int currentIndex = getCurrentDocumentIndex();
+    if (currentIndex >= 0 && currentIndex < pdfViewers.size()) {
+        PDFViewer* viewer = pdfViewers[currentIndex];
+        if (viewer) {
+            viewer->setZoomFromPercentage(percentage);
+        }
+    }
+}
+
 void ViewWidget::onDocumentOpened(int index, const QString& fileName) {
     if (!documentModel)
         return;
@@ -317,6 +327,15 @@ void ViewWidget::onCurrentDocumentChanged(int index) {
     // 更新目录模型并发出信号
     PDFOutlineModel* currentOutline = getCurrentOutlineModel();
     emit currentOutlineModelChanged(currentOutline);
+
+    // 同步工具栏和状态栏到当前标签页的状态
+    int viewerIndex = documentModel->getCurrentDocumentIndex();
+    if (viewerIndex >= 0 && viewerIndex < pdfViewers.size()) {
+        PDFViewer* viewer = pdfViewers[viewerIndex];
+        emit currentViewerPageChanged(viewer->getCurrentPage(),
+                                      viewer->getPageCount());
+        emit currentViewerZoomChanged(viewer->getCurrentZoom());
+    }
 
     qDebug() << "Current document changed to index" << index;
 }

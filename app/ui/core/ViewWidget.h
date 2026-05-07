@@ -33,6 +33,9 @@ public:
     // PDF操作控制
     void executePDFAction(ActionMap action);
 
+    // 缩放控制
+    void setCurrentZoom(int percentage);
+
     // 获取当前状态
     bool hasDocuments() const;
     int getCurrentDocumentIndex() const;

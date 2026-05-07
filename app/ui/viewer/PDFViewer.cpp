@@ -557,7 +557,6 @@ PDFViewer::PDFViewer(QWidget* parent, bool enableStyling)
       currentRotation(0),
       pendingZoomFactor(DEFAULT_ZOOM),
       isZoomPending(false),
-      isSliderDragging(false),
       m_currentSearchResultIndex(-1),
       m_enableStyling(enableStyling),
       m_renderCache(100) {  // 默认 100MB 缓存
@@ -604,8 +603,6 @@ PDFViewer::PDFViewer(QWidget* parent, bool enableStyling)
     setupConnections();
     setupShortcuts();
     loadZoomSettings();
-    updateNavigationButtons();
-    updateZoomControls();
 }
 
 void PDFViewer::setupUI() {
@@ -617,155 +614,6 @@ void PDFViewer::setupUI() {
         setStyleSheet(STYLE.getApplicationStyleSheet());
     }
 
-    // 创建工具栏
-    toolbar = new QWidget(this);
-    toolbar->setObjectName("toolbar");
-    if (m_enableStyling) {
-        toolbar->setStyleSheet(STYLE.getToolbarStyleSheet());
-        toolbarLayout = new QHBoxLayout(toolbar);
-        toolbarLayout->setContentsMargins(STYLE.margin(), STYLE.spacing(),
-                                          STYLE.margin(), STYLE.spacing());
-        toolbarLayout->setSpacing(STYLE.spacing());
-    } else {
-        toolbarLayout = new QHBoxLayout(toolbar);
-        toolbarLayout->setContentsMargins(8, 8, 8, 8);
-        toolbarLayout->setSpacing(8);
-    }
-
-    // 页面导航控件
-    navGroup = new QGroupBox("页面导航", toolbar);
-    QHBoxLayout* navLayout = new QHBoxLayout(navGroup);
-
-    // 使用现代化图标
-    firstPageBtn = new QPushButton("⏮", navGroup);
-    prevPageBtn = new QPushButton("◀", navGroup);
-    pageNumberSpinBox = new QSpinBox(navGroup);
-    pageCountLabel = new QLabel("/ 0", navGroup);
-    nextPageBtn = new QPushButton("▶", navGroup);
-    lastPageBtn = new QPushButton("⏭", navGroup);
-
-    // 设置按钮样式和尺寸
-    QString buttonStyle = STYLE.getButtonStyleSheet();
-    firstPageBtn->setStyleSheet(buttonStyle);
-    prevPageBtn->setStyleSheet(buttonStyle);
-    nextPageBtn->setStyleSheet(buttonStyle);
-    lastPageBtn->setStyleSheet(buttonStyle);
-
-    firstPageBtn->setFixedSize(STYLE.buttonHeight(), STYLE.buttonHeight());
-    prevPageBtn->setFixedSize(STYLE.buttonHeight(), STYLE.buttonHeight());
-    nextPageBtn->setFixedSize(STYLE.buttonHeight(), STYLE.buttonHeight());
-    lastPageBtn->setFixedSize(STYLE.buttonHeight(), STYLE.buttonHeight());
-    pageNumberSpinBox->setMaximumWidth(60);
-
-    // 设置工具提示
-    firstPageBtn->setToolTip("第一页 (Ctrl+Home)");
-    prevPageBtn->setToolTip("上一页 (Page Up)");
-    nextPageBtn->setToolTip("下一页 (Page Down)");
-    lastPageBtn->setToolTip("最后一页 (Ctrl+End)");
-
-    navLayout->addWidget(firstPageBtn);
-    navLayout->addWidget(prevPageBtn);
-    navLayout->addWidget(pageNumberSpinBox);
-    navLayout->addWidget(pageCountLabel);
-    navLayout->addWidget(nextPageBtn);
-    navLayout->addWidget(lastPageBtn);
-
-    // 缩放控件
-    zoomGroup = new QGroupBox("缩放", toolbar);
-    QHBoxLayout* zoomLayout = new QHBoxLayout(zoomGroup);
-
-    // 使用现代化图标
-    zoomOutBtn = new QPushButton("🔍-", zoomGroup);
-    zoomInBtn = new QPushButton("🔍+", zoomGroup);
-    zoomSlider = new QSlider(Qt::Horizontal, zoomGroup);
-    zoomPercentageSpinBox = new QSpinBox(zoomGroup);
-    fitWidthBtn = new QPushButton("📏", zoomGroup);
-    fitHeightBtn = new QPushButton("📐", zoomGroup);
-    fitPageBtn = new QPushButton("🗎", zoomGroup);
-
-    // 设置按钮样式
-    zoomOutBtn->setStyleSheet(buttonStyle);
-    zoomInBtn->setStyleSheet(buttonStyle);
-    fitWidthBtn->setStyleSheet(buttonStyle);
-    fitHeightBtn->setStyleSheet(buttonStyle);
-    fitPageBtn->setStyleSheet(buttonStyle);
-
-    zoomSlider->setRange(10, 500);  // 10% to 500%
-    zoomSlider->setValue(100);
-    zoomSlider->setMinimumWidth(120);
-
-    // 配置百分比输入框
-    zoomPercentageSpinBox->setRange(10, 500);
-    zoomPercentageSpinBox->setValue(100);
-    zoomPercentageSpinBox->setSuffix("%");
-    zoomPercentageSpinBox->setMinimumWidth(80);
-    zoomPercentageSpinBox->setMaximumWidth(80);
-
-    // 设置工具提示
-    zoomOutBtn->setToolTip("缩小 (Ctrl+-)");
-    zoomInBtn->setToolTip("放大 (Ctrl++)");
-    fitWidthBtn->setToolTip("适合宽度 (Ctrl+1)");
-    fitHeightBtn->setToolTip("适合高度 (Ctrl+2)");
-    fitPageBtn->setToolTip("适合页面 (Ctrl+0)");
-
-    zoomLayout->addWidget(zoomOutBtn);
-    zoomLayout->addWidget(zoomInBtn);
-    zoomLayout->addWidget(zoomSlider);
-    zoomLayout->addWidget(zoomPercentageSpinBox);
-    zoomLayout->addWidget(fitWidthBtn);
-    zoomLayout->addWidget(fitHeightBtn);
-    zoomLayout->addWidget(fitPageBtn);
-
-    // 旋转控件
-    rotateGroup = new QGroupBox("旋转", toolbar);
-    QHBoxLayout* rotateLayout = new QHBoxLayout(rotateGroup);
-
-    rotateLeftBtn = new QPushButton("↺", rotateGroup);
-    rotateRightBtn = new QPushButton("↻", rotateGroup);
-
-    // 设置旋转按钮样式
-    rotateLeftBtn->setStyleSheet(buttonStyle);
-    rotateRightBtn->setStyleSheet(buttonStyle);
-
-    rotateLeftBtn->setFixedSize(STYLE.buttonHeight(), STYLE.buttonHeight());
-    rotateRightBtn->setFixedSize(STYLE.buttonHeight(), STYLE.buttonHeight());
-    rotateLeftBtn->setToolTip("向左旋转90度 (Ctrl+L)");
-    rotateRightBtn->setToolTip("向右旋转90度 (Ctrl+R)");
-
-    rotateLayout->addWidget(rotateLeftBtn);
-    rotateLayout->addWidget(rotateRightBtn);
-
-    // 主题切换控件
-    themeGroup = new QGroupBox("主题", toolbar);
-    QHBoxLayout* themeLayout = new QHBoxLayout(themeGroup);
-
-    themeToggleBtn = new QPushButton("🌙", themeGroup);
-    themeToggleBtn->setStyleSheet(buttonStyle);
-    themeToggleBtn->setFixedSize(STYLE.buttonHeight(), STYLE.buttonHeight());
-    themeToggleBtn->setToolTip("切换主题 (Ctrl+Shift+T)");
-
-    themeLayout->addWidget(themeToggleBtn);
-
-    // 查看模式控件
-    viewGroup = new QGroupBox("查看模式", toolbar);
-    QHBoxLayout* viewLayout = new QHBoxLayout(viewGroup);
-
-    viewModeComboBox = new QComboBox(viewGroup);
-    viewModeComboBox->addItem("单页视图",
-                              static_cast<int>(PDFViewMode::SinglePage));
-    viewModeComboBox->addItem("连续滚动",
-                              static_cast<int>(PDFViewMode::ContinuousScroll));
-    viewModeComboBox->setCurrentIndex(0);  // 默认单页视图
-
-    viewLayout->addWidget(viewModeComboBox);
-
-    toolbarLayout->addWidget(navGroup);
-    toolbarLayout->addWidget(zoomGroup);
-    toolbarLayout->addWidget(rotateGroup);
-    toolbarLayout->addWidget(themeGroup);
-    toolbarLayout->addWidget(viewGroup);
-    toolbarLayout->addStretch();
-
     // 创建视图堆叠组件
     viewStack = new QStackedWidget(this);
 
@@ -775,7 +623,6 @@ void PDFViewer::setupUI() {
     searchWidget = new SearchWidget(this);
     searchWidget->setVisible(false);  // 默认隐藏
 
-    mainLayout->addWidget(toolbar);
     mainLayout->addWidget(searchWidget);
     mainLayout->addWidget(viewStack, 1);
 }
@@ -837,39 +684,6 @@ void PDFViewer::setupViewModes() {
 }
 
 void PDFViewer::setupConnections() {
-    // 页面导航
-    connect(firstPageBtn, &QPushButton::clicked, this, &PDFViewer::firstPage);
-    connect(prevPageBtn, &QPushButton::clicked, this, &PDFViewer::previousPage);
-    connect(nextPageBtn, &QPushButton::clicked, this, &PDFViewer::nextPage);
-    connect(lastPageBtn, &QPushButton::clicked, this, &PDFViewer::lastPage);
-    connect(pageNumberSpinBox, QOverload<int>::of(&QSpinBox::valueChanged),
-            this, &PDFViewer::onPageNumberChanged);
-
-    // 缩放控制
-    connect(zoomInBtn, &QPushButton::clicked, this, &PDFViewer::zoomIn);
-    connect(zoomOutBtn, &QPushButton::clicked, this, &PDFViewer::zoomOut);
-    connect(zoomSlider, &QSlider::valueChanged, this,
-            &PDFViewer::onZoomSliderChanged);
-    connect(zoomSlider, &QSlider::sliderPressed, this,
-            &PDFViewer::onZoomSliderPressed);
-    connect(zoomSlider, &QSlider::sliderReleased, this,
-            &PDFViewer::onZoomSliderReleased);
-    connect(zoomPercentageSpinBox, QOverload<int>::of(&QSpinBox::valueChanged),
-            this, &PDFViewer::onZoomPercentageChanged);
-    connect(fitWidthBtn, &QPushButton::clicked, this, &PDFViewer::zoomToWidth);
-    connect(fitHeightBtn, &QPushButton::clicked, this,
-            &PDFViewer::zoomToHeight);
-    connect(fitPageBtn, &QPushButton::clicked, this, &PDFViewer::zoomToFit);
-
-    // 旋转控制
-    connect(rotateLeftBtn, &QPushButton::clicked, this, &PDFViewer::rotateLeft);
-    connect(rotateRightBtn, &QPushButton::clicked, this,
-            &PDFViewer::rotateRight);
-
-    // 主题切换
-    connect(themeToggleBtn, &QPushButton::clicked, this,
-            &PDFViewer::toggleTheme);
-
     // 搜索组件连接
     if (searchWidget) {
         connect(searchWidget, &SearchWidget::searchRequested, this,
@@ -894,11 +708,6 @@ void PDFViewer::setupConnections() {
     // 防抖定时器
     connect(zoomTimer, &QTimer::timeout, this, &PDFViewer::onZoomTimerTimeout);
     connect(scrollTimer, &QTimer::timeout, this, &PDFViewer::onScrollChanged);
-
-    // 查看模式控制
-    connect(viewModeComboBox,
-            QOverload<int>::of(&QComboBox::currentIndexChanged), this,
-            &PDFViewer::onViewModeChanged);
 
     // 页面组件信号
     connect(singlePageWidget, &PDFPageWidget::scaleChanged, this,
@@ -1031,11 +840,7 @@ void PDFViewer::setupShortcuts() {
     connect(jump10Backward, &QShortcut::activated, this,
             [this]() { goToPage(currentPageNumber - 10); });
     connect(gotoPage, &QShortcut::activated, this, [this]() {
-        // Focus on page number input
-        if (pageNumberSpinBox) {
-            pageNumberSpinBox->setFocus();
-            pageNumberSpinBox->selectAll();
-        }
+        // goto-page shortcut - main toolbar handles this
     });
 
     // 连接视图模式快捷键
@@ -1104,9 +909,6 @@ void PDFViewer::setDocument(std::shared_ptr<Poppler::Document> doc) {
                 throw std::runtime_error("无法访问文档页面");
             }
 
-            pageNumberSpinBox->setRange(1, numPages);
-            pageNumberSpinBox->setValue(1);
-            pageCountLabel->setText(QString("/ %1").arg(numPages));
             updatePageDisplay();
 
             // 如果是连续模式，创建所有页面
@@ -1125,8 +927,6 @@ void PDFViewer::setDocument(std::shared_ptr<Poppler::Document> doc) {
 #endif
 
         } else {
-            pageNumberSpinBox->setRange(0, 0);
-            pageCountLabel->setText("/ 0");
             singlePageWidget->setPage(nullptr);
 
             // 清空连续视图
@@ -1146,20 +946,16 @@ void PDFViewer::setDocument(std::shared_ptr<Poppler::Document> doc) {
 #endif
         }
 
-        updateNavigationButtons();
         emit documentChanged(document != nullptr);
 
     } catch (const std::exception& e) {
         // 文档加载失败，清理状态
         document = nullptr;
-        pageNumberSpinBox->setRange(0, 0);
-        pageCountLabel->setText("/ 0");
         singlePageWidget->setPage(nullptr);
 
         setMessage(QString("文档加载失败: %1").arg(e.what()));
         qDebug() << "Document loading failed:" << e.what();
 
-        updateNavigationButtons();
         emit documentChanged(false);
     }
 }
@@ -1187,7 +983,6 @@ bool PDFViewer::goToPageWithValidation(int pageNumber, bool showMessage) {
     }
 
     currentPageNumber = pageNumber;
-    pageNumberSpinBox->setValue(pageNumber + 1);
 
 #ifdef ENABLE_QGRAPHICS_PDF_SUPPORT
     // 如果使用QGraphics渲染，也更新QGraphics查看器
@@ -1199,8 +994,6 @@ bool PDFViewer::goToPageWithValidation(int pageNumber, bool showMessage) {
 #else
     updatePageDisplay();
 #endif
-
-    updateNavigationButtons();
 
     // Update search highlights for the new page
     updateSearchHighlightsForCurrentPage();
@@ -1380,120 +1173,10 @@ void PDFViewer::updateContinuousView() {
     QTimer::singleShot(0, this, [this]() { updateVisiblePages(); });
 }
 
-void PDFViewer::updateNavigationButtons() {
-    bool hasDoc = (document != nullptr);
-    bool hasPages = hasDoc && document->numPages() > 0;
-    bool notFirst = hasPages && currentPageNumber > 0;
-    bool notLast = hasPages && currentPageNumber < document->numPages() - 1;
-
-    // 导航按钮状态
-    firstPageBtn->setEnabled(notFirst);
-    prevPageBtn->setEnabled(notFirst);
-    nextPageBtn->setEnabled(notLast);
-    lastPageBtn->setEnabled(notLast);
-    pageNumberSpinBox->setEnabled(hasPages);
-
-    // 缩放按钮状态
-    zoomInBtn->setEnabled(hasPages && currentZoomFactor < MAX_ZOOM);
-    zoomOutBtn->setEnabled(hasPages && currentZoomFactor > MIN_ZOOM);
-    zoomSlider->setEnabled(hasPages);
-    zoomPercentageSpinBox->setEnabled(hasPages);
-    fitWidthBtn->setEnabled(hasPages);
-    fitHeightBtn->setEnabled(hasPages);
-    fitPageBtn->setEnabled(hasPages);
-
-    // 旋转按钮状态
-    rotateLeftBtn->setEnabled(hasPages);
-    rotateRightBtn->setEnabled(hasPages);
-
-    // 查看模式选择状态
-    viewModeComboBox->setEnabled(hasPages);
-
-    // 更新按钮工具提示
-    if (!hasPages) {
-        firstPageBtn->setToolTip("需要先打开文档");
-        prevPageBtn->setToolTip("需要先打开文档");
-        nextPageBtn->setToolTip("需要先打开文档");
-        lastPageBtn->setToolTip("需要先打开文档");
-        rotateLeftBtn->setToolTip("需要先打开文档");
-        rotateRightBtn->setToolTip("需要先打开文档");
-    } else {
-        firstPageBtn->setToolTip("第一页");
-        prevPageBtn->setToolTip("上一页");
-        nextPageBtn->setToolTip("下一页");
-        lastPageBtn->setToolTip("最后一页");
-        rotateLeftBtn->setToolTip("向左旋转90度");
-        rotateRightBtn->setToolTip("向右旋转90度");
-    }
-}
-
-void PDFViewer::updateZoomControls() {
-    int percentageValue = static_cast<int>(currentZoomFactor * 100);
-
-    // 更新滑块和百分比输入框（阻止信号避免循环）
-    zoomSlider->blockSignals(true);
-    zoomPercentageSpinBox->blockSignals(true);
-
-    zoomSlider->setValue(percentageValue);
-    zoomPercentageSpinBox->setValue(percentageValue);
-
-    zoomSlider->blockSignals(false);
-    zoomPercentageSpinBox->blockSignals(false);
-
-    // 更新按钮状态
-    zoomInBtn->setEnabled(currentZoomFactor < MAX_ZOOM);
-    zoomOutBtn->setEnabled(currentZoomFactor > MIN_ZOOM);
-}
-
-void PDFViewer::onPageNumberChanged(int pageNumber) {
-    goToPage(pageNumber - 1);  // SpinBox is 1-based, internal is 0-based
-}
-
-void PDFViewer::onZoomSliderChanged(int value) {
-    double factor = value / 100.0;
-    factor = qBound(MIN_ZOOM, factor, MAX_ZOOM);
-
-    if (isSliderDragging) {
-        // 拖动过程中：使用快速缩放（只对已渲染的页面进行图像缩放）
-        pendingZoomFactor = factor;
-        quickApplyZoom(factor);
-    } else {
-        // 非拖动状态（如点击滑块、键盘操作等）：直接应用完整缩放
-        setZoom(factor);
-    }
-}
-
-void PDFViewer::onZoomSliderPressed() {
-    isSliderDragging = true;
-    oldZoomFactor = currentZoomFactor;
-}
-
-void PDFViewer::onZoomSliderReleased() {
-    if (isSliderDragging) {
-        isSliderDragging = false;
-
-        // 应用待处理的缩放值并强制重新渲染
-        if (qAbs(pendingZoomFactor - currentZoomFactor) > 0.001) {
-            // 强制重新渲染，即使值相同也要确保质量
-            setZoomWithType(pendingZoomFactor, ZoomType::FixedValue);
-        } else {
-            // 如果缩放值没有变化，仍然需要确保页面正确渲染
-            if (currentViewMode == PDFViewMode::SinglePage &&
-                singlePageWidget) {
-                singlePageWidget->renderPage();
-            } else if (currentViewMode == PDFViewMode::ContinuousScroll) {
-                // 重新渲染当前可见页面
-                updateVisiblePages();
-            }
-        }
-    }
-}
-
 void PDFViewer::onScaleChanged(double scale) {
     // 防止信号循环：只有当缩放来自用户交互（如Ctrl+滚轮）时才处理
     if (scale != currentZoomFactor && !isZoomPending) {
         currentZoomFactor = scale;
-        updateZoomControls();
         saveZoomSettings();
         emit zoomChanged(scale);
     }
@@ -1514,10 +1197,6 @@ void PDFViewer::setViewMode(PDFViewMode mode) {
 
     try {
         // 更新UI
-        viewModeComboBox->blockSignals(true);
-        viewModeComboBox->setCurrentIndex(static_cast<int>(mode));
-        viewModeComboBox->blockSignals(false);
-
         // 切换视图
         if (mode == PDFViewMode::SinglePage) {
             switchToSinglePageMode();
@@ -1532,8 +1211,6 @@ void PDFViewer::setViewMode(PDFViewMode mode) {
 
         // 更新显示
         updatePageDisplay();
-        updateNavigationButtons();
-        updateZoomControls();
 
         // 如果切换到连续滚动模式，需要设置isWidgetReady并渲染可见页面
         if (mode == PDFViewMode::ContinuousScroll) {
@@ -1552,9 +1229,6 @@ void PDFViewer::setViewMode(PDFViewMode mode) {
     } catch (const std::exception& e) {
         // 恢复到原来的模式
         currentViewMode = oldMode;
-        viewModeComboBox->blockSignals(true);
-        viewModeComboBox->setCurrentIndex(static_cast<int>(oldMode));
-        viewModeComboBox->blockSignals(false);
 
         setMessage(QString("切换视图模式失败: %1").arg(e.what()));
         qDebug() << "View mode switch failed:" << e.what();
@@ -1856,51 +1530,8 @@ void PDFViewer::toggleTheme() {
 }
 
 void PDFViewer::updateThemeUI() {
-    Theme currentTheme = STYLE.currentTheme();
-
-    // 更新主题按钮图标
-    if (currentTheme == Theme::Dark) {
-        themeToggleBtn->setText("☀");
-        themeToggleBtn->setToolTip("切换到亮色主题 (Ctrl+Shift+T)");
-    } else {
-        themeToggleBtn->setText("🌙");
-        themeToggleBtn->setToolTip("切换到暗色主题 (Ctrl+Shift+T)");
-    }
-
     // 重新应用主界面样式
     setStyleSheet(STYLE.getApplicationStyleSheet());
-
-    // 更新工具栏样式
-    if (toolbar) {
-        toolbar->setStyleSheet(STYLE.getToolbarStyleSheet());
-    }
-
-    // 更新所有按钮的样式
-    QString buttonStyle = STYLE.getButtonStyleSheet();
-    if (firstPageBtn)
-        firstPageBtn->setStyleSheet(buttonStyle);
-    if (prevPageBtn)
-        prevPageBtn->setStyleSheet(buttonStyle);
-    if (nextPageBtn)
-        nextPageBtn->setStyleSheet(buttonStyle);
-    if (lastPageBtn)
-        lastPageBtn->setStyleSheet(buttonStyle);
-    if (zoomOutBtn)
-        zoomOutBtn->setStyleSheet(buttonStyle);
-    if (zoomInBtn)
-        zoomInBtn->setStyleSheet(buttonStyle);
-    if (fitWidthBtn)
-        fitWidthBtn->setStyleSheet(buttonStyle);
-    if (fitHeightBtn)
-        fitHeightBtn->setStyleSheet(buttonStyle);
-    if (fitPageBtn)
-        fitPageBtn->setStyleSheet(buttonStyle);
-    if (rotateLeftBtn)
-        rotateLeftBtn->setStyleSheet(buttonStyle);
-    if (rotateRightBtn)
-        rotateRightBtn->setStyleSheet(buttonStyle);
-    if (themeToggleBtn)
-        themeToggleBtn->setStyleSheet(buttonStyle);
 
     // 更新滚动区域样式
     QString scrollStyle =
@@ -1922,23 +1553,6 @@ void PDFViewer::updateThemeUI() {
     // 强制整体重绘
     update();
     repaint();
-}
-
-void PDFViewer::onViewModeChanged(int index) {
-    PDFViewMode mode = static_cast<PDFViewMode>(index);
-    setViewMode(mode);
-    if (mode == PDFViewMode::ContinuousScroll) {
-        // 延时0.05秒后设置isWidgetReady为true，确保布局完成
-        QTimer::singleShot(50, this, [this]() {
-            isWidgetReady = true;
-            updateVisiblePages();  // 初始渲染可见页面
-        });
-    }
-}
-
-void PDFViewer::onZoomPercentageChanged() {
-    int percentage = zoomPercentageSpinBox->value();
-    setZoomFromPercentage(percentage);
 }
 
 void PDFViewer::onZoomTimerTimeout() {
@@ -2048,68 +1662,12 @@ void PDFViewer::applyZoom(double factor) {
         }
 #endif
 
-        updateZoomControls();
-        saveZoomSettings();  // 保存缩放设置
+        saveZoomSettings();
         emit zoomChanged(factor);
 
         // 恢复标志状态
         isZoomPending = wasZoomPending;
     }
-}
-
-void PDFViewer::quickApplyZoom(double factor) {
-    if (qAbs(factor - currentZoomFactor) < 0.001) {
-        return;  // 缩放值没有变化
-    }
-
-    currentZoomFactor = factor;
-
-    // 更新UI控件
-    zoomPercentageSpinBox->blockSignals(true);
-    zoomPercentageSpinBox->setValue(static_cast<int>(factor * 100));
-    zoomPercentageSpinBox->blockSignals(false);
-
-    zoomSlider->blockSignals(true);
-    zoomSlider->setValue(static_cast<int>(factor * 100));
-    zoomSlider->blockSignals(false);
-
-    // 对已渲染的页面进行快速图像缩放
-#ifdef ENABLE_QGRAPHICS_PDF_SUPPORT
-    if (useQGraphicsViewer && qgraphicsViewer) {
-        qgraphicsViewer->setZoom(factor);
-    } else {
-#endif
-        if (currentViewMode == PDFViewMode::SinglePage) {
-            // 单页模式：快速缩放当前页面
-            singlePageWidget->blockSignals(true);
-            singlePageWidget->quickScale(factor);
-            singlePageWidget->blockSignals(false);
-        } else if (currentViewMode == PDFViewMode::ContinuousScroll) {
-            // 连续滚动模式：快速缩放已渲染的页面
-            for (int i = 0; i < continuousLayout->count() - 1; ++i) {
-                if (renderedPages.contains(qMakePair(i, oldZoomFactor))) {
-                    QLayoutItem* item = continuousLayout->itemAt(i);
-                    if (item && item->widget()) {
-                        PDFPageWidget* pageWidget =
-                            qobject_cast<PDFPageWidget*>(item->widget());
-                        if (pageWidget) {
-                            pageWidget->blockSignals(true);
-                            pageWidget->quickScale(factor);
-                            pageWidget->blockSignals(false);
-                        }
-                    }
-                }
-            }
-        }
-#ifdef ENABLE_QGRAPHICS_PDF_SUPPORT
-    }
-#endif
-
-    // 更新按钮状态
-    zoomInBtn->setEnabled(currentZoomFactor < MAX_ZOOM);
-    zoomOutBtn->setEnabled(currentZoomFactor > MIN_ZOOM);
-
-    emit zoomChanged(factor);
 }
 
 bool PDFViewer::eventFilter(QObject* object, QEvent* event) {
@@ -2157,21 +1715,6 @@ void PDFViewer::loadZoomSettings() {
 }
 
 void PDFViewer::keyPressEvent(QKeyEvent* event) {
-    // 处理页码输入框的回车键
-    if (event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter) {
-        if (pageNumberSpinBox->hasFocus()) {
-            // 如果页码输入框有焦点，应用当前值并跳转
-            int pageNumber = pageNumberSpinBox->value();
-            if (goToPageWithValidation(
-                    pageNumber - 1,
-                    true)) {  // SpinBox is 1-based, internal is 0-based
-                pageNumberSpinBox->clearFocus();  // 清除焦点
-            }
-            event->accept();
-            return;
-        }
-    }
-
     QWidget::keyPressEvent(event);
 }
 

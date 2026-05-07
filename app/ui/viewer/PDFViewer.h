@@ -235,8 +235,6 @@ protected:
     void setupConnections();
     void setupShortcuts();
     void updatePageDisplay();
-    void updateNavigationButtons();
-    void updateZoomControls();
     bool eventFilter(QObject* object, QEvent* event) override;
     void keyPressEvent(QKeyEvent* event) override;
 
@@ -263,7 +261,6 @@ protected:
 
     // 缩放相关方法
     void applyZoom(double factor);
-    void quickApplyZoom(double factor);  // 快速缩放，只对已渲染页面进行图像缩放
     void saveZoomSettings();
     void loadZoomSettings();
 
@@ -273,13 +270,7 @@ protected:
     void updateAllPagesSearchHighlights();
 
 private slots:
-    void onPageNumberChanged(int pageNumber);
-    void onZoomSliderChanged(int value);
-    void onZoomSliderPressed();
-    void onZoomSliderReleased();
     void onScaleChanged(double scale);
-    void onViewModeChanged(int index);
-    void onZoomPercentageChanged();
     void onZoomTimerTimeout();
 
     // 搜索相关槽函数
@@ -290,7 +281,6 @@ private slots:
 private:
     // UI组件
     QVBoxLayout* mainLayout;
-    QHBoxLayout* toolbarLayout;
     QStackedWidget* viewStack;
 
     // 单页视图组件
@@ -302,40 +292,6 @@ private:
     QWidget* continuousWidget;
     QVBoxLayout* continuousLayout;
     bool isWidgetReady = false;
-
-    // 工具栏组件
-    QWidget* toolbar;
-    QGroupBox* navGroup;
-    QGroupBox* zoomGroup;
-    QGroupBox* rotateGroup;
-    QGroupBox* themeGroup;
-    QGroupBox* viewGroup;
-
-    // 工具栏控件
-    QPushButton* firstPageBtn;
-    QPushButton* prevPageBtn;
-    QSpinBox* pageNumberSpinBox;
-    QLabel* pageCountLabel;
-    QPushButton* nextPageBtn;
-    QPushButton* lastPageBtn;
-
-    QPushButton* zoomInBtn;
-    QPushButton* zoomOutBtn;
-    QSlider* zoomSlider;
-    QSpinBox* zoomPercentageSpinBox;
-    QPushButton* fitWidthBtn;
-    QPushButton* fitHeightBtn;
-    QPushButton* fitPageBtn;
-
-    // 旋转控件
-    QPushButton* rotateLeftBtn;
-    QPushButton* rotateRightBtn;
-
-    // 主题切换控件
-    QPushButton* themeToggleBtn;
-
-    // 查看模式控件
-    QComboBox* viewModeComboBox;
 
     // 搜索控件
     SearchWidget* searchWidget;
@@ -353,7 +309,6 @@ private:
     double oldZoomFactor;
     double pendingZoomFactor;
     bool isZoomPending;
-    bool isSliderDragging;  // 跟踪滑块是否正在被拖动
 
     // 测试支持
     bool m_enableStyling;

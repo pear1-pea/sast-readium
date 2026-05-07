@@ -10,6 +10,7 @@
 StatusBar::StatusBar(QWidget* parent)
     : QStatusBar(parent), currentTotalPages(0) {
     setupUI();
+    setupZoomControls();
     setupLoadingProgress();
 }
 
@@ -28,17 +29,10 @@ void StatusBar::setupUI() {
 
     setupPageInput();
 
-    // 创建缩放信息标签
-    zoomLabel = new QLabel("缩放: 100%", this);
-    zoomLabel->setMinimumWidth(80);
-    zoomLabel->setAlignment(Qt::AlignCenter);
-    zoomLabel->setStyleSheet("QLabel { padding: 2px 8px; }");
-
     setupSeparators();
 
     // 添加到状态栏（从右到左的顺序）
-    addPermanentWidget(zoomLabel);
-    addPermanentWidget(separatorLabel2);
+    // zoomWidget 在 setupZoomControls 中添加
     addPermanentWidget(pageInputEdit);
     addPermanentWidget(pageLabel);
     addPermanentWidget(separatorLabel1);
@@ -91,17 +85,67 @@ void StatusBar::setupSeparators() {
     separatorLabel2 = new QLabel("|", this);
     separatorLabel2->setAlignment(Qt::AlignCenter);
     separatorLabel2->setStyleSheet("QLabel { color: gray; padding: 2px 4px; }");
+}
 
-    separatorLabel3 = new QLabel("|", this);
-    separatorLabel3->setAlignment(Qt::AlignCenter);
-    separatorLabel3->setStyleSheet("QLabel { color: gray; padding: 2px 4px; }");
+void StatusBar::setupZoomControls() {
+    zoomWidget = new QWidget(this);
+    QHBoxLayout* zoomLayout = new QHBoxLayout(zoomWidget);
+    zoomLayout->setContentsMargins(4, 0, 4, 0);
+    zoomLayout->setSpacing(4);
+
+    zoomOutBtn = new QPushButton("🔍-", zoomWidget);
+    zoomOutBtn->setFixedSize(24, 24);
+    zoomOutBtn->setToolTip("缩小");
+    zoomOutBtn->setEnabled(false);
+
+    zoomSlider = new QSlider(Qt::Horizontal, zoomWidget);
+    zoomSlider->setRange(10, 500);
+    zoomSlider->setValue(100);
+    zoomSlider->setFixedWidth(100);
+    zoomSlider->setEnabled(false);
+
+    zoomPercentSpinBox = new QSpinBox(zoomWidget);
+    zoomPercentSpinBox->setRange(10, 500);
+    zoomPercentSpinBox->setValue(100);
+    zoomPercentSpinBox->setSuffix("%");
+    zoomPercentSpinBox->setFixedWidth(70);
+    zoomPercentSpinBox->setEnabled(false);
+
+    zoomInBtn = new QPushButton("🔍+", zoomWidget);
+    zoomInBtn->setFixedSize(24, 24);
+    zoomInBtn->setToolTip("放大");
+    zoomInBtn->setEnabled(false);
+
+    zoomLayout->addWidget(zoomOutBtn);
+    zoomLayout->addWidget(zoomSlider);
+    zoomLayout->addWidget(zoomPercentSpinBox);
+    zoomLayout->addWidget(zoomInBtn);
+
+    addPermanentWidget(separatorLabel2);
+    addPermanentWidget(zoomWidget);
+
+    // 连接信号
+    connect(zoomSlider, &QSlider::valueChanged, this,
+            &StatusBar::onZoomSliderChanged);
+    connect(zoomOutBtn, &QPushButton::clicked, this,
+            &StatusBar::zoomOutClicked);
+    connect(zoomInBtn, &QPushButton::clicked, this, &StatusBar::zoomInClicked);
+}
+
+void StatusBar::onZoomSliderChanged(int value) {
+    // 同步 spinbox（防循环）
+    zoomPercentSpinBox->blockSignals(true);
+    zoomPercentSpinBox->setValue(value);
+    zoomPercentSpinBox->blockSignals(false);
+
+    emit zoomChanged(value);
 }
 
 void StatusBar::setDocumentInfo(const QString& fileName, int currentPage,
-                                int totalPages, double zoomLevel) {
+                                int totalPages, int zoomPercent) {
     setFileName(fileName);
     setPageInfo(currentPage, totalPages);
-    setZoomLevel(zoomLevel);
+    setZoomLevel(zoomPercent);
 }
 
 void StatusBar::setPageInfo(int current, int total) {
@@ -122,12 +166,27 @@ void StatusBar::setPageInfo(int current, int total) {
 }
 
 void StatusBar::setZoomLevel(int percent) {
-    zoomLabel->setText(QString("缩放: %1%").arg(percent));
+    int clamped = qBound(10, percent, 500);
+
+    zoomSlider->blockSignals(true);
+    zoomPercentSpinBox->blockSignals(true);
+
+    zoomSlider->setValue(clamped);
+    zoomPercentSpinBox->setValue(clamped);
+
+    zoomSlider->blockSignals(false);
+    zoomPercentSpinBox->blockSignals(false);
+
+    // 启用控件
+    zoomSlider->setEnabled(true);
+    zoomPercentSpinBox->setEnabled(true);
+    zoomOutBtn->setEnabled(clamped > 10);
+    zoomInBtn->setEnabled(clamped < 500);
 }
 
-void StatusBar::setZoomLevel(double percent) {
-    int roundedPercent = static_cast<int>(percent * 100 + 0.5);  // 四舍五入
-    setZoomLevel(roundedPercent);
+void StatusBar::setZoomLevel(double factor) {
+    int percent = static_cast<int>(factor * 100 + 0.5);
+    setZoomLevel(percent);
 }
 
 void StatusBar::setFileName(const QString& fileName) {
@@ -151,7 +210,12 @@ void StatusBar::clearDocumentInfo() {
     pageInputEdit->setEnabled(false);
     pageInputEdit->setToolTip("");
     pageInputEdit->clear();
-    zoomLabel->setText("缩放: 100%");
+    zoomSlider->setValue(100);
+    zoomPercentSpinBox->setValue(100);
+    zoomSlider->setEnabled(false);
+    zoomPercentSpinBox->setEnabled(false);
+    zoomOutBtn->setEnabled(false);
+    zoomInBtn->setEnabled(false);
     currentTotalPages = 0;
 }
 
@@ -272,15 +336,6 @@ void StatusBar::setPageInputRange(int min, int max) {
         pageInputEdit->setToolTip(
             QString("输入页码 (%1-%2) 并按回车跳转").arg(min).arg(max));
     }
-}
-
-StatusBar::StatusBar(WidgetFactory* factory, QWidget* parent)
-    : StatusBar(parent) {
-    QPushButton* prevButton = factory->createButton(actionID::prev, "Prev");
-    QPushButton* nextButton = factory->createButton(actionID::next, "Next");
-
-    addWidget(prevButton);
-    addWidget(nextButton);
 }
 
 void StatusBar::setupLoadingProgress() {

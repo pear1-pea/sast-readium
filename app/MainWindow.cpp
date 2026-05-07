@@ -97,13 +97,11 @@ MainWindow::~MainWindow() noexcept {}
 void MainWindow::initWindow() { resize(1280, 800); }
 
 void MainWindow::initContent() {
-    WidgetFactory* factory = new WidgetFactory(pageController, this);
-
     menuBar = new MenuBar(recentFilesManager, this);
     toolBar = new ToolBar(this);
     sideBar = new SideBar(this);
     rightSideBar = new RightSideBar(this);
-    statusBar = new StatusBar(factory, this);
+    statusBar = new StatusBar(this);
     viewWidget = new ViewWidget(documentController, documentModel, this);
 
     setMenuBar(menuBar);
@@ -317,10 +315,7 @@ void MainWindow::initConnection() {
     connect(viewWidget, &ViewWidget::currentViewerPageChanged, this,
             &MainWindow::onPageChangedForThumbnailSync);
     connect(viewWidget, &ViewWidget::currentViewerZoomChanged, this,
-            [this](double zoomFactor) {
-                statusBar->setZoomLevel(zoomFactor);
-                toolBar->updateZoomLevel(zoomFactor);
-            });
+            [this](double zoomFactor) { statusBar->setZoomLevel(zoomFactor); });
 
     // 连接查看模式变化信号
     connect(documentController, &DocumentController::viewModeChangeRequested,
@@ -337,6 +332,14 @@ void MainWindow::initConnection() {
     // 连接MainWindow的PDF操作信号到ViewWidget
     connect(this, &MainWindow::pdfViewerActionRequested, viewWidget,
             &ViewWidget::executePDFAction);
+
+    // 连接状态栏缩放控制信号
+    connect(statusBar, &StatusBar::zoomChanged, viewWidget,
+            &ViewWidget::setCurrentZoom);
+    connect(statusBar, &StatusBar::zoomInClicked, this,
+            [this]() { emit pdfViewerActionRequested(ActionMap::zoomIn); });
+    connect(statusBar, &StatusBar::zoomOutClicked, this,
+            [this]() { emit pdfViewerActionRequested(ActionMap::zoomOut); });
 
     // 连接状态栏页码跳转信号
     connect(statusBar, &StatusBar::pageJumpRequested, this,
@@ -441,8 +444,9 @@ void MainWindow::updateStatusBarInfo() {
     int currentPage = viewWidget->getCurrentPage();
     int totalPages = viewWidget->getCurrentPageCount();
     double zoomLevel = viewWidget->getCurrentZoom();
+    int zoomPercent = static_cast<int>(zoomLevel * 100 + 0.5);
 
-    statusBar->setDocumentInfo(fileName, currentPage, totalPages, zoomLevel);
+    statusBar->setDocumentInfo(fileName, currentPage, totalPages, zoomPercent);
 }
 
 void MainWindow::onViewModeChangeRequested(int mode) {

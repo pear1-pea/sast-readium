@@ -5,22 +5,22 @@
 #include <QLineEdit>
 #include <QProgressBar>
 #include <QPropertyAnimation>
+#include <QPushButton>
+#include <QSlider>
+#include <QSpinBox>
 #include <QStatusBar>
 #include <QString>
-#include "../../factory/WidgetFactory.h"
-
 class StatusBar : public QStatusBar {
     Q_OBJECT
 public:
     explicit StatusBar(QWidget* parent = nullptr);
-    StatusBar(WidgetFactory* factory, QWidget* parent = nullptr);
 
     // 状态信息更新接口
     void setDocumentInfo(const QString& fileName, int currentPage,
-                         int totalPages, double zoomLevel);
+                         int totalPages, int zoomPercent);
     void setPageInfo(int current, int total);
     void setZoomLevel(int percent);
-    void setZoomLevel(double percent);
+    void setZoomLevel(double factor);
     void setFileName(const QString& fileName);
     void setMessage(const QString& message);
 
@@ -39,20 +39,29 @@ public:
 
 signals:
     void pageJumpRequested(int pageNumber);
+    void zoomChanged(int percentage);
+    void zoomInClicked();
+    void zoomOutClicked();
 
 private slots:
     void onPageInputReturnPressed();
     void onPageInputEditingFinished();
     void onPageInputTextChanged(const QString& text);
+    void onZoomSliderChanged(int value);
 
 private:
     QLabel* fileNameLabel;
     QLabel* pageLabel;
     QLineEdit* pageInputEdit;
-    QLabel* zoomLabel;
     QLabel* separatorLabel1;
     QLabel* separatorLabel2;
-    QLabel* separatorLabel3;
+
+    // 缩放控件
+    QWidget* zoomWidget;
+    QPushButton* zoomOutBtn;
+    QSlider* zoomSlider;
+    QSpinBox* zoomPercentSpinBox;
+    QPushButton* zoomInBtn;
 
     // 加载进度相关控件
     QProgressBar* loadingProgressBar;
@@ -64,6 +73,7 @@ private:
     void setupUI();
     void setupSeparators();
     void setupPageInput();
+    void setupZoomControls();
     void setupLoadingProgress();
     QString formatFileName(const QString& fullPath) const;
     bool validateAndJumpToPage(const QString& input);
