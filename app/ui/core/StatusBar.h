@@ -10,12 +10,15 @@
 #include <QSpinBox>
 #include <QStatusBar>
 #include <QString>
+#include <QToolButton>
+#include "../../controller/tool.hpp"
+
 class StatusBar : public QStatusBar {
     Q_OBJECT
 public:
     explicit StatusBar(QWidget* parent = nullptr);
 
-    // 状态信息更新接口
+    // Status information update interface
     void setDocumentInfo(const QString& fileName, int currentPage,
                          int totalPages, int zoomPercent);
     void setPageInfo(int current, int total);
@@ -24,14 +27,10 @@ public:
     void setFileName(const QString& fileName);
     void setMessage(const QString& message);
 
-    // 页码输入功能
-    void enablePageInput(bool enabled);
-    void setPageInputRange(int min, int max);
-
-    // 清空状态信息
+    // Clear status information
     void clearDocumentInfo();
 
-    // 加载进度相关方法
+    // Loading progress methods
     void showLoadingProgress(const QString& message = "正在加载...");
     void updateLoadingProgress(int progress);
     void setLoadingMessage(const QString& message);
@@ -42,28 +41,34 @@ signals:
     void zoomChanged(int percentage);
     void zoomInClicked();
     void zoomOutClicked();
+    void actionTriggered(ActionMap action);
 
 private slots:
-    void onPageInputReturnPressed();
-    void onPageInputEditingFinished();
-    void onPageInputTextChanged(const QString& text);
+    void onPageSpinBoxChanged(int pageNumber);
     void onZoomSliderChanged(int value);
 
 private:
     QLabel* fileNameLabel;
-    QLabel* pageLabel;
-    QLineEdit* pageInputEdit;
     QLabel* separatorLabel1;
     QLabel* separatorLabel2;
+    QLabel* separatorLabel3;
 
-    // 缩放控件
+    // Page navigation controls
+    QToolButton* firstPageBtn;
+    QToolButton* prevPageBtn;
+    QSpinBox* pageSpinBox;
+    QLabel* pageCountLabel;
+    QToolButton* nextPageBtn;
+    QToolButton* lastPageBtn;
+
+    // Zoom controls
     QWidget* zoomWidget;
-    QPushButton* zoomOutBtn;
+    QToolButton* zoomOutBtn;
     QSlider* zoomSlider;
     QSpinBox* zoomPercentSpinBox;
-    QPushButton* zoomInBtn;
+    QToolButton* zoomInBtn;
 
-    // 加载进度相关控件
+    // Loading progress controls
     QProgressBar* loadingProgressBar;
     QLabel* loadingMessageLabel;
     QPropertyAnimation* progressAnimation;
@@ -72,9 +77,8 @@ private:
 
     void setupUI();
     void setupSeparators();
-    void setupPageInput();
+    void setupPageNavigation();
     void setupZoomControls();
     void setupLoadingProgress();
     QString formatFileName(const QString& fullPath) const;
-    bool validateAndJumpToPage(const QString& input);
 };

@@ -187,6 +187,176 @@ QFont StyleManager::buttonFont() const {
     return font;
 }
 
+QString StyleManager::getSpinBoxStyleSheet() const {
+    return QString(R"(
+        QSpinBox {
+            background-color: %1;
+            border: 1px solid %2;
+            border-radius: 3px;
+            color: %3;
+            padding: 2px 4px;
+            selection-background-color: %4;
+        }
+        QSpinBox:hover {
+            border-color: %5;
+        }
+        QSpinBox:focus {
+            border: 2px solid %4;
+        }
+        QSpinBox:disabled {
+            background-color: %6;
+            color: %7;
+        }
+        QSpinBox::up-button, QSpinBox::down-button {
+            background-color: %1;
+            border: none;
+            width: 16px;
+        }
+        QSpinBox::up-button:hover, QSpinBox::down-button:hover {
+            background-color: %8;
+        }
+        QSpinBox::up-arrow {
+            image: none;
+            border-left: 4px solid transparent;
+            border-right: 4px solid transparent;
+            border-bottom: 4px solid %3;
+            width: 0;
+            height: 0;
+        }
+        QSpinBox::down-arrow {
+            image: none;
+            border-left: 4px solid transparent;
+            border-right: 4px solid transparent;
+            border-top: 4px solid %3;
+            width: 0;
+            height: 0;
+        }
+    )")
+        .arg(surfaceColor().name())
+        .arg(borderColor().name())
+        .arg(textColor().name())
+        .arg(accentColor().name())
+        .arg(primaryColor().name())
+        .arg(backgroundColor().name())
+        .arg(textSecondaryColor().name())
+        .arg(hoverColor().name());
+}
+
+QString StyleManager::getComboBoxStyleSheet() const {
+    return QString(R"(
+        QComboBox {
+            background-color: %1;
+            border: 1px solid %2;
+            border-radius: 3px;
+            color: %3;
+            padding: 2px 4px 2px 8px;
+            selection-background-color: %4;
+        }
+        QComboBox:hover {
+            border-color: %5;
+        }
+        QComboBox:focus {
+            border: 2px solid %4;
+        }
+        QComboBox:disabled {
+            background-color: %6;
+            color: %7;
+        }
+        QComboBox::drop-down {
+            border: none;
+            width: 20px;
+        }
+        QComboBox::down-arrow {
+            image: none;
+            border-left: 4px solid transparent;
+            border-right: 4px solid transparent;
+            border-top: 4px solid %3;
+            width: 0;
+            height: 0;
+        }
+        QComboBox QAbstractItemView {
+            background-color: %1;
+            border: 1px solid %2;
+            color: %3;
+            selection-background-color: %4;
+            selection-color: %8;
+        }
+    )")
+        .arg(surfaceColor().name())
+        .arg(borderColor().name())
+        .arg(textColor().name())
+        .arg(accentColor().name())
+        .arg(primaryColor().name())
+        .arg(backgroundColor().name())
+        .arg(textSecondaryColor().name())
+        .arg(surfaceColor().name());
+}
+
+QString StyleManager::getLineEditStyleSheet() const {
+    return QString(R"(
+        QLineEdit {
+            background-color: %1;
+            border: 1px solid %2;
+            border-radius: 3px;
+            color: %3;
+            padding: 2px 4px;
+            selection-background-color: %4;
+        }
+        QLineEdit:hover {
+            border-color: %5;
+        }
+        QLineEdit:focus {
+            border: 2px solid %4;
+        }
+        QLineEdit:disabled {
+            background-color: %6;
+            color: %7;
+        }
+    )")
+        .arg(surfaceColor().name())
+        .arg(borderColor().name())
+        .arg(textColor().name())
+        .arg(accentColor().name())
+        .arg(primaryColor().name())
+        .arg(backgroundColor().name())
+        .arg(textSecondaryColor().name());
+}
+
+QString StyleManager::getSliderStyleSheet() const {
+    return QString(R"(
+        QSlider::groove:horizontal {
+            background-color: %1;
+            border: 1px solid %2;
+            height: 4px;
+            border-radius: 2px;
+        }
+        QSlider::handle:horizontal {
+            background-color: %3;
+            border: 1px solid %4;
+            width: 14px;
+            height: 14px;
+            margin: -6px 0;
+            border-radius: 7px;
+        }
+        QSlider::handle:horizontal:hover {
+            background-color: %5;
+        }
+        QSlider::handle:horizontal:pressed {
+            background-color: %6;
+        }
+        QSlider::sub-page:horizontal {
+            background-color: %3;
+            border-radius: 2px;
+        }
+    )")
+        .arg(backgroundColor().name())
+        .arg(borderColor().name())
+        .arg(accentColor().name())
+        .arg(primaryColor().name())
+        .arg(hoverColor().name())
+        .arg(pressedColor().name());
+}
+
 QString StyleManager::getStatusBarStyleSheet() const {
     return QString(R"(
         QStatusBar {

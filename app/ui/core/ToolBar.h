@@ -6,6 +6,7 @@
 #include <QSpinBox>
 #include <QToolBar>
 #include <QToolButton>
+#include <QWidgetAction>
 #include "../../controller/tool.hpp"
 
 class ToolBar : public QToolBar {
@@ -14,48 +15,35 @@ class ToolBar : public QToolBar {
 public:
     ToolBar(QWidget* parent = nullptr);
 
-    // 状态更新接口
-    void updatePageInfo(int currentPage, int totalPages);
     void setActionsEnabled(bool enabled);
 
 signals:
     void actionTriggered(ActionMap action);
-    void pageJumpRequested(int pageNumber);
 
 private slots:
-    void onPageSpinBoxChanged(int pageNumber);
     void onViewModeChanged();
 
 private:
     void setupFileActions();
-    void setupNavigationActions();
     void setupViewActions();
     void setupRotationActions();
     void setupThemeActions();
     void createSeparator();
     void applyToolBarStyle();
 
-    // 文件操作
+    // File operations
     QAction* openAction;
     QAction* openFolderAction;
     QAction* saveAction;
 
-    // 导航操作
-    QAction* firstPageAction;
-    QAction* prevPageAction;
-    QSpinBox* pageSpinBox;
-    QLabel* pageCountLabel;
-    QAction* nextPageAction;
-    QAction* lastPageAction;
-
-    // 视图操作
+    // View operations
     QAction* toggleSidebarAction;
     QComboBox* viewModeCombo;
 
-    // 旋转操作
+    // Rotation operations
     QAction* rotateLeftAction;
     QAction* rotateRightAction;
 
-    // 主题操作
+    // Theme operations
     QAction* themeToggleAction;
 };

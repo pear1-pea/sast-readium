@@ -2,9 +2,9 @@
 #include "controller/PageController.h"
 #include "model/PageModel.h"
 
-Views::Views(WidgetFactory* factory, PageModel* model,
-             PageNavigationDelegate* delegate, QWidget* parent)
-    : QWidget(parent), _factory(factory), _model(model), _delegate(delegate) {
+Views::Views(PageModel* model, PageNavigationDelegate* delegate,
+             QWidget* parent)
+    : QWidget(parent), _model(model), _delegate(delegate) {
     initUI();
 }
 

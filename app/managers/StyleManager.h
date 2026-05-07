@@ -36,6 +36,10 @@ public:
     QString getPDFViewerStyleSheet() const;
     QString getButtonStyleSheet() const;
     QString getScrollBarStyleSheet() const;
+    QString getSpinBoxStyleSheet() const;
+    QString getComboBoxStyleSheet() const;
+    QString getLineEditStyleSheet() const;
+    QString getSliderStyleSheet() const;
 
     // 颜色获取
     QColor primaryColor() const;

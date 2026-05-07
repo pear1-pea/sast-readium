@@ -6,78 +6,45 @@
 #include <QLabel>
 #include <QProgressBar>
 #include <QPropertyAnimation>
+#include "../../managers/StyleManager.h"
 
 StatusBar::StatusBar(QWidget* parent)
     : QStatusBar(parent), currentTotalPages(0) {
     setupUI();
+    setupPageNavigation();
     setupZoomControls();
     setupLoadingProgress();
+
+    // Listen to theme changes and reapply styles
+    connect(&STYLE, &StyleManager::themeChanged, this, [this]() {
+        if (pageSpinBox) {
+            pageSpinBox->setStyleSheet(STYLE.getSpinBoxStyleSheet());
+        }
+        if (zoomPercentSpinBox) {
+            zoomPercentSpinBox->setStyleSheet(STYLE.getSpinBoxStyleSheet());
+        }
+        if (zoomSlider) {
+            zoomSlider->setStyleSheet(STYLE.getSliderStyleSheet());
+        }
+    });
 }
 
 void StatusBar::setupUI() {
-    // 创建文件名标签
+    // Create file name label
     fileNameLabel = new QLabel("无文档", this);
     fileNameLabel->setMinimumWidth(150);
     fileNameLabel->setMaximumWidth(300);
     fileNameLabel->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
     fileNameLabel->setStyleSheet("QLabel { padding: 2px 8px; }");
 
-    // 创建页面信息标签和输入框
-    pageLabel = new QLabel("页:", this);
-    pageLabel->setAlignment(Qt::AlignCenter);
-    pageLabel->setStyleSheet("QLabel { padding: 2px 4px; }");
-
-    setupPageInput();
-
     setupSeparators();
 
-    // 添加到状态栏（从右到左的顺序）
-    // zoomWidget 在 setupZoomControls 中添加
-    addPermanentWidget(pageInputEdit);
-    addPermanentWidget(pageLabel);
-    addPermanentWidget(separatorLabel1);
+    // Add to status bar
     addPermanentWidget(fileNameLabel);
-}
-
-void StatusBar::setupPageInput() {
-    // 创建页码输入框
-    pageInputEdit = new QLineEdit(this);
-    pageInputEdit->setMaximumWidth(60);
-    pageInputEdit->setMinimumWidth(60);
-    pageInputEdit->setAlignment(Qt::AlignCenter);
-    pageInputEdit->setPlaceholderText("页码");
-    pageInputEdit->setStyleSheet(
-        "QLineEdit { "
-        "padding: 2px 4px; "
-        "border: 1px solid gray; "
-        "border-radius: 3px; "
-        "background-color: white; "
-        "} "
-        "QLineEdit:focus { "
-        "border: 2px solid #0078d4; "
-        "background-color: #f0f8ff; "
-        "} "
-        "QLineEdit:disabled { "
-        "background-color: #f0f0f0; "
-        "color: #808080; "
-        "}");
-    pageInputEdit->setEnabled(false);  // 默认禁用，直到有文档加载
-
-    // 添加输入验证器
-    QIntValidator* validator = new QIntValidator(1, 9999, this);
-    pageInputEdit->setValidator(validator);
-
-    // 连接信号
-    connect(pageInputEdit, &QLineEdit::returnPressed, this,
-            &StatusBar::onPageInputReturnPressed);
-    connect(pageInputEdit, &QLineEdit::editingFinished, this,
-            &StatusBar::onPageInputEditingFinished);
-    connect(pageInputEdit, &QLineEdit::textChanged, this,
-            &StatusBar::onPageInputTextChanged);
+    addPermanentWidget(separatorLabel1);
 }
 
 void StatusBar::setupSeparators() {
-    // 创建分隔符
     separatorLabel1 = new QLabel("|", this);
     separatorLabel1->setAlignment(Qt::AlignCenter);
     separatorLabel1->setStyleSheet("QLabel { color: gray; padding: 2px 4px; }");
@@ -85,6 +52,79 @@ void StatusBar::setupSeparators() {
     separatorLabel2 = new QLabel("|", this);
     separatorLabel2->setAlignment(Qt::AlignCenter);
     separatorLabel2->setStyleSheet("QLabel { color: gray; padding: 2px 4px; }");
+
+    separatorLabel3 = new QLabel("|", this);
+    separatorLabel3->setAlignment(Qt::AlignCenter);
+    separatorLabel3->setStyleSheet("QLabel { color: gray; padding: 2px 4px; }");
+}
+
+void StatusBar::setupPageNavigation() {
+    // First page button
+    QAction* firstPageAction = new QAction("⏮", this);
+    firstPageAction->setToolTip("第一页 (Ctrl+Home)");
+    firstPageBtn = new QToolButton(this);
+    firstPageBtn->setDefaultAction(firstPageAction);
+    firstPageBtn->setFixedSize(24, 24);
+    firstPageBtn->setEnabled(false);
+
+    // Previous page button
+    QAction* prevPageAction = new QAction("◀", this);
+    prevPageAction->setToolTip("上一页 (Page Up)");
+    prevPageBtn = new QToolButton(this);
+    prevPageBtn->setDefaultAction(prevPageAction);
+    prevPageBtn->setFixedSize(24, 24);
+    prevPageBtn->setEnabled(false);
+
+    // Page spinbox
+    pageSpinBox = new QSpinBox(this);
+    pageSpinBox->setMinimum(1);
+    pageSpinBox->setMaximum(1);
+    pageSpinBox->setValue(1);
+    pageSpinBox->setFixedWidth(60);
+    pageSpinBox->setToolTip("当前页码");
+    pageSpinBox->setEnabled(false);
+    pageSpinBox->setStyleSheet(STYLE.getSpinBoxStyleSheet());
+
+    // Page count label
+    pageCountLabel = new QLabel("/ 1", this);
+    pageCountLabel->setMinimumWidth(30);
+    pageCountLabel->setAlignment(Qt::AlignCenter);
+
+    // Next page button
+    QAction* nextPageAction = new QAction("▶", this);
+    nextPageAction->setToolTip("下一页 (Page Down)");
+    nextPageBtn = new QToolButton(this);
+    nextPageBtn->setDefaultAction(nextPageAction);
+    nextPageBtn->setFixedSize(24, 24);
+    nextPageBtn->setEnabled(false);
+
+    // Last page button
+    QAction* lastPageAction = new QAction("⏭", this);
+    lastPageAction->setToolTip("最后一页 (Ctrl+End)");
+    lastPageBtn = new QToolButton(this);
+    lastPageBtn->setDefaultAction(lastPageAction);
+    lastPageBtn->setFixedSize(24, 24);
+    lastPageBtn->setEnabled(false);
+
+    // Add to status bar
+    addPermanentWidget(firstPageBtn);
+    addPermanentWidget(prevPageBtn);
+    addPermanentWidget(pageSpinBox);
+    addPermanentWidget(pageCountLabel);
+    addPermanentWidget(nextPageBtn);
+    addPermanentWidget(lastPageBtn);
+
+    // Connect signals
+    connect(firstPageAction, &QAction::triggered, this,
+            [this]() { emit actionTriggered(ActionMap::firstPage); });
+    connect(prevPageAction, &QAction::triggered, this,
+            [this]() { emit actionTriggered(ActionMap::previousPage); });
+    connect(nextPageAction, &QAction::triggered, this,
+            [this]() { emit actionTriggered(ActionMap::nextPage); });
+    connect(lastPageAction, &QAction::triggered, this,
+            [this]() { emit actionTriggered(ActionMap::lastPage); });
+    connect(pageSpinBox, QOverload<int>::of(&QSpinBox::valueChanged), this,
+            &StatusBar::onPageSpinBoxChanged);
 }
 
 void StatusBar::setupZoomControls() {
@@ -93,9 +133,11 @@ void StatusBar::setupZoomControls() {
     zoomLayout->setContentsMargins(4, 0, 4, 0);
     zoomLayout->setSpacing(4);
 
-    zoomOutBtn = new QPushButton("🔍-", zoomWidget);
+    QAction* zoomOutAction = new QAction("-", this);
+    zoomOutAction->setToolTip("缩小");
+    zoomOutBtn = new QToolButton(zoomWidget);
+    zoomOutBtn->setDefaultAction(zoomOutAction);
     zoomOutBtn->setFixedSize(24, 24);
-    zoomOutBtn->setToolTip("缩小");
     zoomOutBtn->setEnabled(false);
 
     zoomSlider = new QSlider(Qt::Horizontal, zoomWidget);
@@ -103,6 +145,7 @@ void StatusBar::setupZoomControls() {
     zoomSlider->setValue(100);
     zoomSlider->setFixedWidth(100);
     zoomSlider->setEnabled(false);
+    zoomSlider->setStyleSheet(STYLE.getSliderStyleSheet());
 
     zoomPercentSpinBox = new QSpinBox(zoomWidget);
     zoomPercentSpinBox->setRange(10, 500);
@@ -110,10 +153,13 @@ void StatusBar::setupZoomControls() {
     zoomPercentSpinBox->setSuffix("%");
     zoomPercentSpinBox->setFixedWidth(70);
     zoomPercentSpinBox->setEnabled(false);
+    zoomPercentSpinBox->setStyleSheet(STYLE.getSpinBoxStyleSheet());
 
-    zoomInBtn = new QPushButton("🔍+", zoomWidget);
+    QAction* zoomInAction = new QAction("+", this);
+    zoomInAction->setToolTip("放大");
+    zoomInBtn = new QToolButton(zoomWidget);
+    zoomInBtn->setDefaultAction(zoomInAction);
     zoomInBtn->setFixedSize(24, 24);
-    zoomInBtn->setToolTip("放大");
     zoomInBtn->setEnabled(false);
 
     zoomLayout->addWidget(zoomOutBtn);
@@ -124,16 +170,20 @@ void StatusBar::setupZoomControls() {
     addPermanentWidget(separatorLabel2);
     addPermanentWidget(zoomWidget);
 
-    // 连接信号
+    // Connect signals
     connect(zoomSlider, &QSlider::valueChanged, this,
             &StatusBar::onZoomSliderChanged);
-    connect(zoomOutBtn, &QPushButton::clicked, this,
+    connect(zoomOutAction, &QAction::triggered, this,
             &StatusBar::zoomOutClicked);
-    connect(zoomInBtn, &QPushButton::clicked, this, &StatusBar::zoomInClicked);
+    connect(zoomInAction, &QAction::triggered, this, &StatusBar::zoomInClicked);
+}
+
+void StatusBar::onPageSpinBoxChanged(int pageNumber) {
+    emit pageJumpRequested(pageNumber - 1);  // Convert to 0-based index
 }
 
 void StatusBar::onZoomSliderChanged(int value) {
-    // 同步 spinbox（防循环）
+    // Sync spinbox (prevent loop)
     zoomPercentSpinBox->blockSignals(true);
     zoomPercentSpinBox->setValue(value);
     zoomPercentSpinBox->blockSignals(false);
@@ -152,16 +202,29 @@ void StatusBar::setPageInfo(int current, int total) {
     currentTotalPages = total;
 
     if (total > 0) {
-        // 更新页码输入框的占位符文本
-        pageInputEdit->setPlaceholderText(
-            QString("%1/%2").arg(current + 1).arg(total));
-        pageInputEdit->setEnabled(true);
-        pageInputEdit->setToolTip(
-            QString("输入页码 (1-%1) 并按回车跳转").arg(total));
+        // Update page spinbox
+        pageSpinBox->blockSignals(true);
+        pageSpinBox->setMaximum(total);
+        pageSpinBox->setValue(current + 1);  // Convert to 1-based
+        pageSpinBox->blockSignals(false);
+
+        pageCountLabel->setText(QString("/ %1").arg(total));
+
+        // Enable controls
+        pageSpinBox->setEnabled(true);
+        firstPageBtn->setEnabled(current > 0);
+        prevPageBtn->setEnabled(current > 0);
+        nextPageBtn->setEnabled(current < total - 1);
+        lastPageBtn->setEnabled(current < total - 1);
     } else {
-        pageInputEdit->setPlaceholderText("0/0");
-        pageInputEdit->setEnabled(false);
-        pageInputEdit->setToolTip("");
+        pageSpinBox->setValue(1);
+        pageSpinBox->setMaximum(1);
+        pageCountLabel->setText("/ 0");
+        pageSpinBox->setEnabled(false);
+        firstPageBtn->setEnabled(false);
+        prevPageBtn->setEnabled(false);
+        nextPageBtn->setEnabled(false);
+        lastPageBtn->setEnabled(false);
     }
 }
 
@@ -177,7 +240,7 @@ void StatusBar::setZoomLevel(int percent) {
     zoomSlider->blockSignals(false);
     zoomPercentSpinBox->blockSignals(false);
 
-    // 启用控件
+    // Enable controls
     zoomSlider->setEnabled(true);
     zoomPercentSpinBox->setEnabled(true);
     zoomOutBtn->setEnabled(clamped > 10);
@@ -195,7 +258,7 @@ void StatusBar::setFileName(const QString& fileName) {
     } else {
         QString displayName = formatFileName(fileName);
         fileNameLabel->setText(displayName);
-        fileNameLabel->setToolTip(fileName);  // 完整路径作为工具提示
+        fileNameLabel->setToolTip(fileName);  // Full path as tooltip
     }
 }
 
@@ -206,16 +269,24 @@ void StatusBar::setMessage(const QString& message) {
 void StatusBar::clearDocumentInfo() {
     fileNameLabel->setText("无文档");
     fileNameLabel->setToolTip("");
-    pageInputEdit->setPlaceholderText("0/0");
-    pageInputEdit->setEnabled(false);
-    pageInputEdit->setToolTip("");
-    pageInputEdit->clear();
+
+    pageSpinBox->setValue(1);
+    pageSpinBox->setMaximum(1);
+    pageSpinBox->setEnabled(false);
+    pageCountLabel->setText("/ 0");
+
+    firstPageBtn->setEnabled(false);
+    prevPageBtn->setEnabled(false);
+    nextPageBtn->setEnabled(false);
+    lastPageBtn->setEnabled(false);
+
     zoomSlider->setValue(100);
     zoomPercentSpinBox->setValue(100);
     zoomSlider->setEnabled(false);
     zoomPercentSpinBox->setEnabled(false);
     zoomOutBtn->setEnabled(false);
     zoomInBtn->setEnabled(false);
+
     currentTotalPages = 0;
 }
 
@@ -227,9 +298,9 @@ QString StatusBar::formatFileName(const QString& fullPath) const {
     QFileInfo fileInfo(fullPath);
     QString baseName = fileInfo.baseName();
 
-    // 如果文件名太长，进行截断
+    // Truncate if filename is too long
     QFontMetrics metrics(fileNameLabel->font());
-    int maxWidth = fileNameLabel->maximumWidth() - 16;  // 留出padding空间
+    int maxWidth = fileNameLabel->maximumWidth() - 16;  // Leave padding space
 
     if (metrics.horizontalAdvance(baseName) > maxWidth) {
         baseName = metrics.elidedText(baseName, Qt::ElideMiddle, maxWidth);
@@ -238,108 +309,8 @@ QString StatusBar::formatFileName(const QString& fullPath) const {
     return baseName;
 }
 
-void StatusBar::onPageInputReturnPressed() {
-    QString input = pageInputEdit->text().trimmed();
-    if (validateAndJumpToPage(input)) {
-        pageInputEdit->clear();
-        pageInputEdit->clearFocus();
-        // 恢复正常样式
-        pageInputEdit->setStyleSheet(
-            pageInputEdit->styleSheet().replace("border: 2px solid red;", ""));
-    }
-}
-
-void StatusBar::onPageInputEditingFinished() {
-    // 当输入框失去焦点时，清空内容并恢复样式
-    pageInputEdit->clear();
-    pageInputEdit->setStyleSheet(
-        pageInputEdit->styleSheet().replace("border: 2px solid red;", ""));
-}
-
-void StatusBar::onPageInputTextChanged(const QString& text) {
-    // 实时验证输入
-    if (text.isEmpty()) {
-        // 恢复正常样式
-        pageInputEdit->setStyleSheet(
-            pageInputEdit->styleSheet().replace("border: 2px solid red;", ""));
-        return;
-    }
-
-    bool ok;
-    int pageNumber = text.toInt(&ok);
-
-    if (!ok || pageNumber < 1 || pageNumber > currentTotalPages) {
-        // 显示错误样式
-        QString currentStyle = pageInputEdit->styleSheet();
-        if (!currentStyle.contains("border: 2px solid red;")) {
-            pageInputEdit->setStyleSheet(
-                currentStyle + " QLineEdit:focus { border: 2px solid red; }");
-        }
-    } else {
-        // 恢复正常样式
-        pageInputEdit->setStyleSheet(
-            pageInputEdit->styleSheet().replace("border: 2px solid red;", ""));
-    }
-}
-
-bool StatusBar::validateAndJumpToPage(const QString& input) {
-    if (input.isEmpty()) {
-        showMessage("请输入页码", 1500);
-        return false;
-    }
-
-    // 检查是否有有效文档
-    if (currentTotalPages <= 0) {
-        showMessage("没有可跳转的文档", 2000);
-        return false;
-    }
-
-    bool ok;
-    int pageNumber = input.toInt(&ok);
-
-    if (!ok) {
-        showMessage("请输入有效的页码数字", 2000);
-        // 添加错误样式
-        QString currentStyle = pageInputEdit->styleSheet();
-        if (!currentStyle.contains("border: 2px solid red;")) {
-            pageInputEdit->setStyleSheet(
-                currentStyle + " QLineEdit { border: 2px solid red; }");
-        }
-        return false;
-    }
-
-    if (pageNumber < 1 || pageNumber > currentTotalPages) {
-        showMessage(QString("页码超出范围 (1-%1)").arg(currentTotalPages),
-                    2000);
-        // 添加错误样式
-        QString currentStyle = pageInputEdit->styleSheet();
-        if (!currentStyle.contains("border: 2px solid red;")) {
-            pageInputEdit->setStyleSheet(
-                currentStyle + " QLineEdit { border: 2px solid red; }");
-        }
-        return false;
-    }
-
-    // 发出页码跳转信号
-    emit pageJumpRequested(pageNumber - 1);  // 转换为0-based
-    showMessage(QString("跳转到第 %1 页").arg(pageNumber), 1000);
-    return true;
-}
-
-void StatusBar::enablePageInput(bool enabled) {
-    pageInputEdit->setEnabled(enabled);
-}
-
-void StatusBar::setPageInputRange(int min, int max) {
-    currentTotalPages = max;
-    if (max > 0) {
-        pageInputEdit->setToolTip(
-            QString("输入页码 (%1-%2) 并按回车跳转").arg(min).arg(max));
-    }
-}
-
 void StatusBar::setupLoadingProgress() {
-    // 创建加载进度条
+    // Create loading progress bar
     loadingProgressBar = new QProgressBar(this);
     loadingProgressBar->setMinimumWidth(200);
     loadingProgressBar->setMaximumWidth(300);
@@ -359,19 +330,19 @@ void StatusBar::setupLoadingProgress() {
         "    border-radius: 2px;"
         "}");
 
-    // 创建加载消息标签
+    // Create loading message label
     loadingMessageLabel = new QLabel(this);
     loadingMessageLabel->setVisible(false);
     loadingMessageLabel->setStyleSheet(
         "QLabel { padding: 2px 8px; color: #666; }");
 
-    // 创建进度动画
+    // Create progress animation
     progressAnimation =
         new QPropertyAnimation(loadingProgressBar, "value", this);
     progressAnimation->setDuration(300);
     progressAnimation->setEasingCurve(QEasingCurve::OutCubic);
 
-    // 添加到状态栏（在最左侧）
+    // Add to status bar (at leftmost position)
     insertPermanentWidget(0, loadingMessageLabel);
     insertPermanentWidget(1, loadingProgressBar);
 }
@@ -382,7 +353,7 @@ void StatusBar::showLoadingProgress(const QString& message) {
     loadingProgressBar->setValue(0);
     loadingProgressBar->setVisible(true);
 
-    // 隐藏其他控件以节省空间
+    // Hide other controls to save space
     fileNameLabel->setVisible(false);
     separatorLabel1->setVisible(false);
 }
@@ -390,7 +361,7 @@ void StatusBar::showLoadingProgress(const QString& message) {
 void StatusBar::updateLoadingProgress(int progress) {
     progress = qBound(0, progress, 100);
 
-    // 使用动画更新进度
+    // Update progress with animation
     progressAnimation->stop();
     progressAnimation->setStartValue(loadingProgressBar->value());
     progressAnimation->setEndValue(progress);
@@ -407,7 +378,7 @@ void StatusBar::hideLoadingProgress() {
     loadingProgressBar->setVisible(false);
     loadingMessageLabel->setVisible(false);
 
-    // 恢复其他控件显示
+    // Restore other controls display
     fileNameLabel->setVisible(true);
     separatorLabel1->setVisible(true);
 }

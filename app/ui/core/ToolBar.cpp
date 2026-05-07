@@ -9,10 +9,8 @@ ToolBar::ToolBar(QWidget* parent) : QToolBar(parent) {
     setObjectName("MainToolBar");
     setToolButtonStyle(Qt::ToolButtonIconOnly);
 
-    // 初始化所有控件
+    // Initialize all controls
     setupFileActions();
-    createSeparator();
-    setupNavigationActions();
     createSeparator();
     setupViewActions();
     createSeparator();
@@ -20,10 +18,14 @@ ToolBar::ToolBar(QWidget* parent) : QToolBar(parent) {
     createSeparator();
     setupThemeActions();
 
-    // 应用样式
+    // Apply initial style
     applyToolBarStyle();
 
-    // 初始状态：禁用所有操作（没有文档时）
+    // Listen to theme changes and reapply styles
+    connect(&STYLE, &StyleManager::themeChanged, this,
+            &ToolBar::applyToolBarStyle);
+
+    // Initial state: disable all actions when no document
     setActionsEnabled(false);
 }
 
@@ -55,60 +57,6 @@ void ToolBar::setupFileActions() {
             [this]() { emit actionTriggered(ActionMap::save); });
 }
 
-void ToolBar::setupNavigationActions() {
-    // 第一页
-    firstPageAction = new QAction("⏮", this);
-    firstPageAction->setToolTip("第一页 (Ctrl+Home)");
-    addAction(firstPageAction);
-
-    // 上一页
-    prevPageAction = new QAction("◀", this);
-    prevPageAction->setToolTip("上一页 (Page Up)");
-    addAction(prevPageAction);
-
-    // 页码输入
-    QWidget* pageWidget = new QWidget(this);
-    QHBoxLayout* pageLayout = new QHBoxLayout(pageWidget);
-    pageLayout->setContentsMargins(4, 0, 4, 0);
-    pageLayout->setSpacing(2);
-
-    pageSpinBox = new QSpinBox(pageWidget);
-    pageSpinBox->setMinimum(1);
-    pageSpinBox->setMaximum(1);
-    pageSpinBox->setValue(1);
-    pageSpinBox->setFixedWidth(60);
-    pageSpinBox->setToolTip("当前页码");
-
-    pageCountLabel = new QLabel("/ 1", pageWidget);
-    pageCountLabel->setMinimumWidth(30);
-
-    pageLayout->addWidget(pageSpinBox);
-    pageLayout->addWidget(pageCountLabel);
-    addWidget(pageWidget);
-
-    // 下一页
-    nextPageAction = new QAction("▶", this);
-    nextPageAction->setToolTip("下一页 (Page Down)");
-    addAction(nextPageAction);
-
-    // 最后一页
-    lastPageAction = new QAction("⏭", this);
-    lastPageAction->setToolTip("最后一页 (Ctrl+End)");
-    addAction(lastPageAction);
-
-    // 连接信号
-    connect(firstPageAction, &QAction::triggered, this,
-            [this]() { emit actionTriggered(ActionMap::firstPage); });
-    connect(prevPageAction, &QAction::triggered, this,
-            [this]() { emit actionTriggered(ActionMap::previousPage); });
-    connect(nextPageAction, &QAction::triggered, this,
-            [this]() { emit actionTriggered(ActionMap::nextPage); });
-    connect(lastPageAction, &QAction::triggered, this,
-            [this]() { emit actionTriggered(ActionMap::lastPage); });
-    connect(pageSpinBox, QOverload<int>::of(&QSpinBox::valueChanged), this,
-            &ToolBar::onPageSpinBoxChanged);
-}
-
 void ToolBar::setupViewActions() {
     // 侧边栏切换
     toggleSidebarAction = new QAction("📋", this);
@@ -117,20 +65,18 @@ void ToolBar::setupViewActions() {
     toggleSidebarAction->setChecked(true);
     addAction(toggleSidebarAction);
 
-    // 视图模式选择
-    QWidget* viewWidget = new QWidget(this);
-    QHBoxLayout* viewLayout = new QHBoxLayout(viewWidget);
-    viewLayout->setContentsMargins(4, 0, 4, 0);
-
-    viewModeCombo = new QComboBox(viewWidget);
+    // 视图模式选择 - 使用 QWidgetAction
+    viewModeCombo = new QComboBox(this);
     viewModeCombo->addItem("单页视图");
     viewModeCombo->addItem("连续滚动");
     viewModeCombo->setCurrentIndex(0);
     viewModeCombo->setToolTip("选择视图模式");
     viewModeCombo->setFixedWidth(100);
+    viewModeCombo->setStyleSheet(STYLE.getComboBoxStyleSheet());
 
-    viewLayout->addWidget(viewModeCombo);
-    addWidget(viewWidget);
+    QWidgetAction* viewAction = new QWidgetAction(this);
+    viewAction->setDefaultWidget(viewModeCombo);
+    addAction(viewAction);
 
     // 连接信号
     connect(toggleSidebarAction, &QAction::triggered, this,
@@ -171,65 +117,44 @@ void ToolBar::setupThemeActions() {
 void ToolBar::createSeparator() { addSeparator(); }
 
 void ToolBar::applyToolBarStyle() {
-    // 应用工具栏样式
+    // Apply toolbar style
     setStyleSheet(STYLE.getToolbarStyleSheet());
 
-    // 设置工具按钮样式
+    // Apply button style to tool buttons only
     QList<QAction*> actions = this->actions();
     for (QAction* action : actions) {
         if (!action->isSeparator()) {
             QWidget* widget = widgetForAction(action);
             if (widget) {
-                widget->setStyleSheet(STYLE.getButtonStyleSheet());
+                // Only apply button style to QToolButton, skip other widgets
+                if (qobject_cast<QToolButton*>(widget)) {
+                    widget->setStyleSheet(STYLE.getButtonStyleSheet());
+                }
             }
         }
     }
-}
 
-void ToolBar::updatePageInfo(int currentPage, int totalPages) {
-    if (pageSpinBox && pageCountLabel) {
-        pageSpinBox->blockSignals(true);
-        pageSpinBox->setMaximum(totalPages);
-        pageSpinBox->setValue(currentPage +
-                              1);  // Convert from 0-based to 1-based
-        pageSpinBox->blockSignals(false);
-
-        pageCountLabel->setText(QString("/ %1").arg(totalPages));
-
-        // 更新导航按钮状态
-        firstPageAction->setEnabled(currentPage > 0);
-        prevPageAction->setEnabled(currentPage > 0);
-        nextPageAction->setEnabled(currentPage < totalPages - 1);
-        lastPageAction->setEnabled(currentPage < totalPages - 1);
+    // Reapply styles to themed controls
+    if (viewModeCombo) {
+        viewModeCombo->setStyleSheet(STYLE.getComboBoxStyleSheet());
     }
 }
 
 void ToolBar::setActionsEnabled(bool enabled) {
-    // 文件操作始终可用
+    // File operations always available
     openAction->setEnabled(true);
     openFolderAction->setEnabled(true);
     saveAction->setEnabled(enabled);
 
-    // 文档相关操作只有在有文档时才可用
-    firstPageAction->setEnabled(enabled);
-    prevPageAction->setEnabled(enabled);
-    nextPageAction->setEnabled(enabled);
-    lastPageAction->setEnabled(enabled);
-    pageSpinBox->setEnabled(enabled);
-
+    // Document-related operations only available when document is loaded
     viewModeCombo->setEnabled(enabled);
 
     rotateLeftAction->setEnabled(enabled);
     rotateRightAction->setEnabled(enabled);
 
-    // 侧边栏和主题切换始终可用
+    // Sidebar and theme toggle always available
     toggleSidebarAction->setEnabled(true);
     themeToggleAction->setEnabled(true);
-}
-
-void ToolBar::onPageSpinBoxChanged(int pageNumber) {
-    // 发出页码跳转请求（转换为0-based）
-    emit pageJumpRequested(pageNumber - 1);
 }
 
 void ToolBar::onViewModeChanged() {

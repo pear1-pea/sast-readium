@@ -209,10 +209,8 @@ void MainWindow::initConnection() {
     connect(toolBar, &ToolBar::actionTriggered, this, [this](ActionMap action) {
         documentController->execute(action, this);
     });
-    connect(toolBar, &ToolBar::pageJumpRequested, this,
-            &MainWindow::onPageJumpRequested);
 
-    // 连接文档控制器的操作完成信号
+    // Connect document controller operation completed signal
     connect(documentController, &DocumentController::documentOperationCompleted,
             this, &MainWindow::onDocumentOperationCompleted);
 
@@ -308,7 +306,6 @@ void MainWindow::initConnection() {
     connect(viewWidget, &ViewWidget::currentViewerPageChanged, this,
             [this](int pageNumber, int totalPages) {
                 statusBar->setPageInfo(pageNumber, totalPages);
-                toolBar->updatePageInfo(pageNumber, totalPages);
             });
 
     // 连接页面变化信号以同步缩略图高光
