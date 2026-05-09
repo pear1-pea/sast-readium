@@ -114,9 +114,8 @@ if (qobject_cast<QToolButton*>(widget)) {
 
 ## 已完成的工作
 
-### 1. StyleManager 扩展
-- ✅ 添加 `getSpinBoxStyleSheet()` 方法
-- ✅ 添加 `getComboBoxStyleSheet()` 方法
+### 1. StyleManager 扩展（Phase 1）
+- ✅ 添加 `getSpinBoxStyleSheet()` / `getComboBoxStyleSheet()` 样式表方法
 - ✅ 支持 Light/Dark 主题
 - ✅ 参考资料：
   - [Qt Style Sheets Examples](https://doc.qt.io/qt-6/stylesheet-examples.html)
@@ -133,11 +132,28 @@ if (qobject_cast<QToolButton*>(widget)) {
 - ✅ ToolBar.h 添加 `#include <QWidgetAction>`
 - ✅ StyleManager.h 添加样式表方法声明
 
+### 4. P0 - 主题切换不更新样式
+- ✅ ToolBar 监听 `themeChanged` → `applyToolBarStyle()`
+- ✅ StatusBar 监听 `themeChanged` → lambda 刷新所有控件
+- ✅ `applyToolBarStyle()` 内重新应用 viewModeCombo 样式
+- ✅ StatusBar 内重新应用 pageSpinBox/zoomPercentSpinBox/zoomSlider 样式
+
+### 5. P1 - StatusBar 缩放控件没有样式
+- ✅ `zoomPercentSpinBox` 创建时应用样式表
+- ✅ `zoomSlider` 创建时应用样式表
+
+### 6. P2 - 控件创建不统一（方案 B：StyleManager 管理）
+- ✅ StyleManager 添加 `createSpinBox()` / `createComboBox()` / `createSlider()` 工厂方法
+- ✅ 内部控件注册表：`registerWidget()` + `reThemeAll()` + `QPointer` 安全删除
+- ✅ ToolBar: viewModeCombo 改用工厂创建
+- ✅ StatusBar: pageSpinBox/zoomPercentSpinBox/zoomSlider 改用工厂创建
+- ✅ 手动 `connect(themeChanged)` 移除，工厂自动管理主题切换
+
 ---
 
 ## 待解决的问题
 
-### P0 - 主题切换不更新样式 ⚠️
+### P0 - 主题切换不更新样式 ✅ 已完成
 **问题**：
 - pageSpinBox, viewModeCombo, zoomPercentSpinBox 在切换主题时不更新
 
@@ -154,7 +170,7 @@ connect(&STYLE, &StyleManager::themeChanged, this, &ToolBar::applyToolBarStyle);
 connect(&STYLE, &StyleManager::themeChanged, this, &StatusBar::applyStatusBarStyle);
 ```
 
-### P1 - StatusBar 缩放控件没有样式 ⚠️
+### P1 - StatusBar 缩放控件没有样式 ✅ 已完成
 **问题**：
 - `zoomPercentSpinBox` 没有应用样式表
 
@@ -165,7 +181,7 @@ connect(&STYLE, &StyleManager::themeChanged, this, &StatusBar::applyStatusBarSty
    ```
 2. 监听主题变化
 
-### P2 - 控件创建不统一 📋
+### P2 - 控件创建不统一 ✅ 已完成
 **问题**：
 - ToolBar 和 StatusBar 各自创建控件
 - 没有统一的工厂或管理机制
@@ -261,30 +277,30 @@ addAction(action);
 ## 相关文件清单
 
 ### 已修改文件
-- `app/managers/StyleManager.h` - 添加 getSpinBoxStyleSheet/getComboBoxStyleSheet 声明
-- `app/managers/StyleManager.cpp` - 实现样式表方法
+- `app/managers/StyleManager.h` - 添加 getSpinBoxStyleSheet/getComboBoxStyleSheet 声明 + 工厂方法 + 注册表
+- `app/managers/StyleManager.cpp` - 实现样式表方法 + 工厂方法 + registerWidget/reThemeAll
 - `app/ui/core/ToolBar.h` - 添加 QWidgetAction 头文件
-- `app/ui/core/ToolBar.cpp` - 重构控件创建，修改 applyToolBarStyle
+- `app/ui/core/ToolBar.cpp` - 重构控件创建，改用工厂，修改 applyToolBarStyle
+- `app/ui/core/StatusBar.cpp` - 改用工厂创建控件，移除手动 connect
 
-### 待修改文件
-- `app/ui/core/ToolBar.cpp` - 添加主题变化监听
-- `app/ui/core/StatusBar.cpp` - 应用样式表，添加主题变化监听
+### 待研究文件（P3）
+- `app/ui/thumbnail/` - 缩略图系统相关文件
 
 ---
 
 ## 下一步行动
 
-1. **立即修复**：
-   - [ ] ToolBar 监听主题变化
-   - [ ] StatusBar 应用样式表并监听主题变化
-   - [ ] 测试主题切换
+1. **已完成**：
+   - [x] ToolBar 监听主题变化
+   - [x] StatusBar 应用样式表并监听主题变化
+   - [x] 测试主题切换
+   - [x] 设计统一的控件创建机制（StyleManager 工厂）
 
 2. **后续优化**：
-   - [ ] 设计统一的控件创建机制
-   - [ ] 缩略图性能优化（如需要）
-   - [ ] 右侧栏功能完善（如需要）
+   - [ ] P3 - 缩略图性能优化
+   - [ ] P4 - 右侧栏功能完善（如需要）
 
 ---
 
 **最后更新**：2026-05-08
-**状态**：进行中
+**状态**：P0-P2 已完成，当前进行 P3 缩略图性能优化

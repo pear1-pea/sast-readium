@@ -30,25 +30,24 @@ ToolBar::ToolBar(QWidget* parent) : QToolBar(parent) {
 }
 
 void ToolBar::setupFileActions() {
-    // 打开文件
+    // Open file
     openAction = new QAction("📁", this);
     openAction->setToolTip("打开PDF文件 (Ctrl+O)");
     openAction->setShortcut(QKeySequence("Ctrl+O"));
     addAction(openAction);
 
-    // 打开文件夹
+    // Open folder
     openFolderAction = new QAction("📂", this);
     openFolderAction->setToolTip("打开文件夹 (Ctrl+Shift+O)");
     openFolderAction->setShortcut(QKeySequence("Ctrl+Shift+O"));
     addAction(openFolderAction);
 
-    // 保存文件
+    // Save file
     saveAction = new QAction("💾", this);
     saveAction->setToolTip("保存文件 (Ctrl+S)");
     saveAction->setShortcut(QKeySequence("Ctrl+S"));
     addAction(saveAction);
 
-    // 连接信号
     connect(openAction, &QAction::triggered, this,
             [this]() { emit actionTriggered(ActionMap::openFile); });
     connect(openFolderAction, &QAction::triggered, this,
@@ -58,27 +57,25 @@ void ToolBar::setupFileActions() {
 }
 
 void ToolBar::setupViewActions() {
-    // 侧边栏切换
+    // Sidebar toggle
     toggleSidebarAction = new QAction("📋", this);
     toggleSidebarAction->setToolTip("切换侧边栏 (F9)");
     toggleSidebarAction->setCheckable(true);
     toggleSidebarAction->setChecked(true);
     addAction(toggleSidebarAction);
 
-    // 视图模式选择 - 使用 QWidgetAction
-    viewModeCombo = new QComboBox(this);
+    // View mode selector - wrapped in QWidgetAction for the toolbar
+    viewModeCombo = STYLE.createComboBox(this);
     viewModeCombo->addItem("单页视图");
     viewModeCombo->addItem("连续滚动");
     viewModeCombo->setCurrentIndex(0);
     viewModeCombo->setToolTip("选择视图模式");
     viewModeCombo->setFixedWidth(100);
-    viewModeCombo->setStyleSheet(STYLE.getComboBoxStyleSheet());
 
     QWidgetAction* viewAction = new QWidgetAction(this);
     viewAction->setDefaultWidget(viewModeCombo);
     addAction(viewAction);
 
-    // 连接信号
     connect(toggleSidebarAction, &QAction::triggered, this,
             [this]() { emit actionTriggered(ActionMap::toggleSideBar); });
     connect(viewModeCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
@@ -86,17 +83,16 @@ void ToolBar::setupViewActions() {
 }
 
 void ToolBar::setupRotationActions() {
-    // 向左旋转
+    // Rotate left
     rotateLeftAction = new QAction("↺", this);
     rotateLeftAction->setToolTip("向左旋转90度 (Ctrl+L)");
     addAction(rotateLeftAction);
 
-    // 向右旋转
+    // Rotate right
     rotateRightAction = new QAction("↻", this);
     rotateRightAction->setToolTip("向右旋转90度 (Ctrl+R)");
     addAction(rotateRightAction);
 
-    // 连接信号
     connect(rotateLeftAction, &QAction::triggered, this,
             [this]() { emit actionTriggered(ActionMap::rotateLeft); });
     connect(rotateRightAction, &QAction::triggered, this,
@@ -104,12 +100,11 @@ void ToolBar::setupRotationActions() {
 }
 
 void ToolBar::setupThemeActions() {
-    // 主题切换
+    // Theme toggle
     themeToggleAction = new QAction("🌙", this);
     themeToggleAction->setToolTip("切换主题 (Ctrl+Shift+T)");
     addAction(themeToggleAction);
 
-    // 连接信号
     connect(themeToggleAction, &QAction::triggered, this,
             [this]() { emit actionTriggered(ActionMap::toggleTheme); });
 }
@@ -132,11 +127,6 @@ void ToolBar::applyToolBarStyle() {
                 }
             }
         }
-    }
-
-    // Reapply styles to themed controls
-    if (viewModeCombo) {
-        viewModeCombo->setStyleSheet(STYLE.getComboBoxStyleSheet());
     }
 }
 

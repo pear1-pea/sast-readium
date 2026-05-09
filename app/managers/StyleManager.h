@@ -2,11 +2,17 @@
 
 #include <QApplication>
 #include <QColor>
+#include <QComboBox>
 #include <QFont>
 #include <QList>
 #include <QObject>
+#include <QPointer>
+#include <QSlider>
+#include <QSpinBox>
 #include <QString>
 #include <QWidget>
+
+#include <functional>
 
 class QMainWindow;
 
@@ -18,18 +24,18 @@ class StyleManager : public QObject {
 public:
     static StyleManager& instance();
 
-    // 主题管理
+    // Theme management
     void setTheme(Theme theme);
-    void toggleTheme();    // 在亮色/暗色间切换
-    void setLightTheme();  // 直接设置亮色主题
-    void setDarkTheme();   // 直接设置暗色主题
+    void toggleTheme();
+    void setLightTheme();
+    void setDarkTheme();
     Theme currentTheme() const { return m_currentTheme; }
 
-    // 统一主题应用
+    // Unified theme application
     void applyThemeStyleSheet(const QString& styleSheet);
     void forceApplyTheme(QWidget* widget, const QString& styleSheet);
 
-    // 样式表获取
+    // Stylesheet getters
     QString getApplicationStyleSheet() const;
     QString getToolbarStyleSheet() const;
     QString getStatusBarStyleSheet() const;
@@ -41,7 +47,13 @@ public:
     QString getLineEditStyleSheet() const;
     QString getSliderStyleSheet() const;
 
-    // 颜色获取
+    // Factory: create themed widgets (auto-register for theme switching)
+    QSpinBox* createSpinBox(QWidget* parent = nullptr);
+    QComboBox* createComboBox(QWidget* parent = nullptr);
+    QSlider* createSlider(Qt::Orientation orientation,
+                          QWidget* parent = nullptr);
+
+    // Color getters
     QColor primaryColor() const;
     QColor secondaryColor() const;
     QColor backgroundColor() const;
@@ -53,12 +65,12 @@ public:
     QColor pressedColor() const;
     QColor accentColor() const;
 
-    // 字体获取
+    // Font getters
     QFont defaultFont() const;
     QFont titleFont() const;
     QFont buttonFont() const;
 
-    // 尺寸常量
+    // Size constants
     int buttonHeight() const { return 32; }
     int buttonMinWidth() const { return 80; }
     int iconSize() const { return 16; }
@@ -68,7 +80,7 @@ public:
 
 signals:
     void themeChanged(Theme theme);
-    void styleSheetApplied();  // 新增：样式表应用完成信号
+    void styleSheetApplied();
 
 private:
     StyleManager();
@@ -80,9 +92,18 @@ private:
     QString createButtonStyle() const;
     QString createScrollBarStyle() const;
 
-    Theme m_currentTheme;
+    // Widget registration for auto re-theming
+    struct WidgetEntry {
+        QPointer<QWidget> widget;
+        std::function<QString()> styleSheetFn;
+    };
+    void registerWidget(QWidget* widget, std::function<QString()> styleSheetFn);
+    void reThemeAll();
 
-    // 颜色定义
+    Theme m_currentTheme;
+    QList<WidgetEntry> m_registeredWidgets;
+
+    // Color definitions
     QColor m_primaryColor;
     QColor m_secondaryColor;
     QColor m_backgroundColor;
@@ -95,5 +116,5 @@ private:
     QColor m_accentColor;
 };
 
-// 便捷宏
+// Convenience macro
 #define STYLE StyleManager::instance()

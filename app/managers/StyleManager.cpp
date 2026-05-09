@@ -13,6 +13,9 @@ StyleManager::StyleManager() : m_currentTheme(Theme::Light) {
     Logger::instance().info(
         "[managers] StyleManager initialized with Light theme");
     updateColors();
+
+    // Auto-retheme all registered widgets on theme change
+    connect(this, &StyleManager::themeChanged, this, &StyleManager::reThemeAll);
 }
 
 void StyleManager::setTheme(Theme theme) {
@@ -42,29 +45,29 @@ void StyleManager::updateColors() {
     Logger::instance().debug("[managers] Updating colors for theme: {}",
                              m_currentTheme == Theme::Light ? "Light" : "Dark");
     if (m_currentTheme == Theme::Light) {
-        // 亮色主题
-        m_primaryColor = QColor(0, 120, 212);       // 蓝色
-        m_secondaryColor = QColor(96, 94, 92);      // 灰色
-        m_backgroundColor = QColor(255, 255, 255);  // 白色
-        m_surfaceColor = QColor(250, 250, 250);     // 浅灰
-        m_textColor = QColor(32, 31, 30);           // 深灰
-        m_textSecondaryColor = QColor(96, 94, 92);  // 中灰
-        m_borderColor = QColor(225, 223, 221);      // 边框灰
-        m_hoverColor = QColor(243, 242, 241);       // 悬停灰
-        m_pressedColor = QColor(237, 235, 233);     // 按下灰
-        m_accentColor = QColor(16, 110, 190);       // 强调蓝
+        // Light theme colors
+        m_primaryColor = QColor(0, 120, 212);       // Blue
+        m_secondaryColor = QColor(96, 94, 92);      // Gray
+        m_backgroundColor = QColor(255, 255, 255);  // White
+        m_surfaceColor = QColor(250, 250, 250);     // Light gray
+        m_textColor = QColor(32, 31, 30);           // Dark gray
+        m_textSecondaryColor = QColor(96, 94, 92);  // Medium gray
+        m_borderColor = QColor(225, 223, 221);      // Border gray
+        m_hoverColor = QColor(243, 242, 241);       // Hover gray
+        m_pressedColor = QColor(237, 235, 233);     // Pressed gray
+        m_accentColor = QColor(16, 110, 190);       // Accent blue
     } else {
-        // 暗色主题
-        m_primaryColor = QColor(96, 205, 255);         // 亮蓝
-        m_secondaryColor = QColor(152, 151, 149);      // 亮灰
-        m_backgroundColor = QColor(32, 31, 30);        // 深灰
-        m_surfaceColor = QColor(40, 39, 38);           // 表面灰
-        m_textColor = QColor(255, 255, 255);           // 白色
-        m_textSecondaryColor = QColor(200, 198, 196);  // 浅灰
-        m_borderColor = QColor(72, 70, 68);            // 边框深灰
-        m_hoverColor = QColor(50, 49, 48);             // 悬停深灰
-        m_pressedColor = QColor(60, 58, 56);           // 按下深灰
-        m_accentColor = QColor(118, 185, 237);         // 强调亮蓝
+        // Dark theme colors
+        m_primaryColor = QColor(96, 205, 255);         // Bright blue
+        m_secondaryColor = QColor(152, 151, 149);      // Light gray
+        m_backgroundColor = QColor(32, 31, 30);        // Dark gray
+        m_surfaceColor = QColor(40, 39, 38);           // Surface gray
+        m_textColor = QColor(255, 255, 255);           // White
+        m_textSecondaryColor = QColor(200, 198, 196);  // Light gray
+        m_borderColor = QColor(72, 70, 68);            // Border dark gray
+        m_hoverColor = QColor(50, 49, 48);             // Hover dark gray
+        m_pressedColor = QColor(60, 58, 56);           // Pressed dark gray
+        m_accentColor = QColor(118, 185, 237);         // Accent bright blue
     }
 }
 
@@ -392,15 +395,16 @@ QString StyleManager::getStatusBarStyleSheet() const {
 }
 
 QString StyleManager::getPDFViewerStyleSheet() const {
-    // 根据主题动态设置PDF查看器背景色
-    QColor pdfBackgroundColor = (m_currentTheme == Theme::Light)
-                                    ? QColor(245, 245, 245)  // 亮色主题使用浅灰
-                                    : QColor(30, 30, 30);  // 暗色主题使用深灰
+    // Set PDF viewer background based on current theme
+    QColor pdfBackgroundColor =
+        (m_currentTheme == Theme::Light)
+            ? QColor(245, 245, 245)  // Light gray for light theme
+            : QColor(30, 30, 30);    // Dark gray for dark theme
 
     QColor pageBackgroundColor =
         (m_currentTheme == Theme::Light)
-            ? QColor(255, 255, 255)  // 亮色主题PDF页面白色
-            : QColor(45, 45, 48);    // 暗色主题PDF页面深灰
+            ? QColor(255, 255, 255)  // White page in light theme
+            : QColor(45, 45, 48);    // Dark page in dark theme
 
     return QString(R"(
         QScrollArea#singlePageScrollArea {
@@ -435,13 +439,13 @@ QString StyleManager::getScrollBarStyleSheet() const {
 }
 
 void StyleManager::applyThemeStyleSheet(const QString& styleSheet) {
-    // 获取主窗口并应用样式表
+    // Find the main window and apply the stylesheet
     QWidget* mainWindow = nullptr;
 
-    // 首先尝试获取活动窗口
+    // Try active window first
     mainWindow = QApplication::activeWindow();
 
-    // 如果没有活动窗口，尝试获取所有顶级窗口中的第一个
+    // Fall back to first QMainWindow among top-level widgets
     if (!mainWindow) {
         QWidgetList topLevelWidgets = QApplication::topLevelWidgets();
         for (QWidget* widget : topLevelWidgets) {
@@ -452,7 +456,7 @@ void StyleManager::applyThemeStyleSheet(const QString& styleSheet) {
         }
     }
 
-    // 最后的备选方案：获取任何顶级窗口
+    // Last resort: any top-level widget
     if (!mainWindow) {
         QWidgetList topLevelWidgets = QApplication::topLevelWidgets();
         if (!topLevelWidgets.isEmpty()) {
@@ -471,7 +475,6 @@ void StyleManager::applyThemeStyleSheet(const QString& styleSheet) {
             "[StyleManager] No main window found to apply stylesheet");
     }
 
-    // 发出样式表应用完成信号
     emit styleSheetApplied();
 }
 
@@ -486,6 +489,50 @@ void StyleManager::forceApplyTheme(QWidget* widget, const QString& styleSheet) {
         Logger::instance().warning(
             "[StyleManager] Cannot force apply theme to null widget");
     }
+}
+
+void StyleManager::registerWidget(QWidget* widget,
+                                  std::function<QString()> styleSheetFn) {
+    // Apply initial stylesheet
+    widget->setStyleSheet(styleSheetFn());
+
+    // Track for future theme changes (QPointer handles widget deletion)
+    m_registeredWidgets.append({QPointer<QWidget>(widget), styleSheetFn});
+}
+
+void StyleManager::reThemeAll() {
+    Logger::instance().debug("[StyleManager] Re-theming {} registered widgets",
+                             m_registeredWidgets.size());
+
+    // Iterate in reverse so removal doesn't affect index
+    for (int i = m_registeredWidgets.size() - 1; i >= 0; --i) {
+        auto& entry = m_registeredWidgets[i];
+        if (entry.widget) {
+            entry.widget->setStyleSheet(entry.styleSheetFn());
+        } else {
+            // Widget was deleted, remove from tracking
+            m_registeredWidgets.removeAt(i);
+        }
+    }
+}
+
+QSpinBox* StyleManager::createSpinBox(QWidget* parent) {
+    QSpinBox* spinBox = new QSpinBox(parent);
+    registerWidget(spinBox, [this]() { return getSpinBoxStyleSheet(); });
+    return spinBox;
+}
+
+QComboBox* StyleManager::createComboBox(QWidget* parent) {
+    QComboBox* comboBox = new QComboBox(parent);
+    registerWidget(comboBox, [this]() { return getComboBoxStyleSheet(); });
+    return comboBox;
+}
+
+QSlider* StyleManager::createSlider(Qt::Orientation orientation,
+                                    QWidget* parent) {
+    QSlider* slider = new QSlider(orientation, parent);
+    registerWidget(slider, [this]() { return getSliderStyleSheet(); });
+    return slider;
 }
 
 QString StyleManager::createScrollBarStyle() const {

@@ -15,18 +15,8 @@ StatusBar::StatusBar(QWidget* parent)
     setupZoomControls();
     setupLoadingProgress();
 
-    // Listen to theme changes and reapply styles
-    connect(&STYLE, &StyleManager::themeChanged, this, [this]() {
-        if (pageSpinBox) {
-            pageSpinBox->setStyleSheet(STYLE.getSpinBoxStyleSheet());
-        }
-        if (zoomPercentSpinBox) {
-            zoomPercentSpinBox->setStyleSheet(STYLE.getSpinBoxStyleSheet());
-        }
-        if (zoomSlider) {
-            zoomSlider->setStyleSheet(STYLE.getSliderStyleSheet());
-        }
-    });
+    // Theme switching is handled automatically by StyleManager factory methods
+    // (createSpinBox/createComboBox/createSlider auto-register for re-theming)
 }
 
 void StatusBar::setupUI() {
@@ -76,14 +66,13 @@ void StatusBar::setupPageNavigation() {
     prevPageBtn->setEnabled(false);
 
     // Page spinbox
-    pageSpinBox = new QSpinBox(this);
+    pageSpinBox = STYLE.createSpinBox(this);
     pageSpinBox->setMinimum(1);
     pageSpinBox->setMaximum(1);
     pageSpinBox->setValue(1);
     pageSpinBox->setFixedWidth(60);
     pageSpinBox->setToolTip("当前页码");
     pageSpinBox->setEnabled(false);
-    pageSpinBox->setStyleSheet(STYLE.getSpinBoxStyleSheet());
 
     // Page count label
     pageCountLabel = new QLabel("/ 1", this);
@@ -140,20 +129,18 @@ void StatusBar::setupZoomControls() {
     zoomOutBtn->setFixedSize(24, 24);
     zoomOutBtn->setEnabled(false);
 
-    zoomSlider = new QSlider(Qt::Horizontal, zoomWidget);
+    zoomSlider = STYLE.createSlider(Qt::Horizontal, zoomWidget);
     zoomSlider->setRange(10, 500);
     zoomSlider->setValue(100);
     zoomSlider->setFixedWidth(100);
     zoomSlider->setEnabled(false);
-    zoomSlider->setStyleSheet(STYLE.getSliderStyleSheet());
 
-    zoomPercentSpinBox = new QSpinBox(zoomWidget);
+    zoomPercentSpinBox = STYLE.createSpinBox(zoomWidget);
     zoomPercentSpinBox->setRange(10, 500);
     zoomPercentSpinBox->setValue(100);
     zoomPercentSpinBox->setSuffix("%");
     zoomPercentSpinBox->setFixedWidth(70);
     zoomPercentSpinBox->setEnabled(false);
-    zoomPercentSpinBox->setStyleSheet(STYLE.getSpinBoxStyleSheet());
 
     QAction* zoomInAction = new QAction("+", this);
     zoomInAction->setToolTip("放大");
