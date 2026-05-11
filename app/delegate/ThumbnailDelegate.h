@@ -104,6 +104,9 @@ private:
                          const QStyleOptionViewItem& option) const;
     void paintLoadingIndicator(QPainter* painter, const QRect& rect,
                                const QStyleOptionViewItem& option) const;
+    void paintBlurredPreview(QPainter* painter, const QRect& rect,
+                             const QPixmap& preview,
+                             const QStyleOptionViewItem& option) const;
     void paintErrorIndicator(QPainter* painter, const QRect& rect,
                              const QString& errorMessage,
                              const QStyleOptionViewItem& option) const;

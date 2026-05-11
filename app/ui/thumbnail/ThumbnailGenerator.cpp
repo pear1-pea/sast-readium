@@ -12,6 +12,7 @@
 #include <QtGui>
 #include <QtWidgets>
 #include <algorithm>
+#include <mutex>
 #include "utils/LoggingMacros.h"
 
 ThumbnailGenerator::ThumbnailGenerator(QObject* parent)
@@ -182,6 +183,57 @@ void ThumbnailGenerator::generateThumbnailRange(int startPage, int endPage,
 
     for (int i = startPage; i <= endPage; ++i) {
         generateThumbnail(i, size, quality, i - startPage);  // 按顺序设置优先级
+    }
+}
+
+void ThumbnailGenerator::generateLowResPreview(int pageNumber,
+                                               const QSize& size) {
+    if (!m_document || pageNumber < 0 || pageNumber >= m_document->numPages()) {
+        return;
+    }
+
+    QSize previewSize = size.isValid() ? size : QSize(40, 60);
+    constexpr double LOW_RES_QUALITY = 0.15;
+
+    // Non-blocking: skip if mutex is held by a concurrent render job.
+    // The loader's timer will retry in 150ms.
+    std::unique_lock lock(m_documentMutex, std::try_to_lock);
+    if (!lock.owns_lock()) {
+        return;
+    }
+
+    try {
+        std::unique_ptr<Poppler::Page> page(m_document->page(pageNumber));
+        if (!page) {
+            return;
+        }
+
+        QPixmap preview = renderPageToPixmapOptimized(page.get(), previewSize,
+                                                      LOW_RES_QUALITY);
+
+        // Unlock before emitting signal to avoid deadlock if handler needs
+        // mutex
+        lock.unlock();
+
+        if (!preview.isNull()) {
+            emit lowResPreviewGenerated(pageNumber, preview);
+        }
+    } catch (...) {
+        // Low-res preview is best-effort; silently ignore failures
+    }
+}
+
+void ThumbnailGenerator::generateLowResPreviewRange(int startPage, int endPage,
+                                                    const QSize& size) {
+    if (!m_document)
+        return;
+
+    int numPages = m_document->numPages();
+    startPage = qBound(0, startPage, numPages - 1);
+    endPage = qBound(startPage, endPage, numPages - 1);
+
+    for (int i = startPage; i <= endPage; ++i) {
+        generateLowResPreview(i, size);
     }
 }
 
@@ -458,29 +510,41 @@ void ThumbnailGenerator::handleJobError(GenerationJob* job,
 }
 
 QPixmap ThumbnailGenerator::generatePixmap(const GenerationRequest& request) {
-    QMutexLocker locker(&m_documentMutex);
+    m_documentMutex.lock();
 
     if (!m_document) {
+        m_documentMutex.unlock();
         return QPixmap();
     }
 
+    QPixmap result;
     try {
         std::unique_ptr<Poppler::Page> page(
             m_document->page(request.pageNumber));
-        if (!page) {
-            return QPixmap();
+        if (page) {
+            result =
+                renderPageToPixmap(page.get(), request.size, request.quality);
         }
-
-        return renderPageToPixmap(page.get(), request.size, request.quality);
-
     } catch (const std::exception& e) {
         LOG_WARNING("ThumbnailGenerator: Exception in generatePixmap - {}",
                     e.what());
-        return QPixmap();
     } catch (...) {
         LOG_WARNING("ThumbnailGenerator: Unknown exception in generatePixmap");
-        return QPixmap();
     }
+
+    // Unlock before yielding, so main thread's tryLock can acquire the mutex
+    m_documentMutex.unlock();
+
+    // Brief yield to prevent low-res preview starvation:
+    // When batch high-res jobs run continuously, they hold the document mutex
+    // back-to-back, causing generateLowResPreview's tryLock to fail repeatedly.
+    // This 5ms sleep forces a thread scheduling point, giving the main thread
+    // a window to acquire the mutex via tryLock.
+    if (request.retryCount == 0) {
+        QThread::msleep(5);
+    }
+
+    return result;
 }
 
 QPixmap ThumbnailGenerator::renderPageToPixmap(Poppler::Page* page,

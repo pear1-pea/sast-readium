@@ -122,6 +122,19 @@ QVariant ThumbnailModel::data(const QModelIndex& index, int role) const {
             return (it != m_thumbnails.end()) ? it->errorMessage : QString();
         }
 
+        case PreviewPixmapRole: {
+            auto it = m_thumbnails.find(pageNumber);
+            if (it != m_thumbnails.end() && !it->previewPixmap.isNull()) {
+                return it->previewPixmap;
+            }
+            return QVariant();
+        }
+
+        case HasPreviewRole: {
+            auto it = m_thumbnails.find(pageNumber);
+            return (it != m_thumbnails.end() && !it->previewPixmap.isNull());
+        }
+
         case PageSizeRole: {
             auto it = m_thumbnails.find(pageNumber);
             if (it != m_thumbnails.end() && !it->pageSize.isEmpty()) {
@@ -502,6 +515,29 @@ void ThumbnailModel::onThumbnailGenerated(int pageNumber,
 
     QModelIndex idx = index(pageNumber);
     emit dataChanged(idx, idx, {PixmapRole, LoadingRole});
+}
+
+void ThumbnailModel::onLowResPreviewReady(int pageNumber,
+                                          const QPixmap& preview) {
+    if (preview.isNull())
+        return;
+
+    {
+        QMutexLocker locker(&m_thumbnailsMutex);
+        ThumbnailItem& item = m_thumbnails[pageNumber];
+        // Only store preview if no full-res thumbnail exists yet
+        if (item.pixmap.isNull()) {
+            item.previewPixmap = preview;
+            // Ensure the item exists so LoadingRole stays true
+            if (!item.isLoading) {
+                item.isLoading = true;
+            }
+        }
+    }
+
+    QModelIndex idx = index(pageNumber);
+    emit dataChanged(idx, idx,
+                     {PreviewPixmapRole, HasPreviewRole, LoadingRole});
 }
 
 void ThumbnailModel::onThumbnailError(int pageNumber, const QString& error) {

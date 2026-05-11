@@ -13,6 +13,7 @@
 
 class ThumbnailModel;
 class ThumbnailDelegate;
+class ProgressiveThumbnailLoader;
 
 /**
  * @brief Chrome风格的PDF缩略图列表视图
@@ -130,6 +131,12 @@ private:
     void updateItemSizes();
     void updatePreloadRange();
 
+    QPair<int, int> calculateVisibleRange() const;
+
+    // Heuristic prefetching: velocity-aware scroll tracking
+    void updateScrollVelocity(int delta, qint64 timestamp);
+    int predictLandingPage() const;
+
     void animateScrollTo(int scrollPosition);
     void animateScrollToPage(int pageNumber);
     void stopScrollAnimation();
@@ -177,18 +184,25 @@ private:
     int m_preloadMargin;
     bool m_autoPreload;
     QTimer* m_preloadTimer;
-    int m_lastFirstVisible;
-    int m_lastLastVisible;
 
-    // 可见范围跟踪 - 优化版本
+    // 可见范围跟踪
     QPair<int, int> m_visibleRange;
     bool m_isScrolling;
 
-    // 性能优化
+    // Heuristic scroll velocity tracking
+    double m_scrollVelocity;  // pixels/ms
+    qint64 m_lastScrollTime;
+    int m_lastScrollPosition;
+    int m_scrollDirection;  // +1 down, -1 up, 0 stationary
+
+    // Performance optimization
     QTimer* m_viewportUpdateTimer;
     bool m_viewportUpdatePending;
     int m_lastVisibleStart;
     int m_lastVisibleEnd;
+
+    // Progressive loading (two-stage rendering coordinator)
+    ProgressiveThumbnailLoader* m_progressiveLoader;
 
     // 淡入效果
     QTimer* m_fadeInTimer;
@@ -214,4 +228,13 @@ private:
     static constexpr int FADE_IN_DURATION = 150;           // ms
     static constexpr int FADE_IN_TIMER_INTERVAL = 50;      // ms
     static constexpr int SMOOTH_SCROLL_STEP = 120;  // pixels per wheel step
+    // Heuristic prefetching thresholds
+    static constexpr double VELOCITY_SLOW_THRESHOLD = 0.5;    // px/ms
+    static constexpr double VELOCITY_MEDIUM_THRESHOLD = 2.0;  // px/ms
+    static constexpr int PRELOAD_COUNT_SLOW = 3;
+    static constexpr int PRELOAD_COUNT_MEDIUM = 10;
+    static constexpr int PRELOAD_COUNT_FAST = 20;
+    static constexpr int VIEWPORT_DEBOUNCE_SLOW = 50;     // ms
+    static constexpr int VIEWPORT_DEBOUNCE_MEDIUM = 100;  // ms
+    static constexpr int VIEWPORT_DEBOUNCE_FAST = 200;    // ms
 };

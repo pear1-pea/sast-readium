@@ -89,6 +89,11 @@ public:
                                 const QSize& size = QSize(),
                                 double quality = -1.0);
 
+    // Generate a very low resolution preview (synchronous, sub-ms)
+    void generateLowResPreview(int pageNumber, const QSize& size = QSize());
+    void generateLowResPreviewRange(int startPage, int endPage,
+                                    const QSize& size = QSize());
+
     // 队列管理
     void clearQueue();
     void cancelRequest(int pageNumber);
@@ -110,6 +115,7 @@ public:
 
 signals:
     void thumbnailGenerated(int pageNumber, const QPixmap& pixmap);
+    void lowResPreviewGenerated(int pageNumber, const QPixmap& preview);
     void thumbnailError(int pageNumber, const QString& error);
     void queueSizeChanged(int size);
     void activeJobsChanged(int count);

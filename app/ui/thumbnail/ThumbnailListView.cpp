@@ -24,6 +24,8 @@
 #include "delegate/ThumbnailDelegate.h"
 #include "managers/StyleManager.h"
 #include "model/ThumbnailModel.h"
+#include "ui/thumbnail/ProgressiveThumbnailLoader.h"
+#include "ui/thumbnail/ThumbnailGenerator.h"
 #include "utils/LoggingMacros.h"
 
 ThumbnailListView::ThumbnailListView(QWidget* parent)
@@ -41,17 +43,20 @@ ThumbnailListView::ThumbnailListView(QWidget* parent)
       m_preloadMargin(DEFAULT_PRELOAD_MARGIN),
       m_autoPreload(true),
       m_preloadTimer(nullptr),
-      m_lastFirstVisible(-1),
-      m_lastLastVisible(-1),
       m_fadeInTimer(nullptr),
       m_opacityEffect(nullptr),
       m_contextMenuEnabled(true),
       m_contextMenu(nullptr),
       m_contextMenuPage(-1),
       m_currentPage(-1),
+      m_progressiveLoader(nullptr),
       m_viewportUpdatePending(false),
       m_lastVisibleStart(-1),
-      m_lastVisibleEnd(-1) {
+      m_lastVisibleEnd(-1),
+      m_scrollVelocity(0.0),
+      m_lastScrollTime(0),
+      m_lastScrollPosition(0),
+      m_scrollDirection(0) {
     setupUI();
     setupScrollBars();
     setupAnimations();
@@ -208,8 +213,24 @@ void ThumbnailListView::setThumbnailModel(ThumbnailModel* model) {
                 &ThumbnailListView::onModelRowsRemoved);
     }
 
+    // Recreate progressive loader tied to the new model's generator
+    delete m_progressiveLoader;
+    m_progressiveLoader = nullptr;
+    ThumbnailGenerator* gen =
+        m_thumbnailModel ? m_thumbnailModel->findChild<ThumbnailGenerator*>()
+                         : nullptr;
+    if (gen) {
+        m_progressiveLoader = new ProgressiveThumbnailLoader(gen, this);
+        connect(m_progressiveLoader,
+                &ProgressiveThumbnailLoader::lowResPreviewReady,
+                m_thumbnailModel, &ThumbnailModel::onLowResPreviewReady);
+        connect(m_progressiveLoader,
+                &ProgressiveThumbnailLoader::requestHighRes, m_thumbnailModel,
+                &ThumbnailModel::requestThumbnail);
+    }
+
     updateItemSizes();
-    updateVisibleRange();
+    scheduleViewportUpdate();
 }
 
 ThumbnailModel* ThumbnailListView::thumbnailModel() const {
@@ -563,40 +584,16 @@ void ThumbnailListView::contextMenuEvent(QContextMenuEvent* event) {
 
 void ThumbnailListView::onScrollBarValueChanged(int value) {
     Q_UNUSED(value)
-    updateVisibleRange();
-    updatePreloadRange();
+    scheduleViewportUpdate();
+    if (m_autoPreload) {
+        m_preloadTimer->start();
+    }
 }
 
 void ThumbnailListView::onScrollBarRangeChanged(int min, int max) {
     Q_UNUSED(min);
     Q_UNUSED(max);
-
-    // 防抖逻辑：检查是否是由于样式更新导致的微小变化
-    // 如果可见范围没有实质性变化，就不触发更新
-    ThumbnailModel* thumbnailModel = qobject_cast<ThumbnailModel*>(model());
-    if (!thumbnailModel) {
-        return;
-    }
-
-    QRect viewportRect = viewport()->rect();
-    int firstVisible = indexAt(viewportRect.topLeft()).row();
-    int lastVisible = indexAt(viewportRect.bottomRight()).row();
-
-    if (firstVisible < 0)
-        firstVisible = 0;
-    if (lastVisible < 0)
-        lastVisible = thumbnailModel->rowCount() - 1;
-
-    // 如果可见范围没有变化，就不需要更新
-    if (m_visibleRange.first == firstVisible &&
-        m_visibleRange.second == lastVisible) {
-        return;
-    }
-
-    LOG_DEBUG("ThumbnailListView: Range changed ({}~{} -> {}~{})",
-              m_visibleRange.first, m_visibleRange.second, firstVisible,
-              lastVisible);
-    updateVisibleRange();
+    scheduleViewportUpdate();
 }
 
 void ThumbnailListView::onModelDataChanged(const QModelIndex& topLeft,
@@ -612,7 +609,7 @@ void ThumbnailListView::onModelRowsInserted(const QModelIndex& parent,
     Q_UNUSED(first);
     Q_UNUSED(last);
     updateItemSizes();
-    updateVisibleRange();
+    scheduleViewportUpdate();
 }
 
 void ThumbnailListView::onModelRowsRemoved(const QModelIndex& parent, int first,
@@ -621,13 +618,13 @@ void ThumbnailListView::onModelRowsRemoved(const QModelIndex& parent, int first,
     Q_UNUSED(first);
     Q_UNUSED(last);
     updateItemSizes();
-    updateVisibleRange();
+    scheduleViewportUpdate();
 }
 
 void ThumbnailListView::onScrollAnimationFinished() {
     m_isScrolling = false;
     m_isScrollAnimating = false;
-    updateVisibleRange();
+    scheduleViewportUpdate();
 }
 
 void ThumbnailListView::onPreloadTimer() { updatePreloadRange(); }
@@ -638,40 +635,37 @@ void ThumbnailListView::onFadeInTimer() {
 }
 
 void ThumbnailListView::updateVisibleRange() {
+    // Immediate update without debouncing - used for critical updates
     ThumbnailModel* thumbnailModel = qobject_cast<ThumbnailModel*>(model());
     if (!thumbnailModel)
         return;
 
-    QRect viewportRect = viewport()->rect();
-    int firstVisible = indexAt(viewportRect.topLeft()).row();
-    int lastVisible = indexAt(viewportRect.bottomRight()).row();
+    QPair<int, int> newRange = calculateVisibleRange();
+    if (newRange.first < 0 || newRange.second < 0)
+        return;
 
-    if (firstVisible < 0)
-        firstVisible = 0;
-    if (lastVisible < 0)
-        lastVisible = thumbnailModel->rowCount() - 1;
-
-    // 防抖逻辑：如果可见范围没有变化，就不重复请求缩略图
-    if (m_visibleRange.first == firstVisible &&
-        m_visibleRange.second == lastVisible) {
+    // Skip if range hasn't changed
+    if (m_visibleRange == newRange) {
         return;
     }
 
     QPair<int, int> oldRange = m_visibleRange;
-    m_visibleRange = qMakePair(firstVisible, lastVisible);
+    m_visibleRange = newRange;
 
-    // 请求可见范围的缩略图 - 智能请求，只加载需要的
-    int requestCount = 0;
-    for (int i = firstVisible; i <= lastVisible; ++i) {
+    // Request thumbnails for visible range
+    for (int i = newRange.first; i <= newRange.second; ++i) {
         QModelIndex index = thumbnailModel->index(i, 0);
         if (index.isValid()) {
-            // 检查是否已经有缓存或正在加载
             if (!thumbnailModel->hasCachedThumbnail(i) &&
                 !thumbnailModel->isThumbnailLoading(i)) {
                 thumbnailModel->requestThumbnail(i);
-                requestCount++;
             }
         }
+    }
+
+    // Emit signal
+    if (oldRange != m_visibleRange) {
+        emit visibleRangeChanged(m_visibleRange.first, m_visibleRange.second);
     }
 }
 
@@ -690,20 +684,31 @@ void ThumbnailListView::paintEvent(QPaintEvent* event) {
 void ThumbnailListView::resizeEvent(QResizeEvent* event) {
     QListView::resizeEvent(event);
     updateItemSizes();
-    updateVisibleRange();
+    scheduleViewportUpdate();
 }
 
 void ThumbnailListView::showEvent(QShowEvent* event) {
     QListView::showEvent(event);
-    updateVisibleRange();
+    scheduleViewportUpdate();
 }
 
 void ThumbnailListView::scrollContentsBy(int dx, int dy) {
-    QListView::scrollContentsBy(dx, dy);
+    Q_UNUSED(dx)
+    QListView::scrollContentsBy(0, dy);
 
     m_isScrolling = true;
 
-    // 使用优化的视口更新
+    // Update scroll velocity tracking
+    qint64 now = QDateTime::currentMSecsSinceEpoch();
+    updateScrollVelocity(dy, now);
+
+    // Notify progressive loader of scroll state
+    if (m_progressiveLoader) {
+        m_progressiveLoader->onScrollStateChanged(m_scrollVelocity,
+                                                  m_scrollDirection);
+    }
+
+    // Use dynamic debounce based on velocity
     scheduleViewportUpdate();
 }
 
@@ -731,6 +736,70 @@ void ThumbnailListView::updateItemSizes() {
 
     // 只触发布局更新，避免强制重绘所有项目
     scheduleDelayedItemsLayout();
+}
+
+QPair<int, int> ThumbnailListView::calculateVisibleRange() const {
+    ThumbnailModel* thumbnailModel = qobject_cast<ThumbnailModel*>(model());
+    if (!thumbnailModel) {
+        return qMakePair(-1, -1);
+    }
+
+    QRect viewportRect = viewport()->rect();
+    int firstVisible = indexAt(viewportRect.topLeft()).row();
+    int lastVisible = indexAt(viewportRect.bottomRight()).row();
+
+    if (firstVisible < 0)
+        firstVisible = 0;
+    if (lastVisible < 0)
+        lastVisible = thumbnailModel->rowCount() - 1;
+
+    return qMakePair(firstVisible, lastVisible);
+}
+
+void ThumbnailListView::updateScrollVelocity(int delta, qint64 timestamp) {
+    constexpr qint64 VELOCITY_WINDOW_MS = 100;
+    qint64 elapsed = timestamp - m_lastScrollTime;
+
+    if (elapsed > 0 && elapsed < VELOCITY_WINDOW_MS) {
+        // Exponential moving average for smooth velocity
+        double instantVelocity = qAbs(static_cast<double>(delta)) / elapsed;
+        if (m_scrollVelocity == 0.0) {
+            m_scrollVelocity = instantVelocity;
+        } else {
+            m_scrollVelocity = 0.3 * instantVelocity + 0.7 * m_scrollVelocity;
+        }
+    } else if (elapsed >= VELOCITY_WINDOW_MS) {
+        // Reset if too much time passed (free-fall detection)
+        m_scrollVelocity =
+            qAbs(static_cast<double>(delta)) / qMax(elapsed, 1LL);
+    }
+
+    m_scrollDirection = (delta > 0) ? 1 : (delta < 0) ? -1 : 0;
+    m_lastScrollTime = timestamp;
+    m_lastScrollPosition = verticalScrollBar()->value();
+}
+
+int ThumbnailListView::predictLandingPage() const {
+    if (m_scrollVelocity < VELOCITY_SLOW_THRESHOLD || m_scrollDirection == 0) {
+        return -1;
+    }
+
+    // Predict landing position: current position + velocity * decay factor
+    // Decay simulates friction - fast scrolls travel further proportionally
+    double decayFactor =
+        (m_scrollVelocity > VELOCITY_MEDIUM_THRESHOLD) ? 1.5 : 0.8;
+    int predictedDelta = static_cast<int>(m_scrollVelocity * 300 * decayFactor);
+    int predictedPosition =
+        m_lastScrollPosition + m_scrollDirection * predictedDelta;
+
+    // Clamp and convert to page number
+    predictedPosition =
+        qBound(verticalScrollBar()->minimum(), predictedPosition,
+               verticalScrollBar()->maximum());
+
+    QModelIndex predictedIndex = indexAt(
+        viewport()->rect().adjusted(0, 0, 0, predictedPosition).bottomRight());
+    return predictedIndex.row();
 }
 
 void ThumbnailListView::animateScrollTo(int position) {
@@ -790,25 +859,41 @@ void ThumbnailListView::updatePreloadRange() {
     if (!thumbnailModel || m_visibleRange.first < 0)
         return;
 
-    // 预加载可见范围前后的几页
-    int preloadCount = 3;
-    int startPage = qMax(0, m_visibleRange.first - preloadCount);
-    int endPage = qMin(thumbnailModel->rowCount() - 1,
-                       m_visibleRange.second + preloadCount);
+    int numPages = thumbnailModel->rowCount();
+    int startPage = 0, endPage = 0;
 
-    // 智能预加载：只预加载尚未缓存且不在可见范围内的页面
-    int preloadRequestCount = 0;
-    for (int i = startPage; i <= endPage; ++i) {
-        // 跳过可见范围内的页面（这些已经在updateVisibleRange中处理了）
-        if (i >= m_visibleRange.first && i <= m_visibleRange.second) {
-            continue;
+    if (m_scrollVelocity < VELOCITY_SLOW_THRESHOLD) {
+        // Slow / stationary: linear preload around visible range
+        startPage = qMax(0, m_visibleRange.first - PRELOAD_COUNT_SLOW);
+        endPage =
+            qMin(numPages - 1, m_visibleRange.second + PRELOAD_COUNT_SLOW);
+    } else if (m_scrollVelocity < VELOCITY_MEDIUM_THRESHOLD) {
+        // Medium scroll: wider linear preload in scroll direction
+        startPage = qMax(0, m_visibleRange.first - PRELOAD_COUNT_MEDIUM);
+        endPage =
+            qMin(numPages - 1, m_visibleRange.second + PRELOAD_COUNT_MEDIUM);
+    } else {
+        // Fast scroll: cancel pending non-visible requests, jump to predicted
+        // target
+        int predictedPage = predictLandingPage();
+        if (predictedPage >= 0) {
+            startPage = qMax(0, predictedPage - PRELOAD_COUNT_FAST);
+            endPage = qMin(numPages - 1, predictedPage + PRELOAD_COUNT_FAST);
+        } else {
+            startPage = qMax(0, m_visibleRange.first - PRELOAD_COUNT_FAST);
+            endPage =
+                qMin(numPages - 1, m_visibleRange.second + PRELOAD_COUNT_FAST);
         }
+    }
 
-        // 检查是否需要预加载
+    // Request preload pages not already cached or loading
+    for (int i = startPage; i <= endPage; ++i) {
+        if (i >= m_visibleRange.first && i <= m_visibleRange.second)
+            continue;
+
         if (!thumbnailModel->hasCachedThumbnail(i) &&
             !thumbnailModel->isThumbnailLoading(i)) {
             thumbnailModel->requestThumbnail(i);
-            preloadRequestCount++;
         }
     }
 }
@@ -914,8 +999,27 @@ void ThumbnailListView::exportPageToFile(int pageNumber) {
 }
 
 void ThumbnailListView::scheduleViewportUpdate() {
-    if (!m_viewportUpdatePending && m_viewportUpdateTimer) {
+    if (!m_viewportUpdateTimer)
+        return;
+
+    // Dynamic debounce: fast scroll = longer delay to skip intermediate frames
+    int delay;
+    if (m_scrollVelocity < VELOCITY_SLOW_THRESHOLD) {
+        delay = VIEWPORT_DEBOUNCE_SLOW;
+    } else if (m_scrollVelocity < VELOCITY_MEDIUM_THRESHOLD) {
+        delay = VIEWPORT_DEBOUNCE_MEDIUM;
+    } else {
+        delay = VIEWPORT_DEBOUNCE_FAST;
+    }
+
+    // Update interval on each call in case velocity changed
+    m_viewportUpdateTimer->setInterval(delay);
+
+    if (!m_viewportUpdatePending) {
         m_viewportUpdatePending = true;
+        m_viewportUpdateTimer->start();
+    } else {
+        // Restart to re-arm the timer with the new delay
         m_viewportUpdateTimer->start();
     }
 }
@@ -927,38 +1031,46 @@ void ThumbnailListView::optimizedUpdateVisibleRange() {
     if (!thumbnailModel)
         return;
 
-    QRect viewportRect = viewport()->rect();
-    int firstVisible = indexAt(viewportRect.topLeft()).row();
-    int lastVisible = indexAt(viewportRect.bottomRight()).row();
+    QPair<int, int> newRange = calculateVisibleRange();
+    if (newRange.first < 0 || newRange.second < 0)
+        return;
 
-    if (firstVisible < 0)
-        firstVisible = 0;
-    if (lastVisible < 0)
-        lastVisible = thumbnailModel->rowCount() - 1;
+    // Only update if visible range changed significantly (threshold: 1 item)
+    if (qAbs(newRange.first - m_lastVisibleStart) > 1 ||
+        qAbs(newRange.second - m_lastVisibleEnd) > 1) {
+        QPair<int, int> oldRange = m_visibleRange;
+        m_visibleRange = newRange;
+        m_lastVisibleStart = newRange.first;
+        m_lastVisibleEnd = newRange.second;
 
-    // 只有当可见范围发生显著变化时才更新
-    if (qAbs(firstVisible - m_lastVisibleStart) > 1 ||
-        qAbs(lastVisible - m_lastVisibleEnd) > 1) {
-        m_visibleRange = qMakePair(firstVisible, lastVisible);
-        m_lastVisibleStart = firstVisible;
-        m_lastVisibleEnd = lastVisible;
-
-        // 更新模型的视口范围（用于懒加载）
-        thumbnailModel->setViewportRange(firstVisible, lastVisible,
-                                         m_preloadMargin);
-
-        // 请求可见范围的缩略图 - 智能请求，只加载需要的
-        int requestCount = 0;
-        for (int i = firstVisible; i <= lastVisible; ++i) {
-            QModelIndex index = thumbnailModel->index(i, 0);
-            if (index.isValid()) {
-                // 检查是否已经有缓存或正在加载
-                if (!thumbnailModel->hasCachedThumbnail(i) &&
-                    !thumbnailModel->isThumbnailLoading(i)) {
-                    thumbnailModel->requestThumbnail(i);
-                    requestCount++;
+        // Notify progressive loader for two-stage rendering.
+        // Loader handles low-res instantly via synchronous call, then
+        // dwell timer triggers high-res via model->requestThumbnail.
+        if (m_progressiveLoader) {
+            m_progressiveLoader->onVisibleRangeChanged(newRange.first,
+                                                       newRange.second);
+        } else {
+            // Fallback: direct thumbnail request (no progressive loader)
+            for (int i = newRange.first; i <= newRange.second; ++i) {
+                QModelIndex index = thumbnailModel->index(i, 0);
+                if (index.isValid()) {
+                    if (!thumbnailModel->hasCachedThumbnail(i) &&
+                        !thumbnailModel->isThumbnailLoading(i)) {
+                        thumbnailModel->requestThumbnail(i);
+                    }
                 }
             }
+        }
+
+        // Emit signal if range actually changed
+        if (oldRange != m_visibleRange) {
+            emit visibleRangeChanged(m_visibleRange.first,
+                                     m_visibleRange.second);
+        }
+
+        // Trigger preload after visible range update
+        if (m_autoPreload) {
+            updatePreloadRange();
         }
     }
 

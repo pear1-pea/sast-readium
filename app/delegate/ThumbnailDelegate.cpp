@@ -70,6 +70,9 @@ void ThumbnailDelegate::paint(QPainter* painter,
     QPixmap thumbnail = index.data(ThumbnailModel::PixmapRole).value<QPixmap>();
     bool isLoading = index.data(ThumbnailModel::LoadingRole).toBool();
     bool hasError = index.data(ThumbnailModel::ErrorRole).toBool();
+    bool hasPreview = index.data(ThumbnailModel::HasPreviewRole).toBool();
+    QPixmap preview =
+        index.data(ThumbnailModel::PreviewPixmapRole).value<QPixmap>();
     QString errorMessage =
         index.data(ThumbnailModel::ErrorMessageRole).toString();
     int pageNumber = index.data(ThumbnailModel::PageNumberRole).toInt();
@@ -92,6 +95,8 @@ void ThumbnailDelegate::paint(QPainter* painter,
     // 绘制缩略图内容
     if (hasError) {
         paintErrorIndicator(painter, thumbnailRect, errorMessage, option);
+    } else if (isLoading && hasPreview && !preview.isNull()) {
+        paintBlurredPreview(painter, thumbnailRect, preview, option);
     } else if (isLoading) {
         paintLoadingIndicator(painter, thumbnailRect, option);
     } else if (!thumbnail.isNull()) {
@@ -299,6 +304,30 @@ void ThumbnailDelegate::paintPageNumber(
 
     QString pageText = QString::number(pageNumber + 1);  // 页码从1开始显示
     painter->drawText(rect, Qt::AlignCenter, pageText);
+}
+
+void ThumbnailDelegate::paintBlurredPreview(
+    QPainter* painter, const QRect& rect, const QPixmap& preview,
+    const QStyleOptionViewItem& option) const {
+    // Draw low-res preview stretched to fill rect (naturally blurry)
+    painter->drawPixmap(rect, preview, preview.rect());
+
+    // Semi-transparent overlay for loading-state visual feedback
+    painter->fillRect(rect, QColor(255, 255, 255, 80));
+
+    // Small spinner in bottom-right to indicate loading in progress
+    QRect spinnerRect(rect.right() - LOADING_SPINNER_SIZE - 4,
+                      rect.bottom() - LOADING_SPINNER_SIZE - 4,
+                      LOADING_SPINNER_SIZE, LOADING_SPINNER_SIZE);
+    AnimationState* state = getAnimationState(option.index);
+    int angle = state ? state->loadingAngle : 0;
+
+    painter->setRenderHint(QPainter::Antialiasing);
+    QPen pen(m_loadingColor, 2);
+    painter->setPen(pen);
+
+    int spanAngle = 270 * 16;  // 3/4 circle
+    painter->drawArc(spinnerRect, angle * 16, spanAngle);
 }
 
 void ThumbnailDelegate::paintLoadingIndicator(
