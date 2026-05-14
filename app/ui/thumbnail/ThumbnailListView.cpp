@@ -5,7 +5,6 @@
 #include <QContextMenuEvent>
 #include <QDebug>
 #include <QEasingCurve>
-#include <QGraphicsOpacityEffect>
 #include <QKeyEvent>
 #include <QListView>
 #include <QMenu>
@@ -36,20 +35,18 @@ ThumbnailListView::ThumbnailListView(QWidget* parent)
       m_thumbnailSpacing(DEFAULT_SPACING),
       m_animationEnabled(true),
       m_smoothScrolling(true),
-      m_fadeInEnabled(true),
       m_scrollAnimation(nullptr),
       m_targetScrollPosition(0),
       m_isScrollAnimating(false),
       m_preloadMargin(DEFAULT_PRELOAD_MARGIN),
       m_autoPreload(true),
       m_preloadTimer(nullptr),
-      m_fadeInTimer(nullptr),
-      m_opacityEffect(nullptr),
       m_contextMenuEnabled(true),
       m_contextMenu(nullptr),
       m_contextMenuPage(-1),
       m_currentPage(-1),
       m_progressiveLoader(nullptr),
+      m_delegateAnimationTimer(nullptr),
       m_viewportUpdatePending(false),
       m_lastVisibleStart(-1),
       m_lastVisibleEnd(-1),
@@ -73,8 +70,8 @@ ThumbnailListView::~ThumbnailListView() {
         m_preloadTimer->stop();
     }
 
-    if (m_fadeInTimer) {
-        m_fadeInTimer->stop();
+    if (m_delegateAnimationTimer) {
+        m_delegateAnimationTimer->stop();
     }
 }
 
@@ -142,19 +139,14 @@ void ThumbnailListView::setupAnimations() {
     connect(m_viewportUpdateTimer, &QTimer::timeout, this,
             &ThumbnailListView::optimizedUpdateVisibleRange);
 
-    // 淡入效果定时器
-    m_fadeInTimer = new QTimer(this);
-    m_fadeInTimer->setInterval(FADE_IN_TIMER_INTERVAL);
-    m_fadeInTimer->setSingleShot(false);
-    connect(m_fadeInTimer, &QTimer::timeout, this,
-            &ThumbnailListView::onFadeInTimer);
-
-    // 透明度效果
-    if (m_fadeInEnabled) {
-        m_opacityEffect = new QGraphicsOpacityEffect(this);
-        m_opacityEffect->setOpacity(1.0);
-        setGraphicsEffect(m_opacityEffect);
-    }
+    // Delegate animation driver (~30fps) — keeps viewport repainting so
+    // the delegate can lerp hover/selection opacity and rotate spinners
+    // in its paint() method.
+    m_delegateAnimationTimer = new QTimer(this);
+    m_delegateAnimationTimer->setInterval(DELEGATE_ANIMATION_INTERVAL);
+    connect(m_delegateAnimationTimer, &QTimer::timeout, this,
+            &ThumbnailListView::onDelegateAnimationTick);
+    m_delegateAnimationTimer->start();
 }
 
 void ThumbnailListView::setupContextMenu() {
@@ -222,9 +214,6 @@ void ThumbnailListView::setThumbnailModel(ThumbnailModel* model) {
     if (gen) {
         m_progressiveLoader = new ProgressiveThumbnailLoader(gen, this);
         connect(m_progressiveLoader,
-                &ProgressiveThumbnailLoader::lowResPreviewReady,
-                m_thumbnailModel, &ThumbnailModel::onLowResPreviewReady);
-        connect(m_progressiveLoader,
                 &ProgressiveThumbnailLoader::requestHighRes, m_thumbnailModel,
                 &ThumbnailModel::requestThumbnail);
     }
@@ -247,8 +236,13 @@ void ThumbnailListView::setThumbnailDelegate(ThumbnailDelegate* delegate) {
 
     if (delegate) {
         delegate->setParent(this);
-        delegate->installEventFilter(this);
     }
+
+    // Enable hover detection via WA_Hover so the delegate's paint() reads
+    // State_MouseOver; the entered signal ensures repaint on item change.
+    viewport()->setAttribute(Qt::WA_Hover);
+    connect(this, &QAbstractItemView::entered, this,
+            [this]() { viewport()->update(); });
 
     updateItemSizes();
 }
@@ -417,24 +411,6 @@ void ThumbnailListView::setSmoothScrolling(bool enabled) {
     m_smoothScrolling = enabled;
 }
 
-void ThumbnailListView::setFadeInEnabled(bool enabled) {
-    if (m_fadeInEnabled == enabled) {
-        return;
-    }
-
-    m_fadeInEnabled = enabled;
-
-    if (enabled && !m_opacityEffect) {
-        m_opacityEffect = new QGraphicsOpacityEffect(this);
-        m_opacityEffect->setOpacity(1.0);
-        setGraphicsEffect(m_opacityEffect);
-    } else if (!enabled && m_opacityEffect) {
-        setGraphicsEffect(nullptr);
-        delete m_opacityEffect;
-        m_opacityEffect = nullptr;
-    }
-}
-
 void ThumbnailListView::setPreloadMargin(int margin) {
     m_preloadMargin = qMax(0, margin);
     updatePreloadRange();
@@ -598,9 +574,8 @@ void ThumbnailListView::onScrollBarRangeChanged(int min, int max) {
 
 void ThumbnailListView::onModelDataChanged(const QModelIndex& topLeft,
                                            const QModelIndex& bottomRight) {
-    Q_UNUSED(topLeft);
-    Q_UNUSED(bottomRight);
-    update();
+    // Repaint only the affected rows instead of the full viewport
+    viewport()->update(visualRect(topLeft).united(visualRect(bottomRight)));
 }
 
 void ThumbnailListView::onModelRowsInserted(const QModelIndex& parent,
@@ -629,13 +604,9 @@ void ThumbnailListView::onScrollAnimationFinished() {
 
 void ThumbnailListView::onPreloadTimer() { updatePreloadRange(); }
 
-void ThumbnailListView::onFadeInTimer() {
-    // 简单的淡入动画
-    update();
-}
+void ThumbnailListView::onDelegateAnimationTick() { viewport()->update(); }
 
 void ThumbnailListView::updateVisibleRange() {
-    // Immediate update without debouncing - used for critical updates
     ThumbnailModel* thumbnailModel = qobject_cast<ThumbnailModel*>(model());
     if (!thumbnailModel)
         return;
@@ -644,29 +615,15 @@ void ThumbnailListView::updateVisibleRange() {
     if (newRange.first < 0 || newRange.second < 0)
         return;
 
-    // Skip if range hasn't changed
-    if (m_visibleRange == newRange) {
+    if (m_visibleRange == newRange)
         return;
-    }
 
-    QPair<int, int> oldRange = m_visibleRange;
     m_visibleRange = newRange;
+    emit visibleRangeChanged(newRange.first, newRange.second);
 
-    // Request thumbnails for visible range
-    for (int i = newRange.first; i <= newRange.second; ++i) {
-        QModelIndex index = thumbnailModel->index(i, 0);
-        if (index.isValid()) {
-            if (!thumbnailModel->hasCachedThumbnail(i) &&
-                !thumbnailModel->isThumbnailLoading(i)) {
-                thumbnailModel->requestThumbnail(i);
-            }
-        }
-    }
-
-    // Emit signal
-    if (oldRange != m_visibleRange) {
-        emit visibleRangeChanged(m_visibleRange.first, m_visibleRange.second);
-    }
+    // Dispatch thumbnail requests for the full target range (visible + preload)
+    // in one pass, avoiding duplicate paths between visible and preload logic.
+    updatePreloadRange();
 }
 
 void ThumbnailListView::paintEvent(QPaintEvent* event) {
@@ -748,10 +705,9 @@ QPair<int, int> ThumbnailListView::calculateVisibleRange() const {
     int firstVisible = indexAt(viewportRect.topLeft()).row();
     int lastVisible = indexAt(viewportRect.bottomRight()).row();
 
-    if (firstVisible < 0)
-        firstVisible = 0;
-    if (lastVisible < 0)
-        lastVisible = thumbnailModel->rowCount() - 1;
+    // Layout not ready yet — caller handles (-1, -1) with early return
+    if (firstVisible < 0 || lastVisible < 0)
+        return qMakePair(-1, -1);
 
     return qMakePair(firstVisible, lastVisible);
 }
@@ -837,15 +793,7 @@ QModelIndex ThumbnailListView::indexAtPage(int pageNumber) const {
     ThumbnailModel* thumbnailModel = qobject_cast<ThumbnailModel*>(model());
     if (!thumbnailModel)
         return QModelIndex();
-
-    for (int i = 0; i < thumbnailModel->rowCount(); ++i) {
-        QModelIndex index = thumbnailModel->index(i, 0);
-        if (index.isValid() && index.row() == pageNumber) {
-            return index;
-        }
-    }
-
-    return QModelIndex();
+    return thumbnailModel->index(pageNumber, 0);
 }
 
 int ThumbnailListView::pageAtIndex(const QModelIndex& index) const {
@@ -875,6 +823,8 @@ void ThumbnailListView::updatePreloadRange() {
     } else {
         // Fast scroll: cancel pending non-visible requests, jump to predicted
         // target
+        thumbnailModel->cancelOutOfRangeRequests(m_visibleRange.first,
+                                                 m_visibleRange.second);
         int predictedPage = predictLandingPage();
         if (predictedPage >= 0) {
             startPage = qMax(0, predictedPage - PRELOAD_COUNT_FAST);
@@ -886,11 +836,10 @@ void ThumbnailListView::updatePreloadRange() {
         }
     }
 
-    // Request preload pages not already cached or loading
+    // Request pages not already cached or loading.
+    // Visible range is included so updateVisibleRange does not need its own
+    // request loop — all thumbnail dispatch converges here.
     for (int i = startPage; i <= endPage; ++i) {
-        if (i >= m_visibleRange.first && i <= m_visibleRange.second)
-            continue;
-
         if (!thumbnailModel->hasCachedThumbnail(i) &&
             !thumbnailModel->isThumbnailLoading(i)) {
             thumbnailModel->requestThumbnail(i);
@@ -932,7 +881,7 @@ void ThumbnailListView::copyPageToClipboard(int pageNumber) {
         return;
     }
 
-    QPixmap pixmap = index.data(Qt::DecorationRole).value<QPixmap>();
+    QPixmap pixmap = index.data(ThumbnailModel::PixmapRole).value<QPixmap>();
     if (pixmap.isNull()) {
         QMessageBox::warning(this, "错误", "无法获取页面图像");
         return;
@@ -975,7 +924,7 @@ void ThumbnailListView::exportPageToFile(int pageNumber) {
         return;
     }
 
-    QPixmap pixmap = index.data(Qt::DecorationRole).value<QPixmap>();
+    QPixmap pixmap = index.data(ThumbnailModel::PixmapRole).value<QPixmap>();
     if (pixmap.isNull()) {
         QMessageBox::warning(this, "错误", "无法获取页面图像");
         return;
@@ -1035,13 +984,18 @@ void ThumbnailListView::optimizedUpdateVisibleRange() {
     if (newRange.first < 0 || newRange.second < 0)
         return;
 
-    // Only update if visible range changed significantly (threshold: 1 item)
-    if (qAbs(newRange.first - m_lastVisibleStart) > 1 ||
-        qAbs(newRange.second - m_lastVisibleEnd) > 1) {
+    // Only update if visible range changed significantly
+    if (qAbs(newRange.first - m_lastVisibleStart) > 0 ||
+        qAbs(newRange.second - m_lastVisibleEnd) > 0) {
         QPair<int, int> oldRange = m_visibleRange;
         m_visibleRange = newRange;
         m_lastVisibleStart = newRange.first;
         m_lastVisibleEnd = newRange.second;
+
+        // Restore viewport range in model so lazy loading and priority
+        // scheduling work correctly.
+        thumbnailModel->setViewportRange(newRange.first, newRange.second,
+                                         m_preloadMargin);
 
         // Notify progressive loader for two-stage rendering.
         // Loader handles low-res instantly via synchronous call, then

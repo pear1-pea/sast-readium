@@ -42,8 +42,6 @@ public:
     enum ThumbnailRole {
         PageNumberRole = Qt::UserRole + 1,
         PixmapRole,
-        PreviewPixmapRole,
-        HasPreviewRole,
         LoadingRole,
         ErrorRole,
         ErrorMessageRole,
@@ -105,11 +103,10 @@ public slots:
     void refreshThumbnail(int pageNumber);
     void refreshAllThumbnails();
     void preloadVisibleRange(int firstVisible, int lastVisible);
-
-    // 懒加载和视口管理
     void setLazyLoadingEnabled(bool enabled);
     void setViewportRange(int start, int end, int margin = 2);
     void updateViewportPriorities();
+    void cancelOutOfRangeRequests(int keepStart, int keepEnd);
 
 signals:
     void thumbnailLoaded(int pageNumber);
@@ -117,10 +114,6 @@ signals:
     void cacheUpdated();
     void memoryUsageChanged(qint64 usage);
     void loadingStateChanged(int pageNumber, bool loading);
-
-public slots:
-    // Called by ProgressiveThumbnailLoader when low-res preview is ready
-    void onLowResPreviewReady(int pageNumber, const QPixmap& preview);
 
 private slots:
     void onThumbnailGenerated(int pageNumber, const QPixmap& pixmap);
@@ -132,7 +125,6 @@ private slots:
 private:
     struct ThumbnailItem {
         QPixmap pixmap;
-        QPixmap previewPixmap;
         bool isLoading = false;
         bool hasError = false;
         QString errorMessage;

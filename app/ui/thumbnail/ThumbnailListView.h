@@ -1,7 +1,6 @@
 #pragma once
 
 #include <QAction>
-#include <QGraphicsOpacityEffect>
 #include <QListView>
 #include <QMenu>
 #include <QPropertyAnimation>
@@ -69,9 +68,6 @@ public:
     void setSmoothScrolling(bool enabled);
     bool smoothScrolling() const { return m_smoothScrolling; }
 
-    void setFadeInEnabled(bool enabled);
-    bool fadeInEnabled() const { return m_fadeInEnabled; }
-
     // 预加载控制
     void setPreloadMargin(int margin);
     int preloadMargin() const { return m_preloadMargin; }
@@ -116,7 +112,7 @@ private slots:
     void onModelRowsRemoved(const QModelIndex& parent, int first, int last);
     void onScrollAnimationFinished();
     void onPreloadTimer();
-    void onFadeInTimer();
+    void onDelegateAnimationTick();
     void updateVisibleRange();
     void scheduleViewportUpdate();
     void optimizedUpdateVisibleRange();
@@ -140,9 +136,6 @@ private:
     void animateScrollTo(int scrollPosition);
     void animateScrollToPage(int pageNumber);
     void stopScrollAnimation();
-
-    void fadeInVisibleItems();
-    void updateFadeEffect();
 
     QModelIndex indexAtPage(int pageNumber) const;
     int pageAtIndex(const QModelIndex& index) const;
@@ -173,7 +166,6 @@ private:
     int m_thumbnailSpacing;
     bool m_animationEnabled;
     bool m_smoothScrolling;
-    bool m_fadeInEnabled;
 
     // 滚动动画
     QPropertyAnimation* m_scrollAnimation;
@@ -201,12 +193,11 @@ private:
     int m_lastVisibleStart;
     int m_lastVisibleEnd;
 
+    // Delegate animation driver (30fps tick → viewport repaint)
+    QTimer* m_delegateAnimationTimer;
+
     // Progressive loading (two-stage rendering coordinator)
     ProgressiveThumbnailLoader* m_progressiveLoader;
-
-    // 淡入效果
-    QTimer* m_fadeInTimer;
-    QGraphicsOpacityEffect* m_opacityEffect;
 
     // 右键菜单
     bool m_contextMenuEnabled;
@@ -225,8 +216,6 @@ private:
     static constexpr int DEFAULT_PRELOAD_MARGIN = 3;
     static constexpr int SCROLL_ANIMATION_DURATION = 300;  // ms
     static constexpr int PRELOAD_TIMER_INTERVAL = 200;     // ms
-    static constexpr int FADE_IN_DURATION = 150;           // ms
-    static constexpr int FADE_IN_TIMER_INTERVAL = 50;      // ms
     static constexpr int SMOOTH_SCROLL_STEP = 120;  // pixels per wheel step
     // Heuristic prefetching thresholds
     static constexpr double VELOCITY_SLOW_THRESHOLD = 0.5;    // px/ms
@@ -234,7 +223,8 @@ private:
     static constexpr int PRELOAD_COUNT_SLOW = 3;
     static constexpr int PRELOAD_COUNT_MEDIUM = 10;
     static constexpr int PRELOAD_COUNT_FAST = 20;
-    static constexpr int VIEWPORT_DEBOUNCE_SLOW = 50;     // ms
-    static constexpr int VIEWPORT_DEBOUNCE_MEDIUM = 100;  // ms
-    static constexpr int VIEWPORT_DEBOUNCE_FAST = 200;    // ms
+    static constexpr int DELEGATE_ANIMATION_INTERVAL = 33;  // ms (~30fps)
+    static constexpr int VIEWPORT_DEBOUNCE_SLOW = 50;       // ms
+    static constexpr int VIEWPORT_DEBOUNCE_MEDIUM = 100;    // ms
+    static constexpr int VIEWPORT_DEBOUNCE_FAST = 200;      // ms
 };

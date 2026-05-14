@@ -16,7 +16,7 @@
 
 class QMainWindow;
 
-enum class Theme { Light, Dark };
+#include "common/Theme.h"
 
 class StyleManager : public QObject {
     Q_OBJECT

@@ -269,12 +269,7 @@ void SideBar::updateThemeUI() {
 
     // 更新ThumbnailDelegate的主题
     if (thumbnailDelegate) {
-        Theme currentTheme = StyleManager::instance().currentTheme();
-        if (currentTheme == Theme::Dark) {
-            thumbnailDelegate->setDarkTheme();
-        } else {
-            thumbnailDelegate->setLightTheme();
-        }
+        thumbnailDelegate->setTheme(StyleManager::instance().currentTheme());
     }
 
     if (tabWidget) {

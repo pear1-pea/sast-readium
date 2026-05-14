@@ -186,57 +186,6 @@ void ThumbnailGenerator::generateThumbnailRange(int startPage, int endPage,
     }
 }
 
-void ThumbnailGenerator::generateLowResPreview(int pageNumber,
-                                               const QSize& size) {
-    if (!m_document || pageNumber < 0 || pageNumber >= m_document->numPages()) {
-        return;
-    }
-
-    QSize previewSize = size.isValid() ? size : QSize(40, 60);
-    constexpr double LOW_RES_QUALITY = 0.15;
-
-    // Non-blocking: skip if mutex is held by a concurrent render job.
-    // The loader's timer will retry in 150ms.
-    std::unique_lock lock(m_documentMutex, std::try_to_lock);
-    if (!lock.owns_lock()) {
-        return;
-    }
-
-    try {
-        std::unique_ptr<Poppler::Page> page(m_document->page(pageNumber));
-        if (!page) {
-            return;
-        }
-
-        QPixmap preview = renderPageToPixmapOptimized(page.get(), previewSize,
-                                                      LOW_RES_QUALITY);
-
-        // Unlock before emitting signal to avoid deadlock if handler needs
-        // mutex
-        lock.unlock();
-
-        if (!preview.isNull()) {
-            emit lowResPreviewGenerated(pageNumber, preview);
-        }
-    } catch (...) {
-        // Low-res preview is best-effort; silently ignore failures
-    }
-}
-
-void ThumbnailGenerator::generateLowResPreviewRange(int startPage, int endPage,
-                                                    const QSize& size) {
-    if (!m_document)
-        return;
-
-    int numPages = m_document->numPages();
-    startPage = qBound(0, startPage, numPages - 1);
-    endPage = qBound(startPage, endPage, numPages - 1);
-
-    for (int i = startPage; i <= endPage; ++i) {
-        generateLowResPreview(i, size);
-    }
-}
-
 void ThumbnailGenerator::clearQueue() {
     QMutexLocker locker(&m_queueMutex);
     m_requestQueue.clear();
@@ -510,10 +459,9 @@ void ThumbnailGenerator::handleJobError(GenerationJob* job,
 }
 
 QPixmap ThumbnailGenerator::generatePixmap(const GenerationRequest& request) {
-    m_documentMutex.lock();
+    QMutexLocker locker(&m_documentMutex);
 
     if (!m_document) {
-        m_documentMutex.unlock();
         return QPixmap();
     }
 
@@ -533,7 +481,7 @@ QPixmap ThumbnailGenerator::generatePixmap(const GenerationRequest& request) {
     }
 
     // Unlock before yielding, so main thread's tryLock can acquire the mutex
-    m_documentMutex.unlock();
+    locker.unlock();
 
     // Brief yield to prevent low-res preview starvation:
     // When batch high-res jobs run continuously, they hold the document mutex
