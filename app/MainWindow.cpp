@@ -404,6 +404,7 @@ void MainWindow::onCurrentDocumentChangedForOutline(int index) {
             documentModel->getDocument(index);
         if (sharedDoc) {
             sideBar->setDocument(sharedDoc);
+            renderModel->setDocument(sharedDoc);
         }
     }
 }

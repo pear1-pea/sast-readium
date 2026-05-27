@@ -1,7 +1,6 @@
 #pragma once
 
 #include <poppler/qt6/poppler-qt6.h>
-#include <QCache>
 #include <QDateTime>
 #include <QHash>
 #include <QMutex>
@@ -11,6 +10,8 @@
 #include <QThread>
 #include <QTimer>
 #include <QWaitCondition>
+
+class PDFRenderCache;
 
 /**
  * Intelligent PDF page prerendering system with predictive loading
@@ -48,8 +49,7 @@ public:
     void setDocument(Poppler::Document* document);
     void setStrategy(PrerenderStrategy strategy);
     void setMaxWorkerThreads(int threads);
-    void setMaxCacheSize(int maxItems);
-    void setMaxMemoryUsage(qint64 bytes);
+    void setRenderCache(PDFRenderCache* cache);
 
     // Prerendering control
     void requestPrerender(int pageNumber, double scaleFactor, int rotation,
@@ -58,15 +58,8 @@ public:
     void cancelPrerenderingForPage(int pageNumber);
     void clearPrerenderQueue();
 
-    // Cache access
-    QPixmap getCachedPage(int pageNumber, double scaleFactor, int rotation);
-    bool hasPrerenderedPage(int pageNumber, double scaleFactor, int rotation);
-
     // Statistics and monitoring
     int queueSize() const;
-    int cacheSize() const;
-    qint64 memoryUsage() const;
-    double cacheHitRatio() const;
 
     // Adaptive learning
     void recordPageView(int pageNumber, qint64 viewDuration);
@@ -99,8 +92,6 @@ private:
     // Configuration
     PrerenderStrategy m_strategy;
     int m_maxWorkerThreads;
-    int m_maxCacheSize;
-    qint64 m_maxMemoryUsage;
 
     // Request management
     QQueue<RenderRequest> m_renderQueue;
@@ -108,20 +99,6 @@ private:
     QWaitCondition m_queueCondition;
     bool m_isRunning;
     bool m_isPaused;
-
-    // Cache management
-    struct CacheItem {
-        QPixmap pixmap;
-        qint64 timestamp;
-        qint64 memorySize;
-        int accessCount;
-    };
-    QHash<QString, CacheItem> m_cache;
-    qint64 m_currentMemoryUsage;
-
-    // Statistics
-    int m_cacheHits;
-    int m_cacheMisses;
 
     // Adaptive learning
     QHash<int, QList<qint64>> m_pageViewTimes;
@@ -133,16 +110,12 @@ private:
     int m_prerenderRange;
 
     // Helper methods
-    QString getCacheKey(int pageNumber, double scaleFactor, int rotation);
-    void evictLRUItems();
-    qint64 getPixmapMemorySize(const QPixmap& pixmap);
+    PDFRenderCache* m_renderCache = nullptr;
 
 signals:
     void pagePrerendered(int pageNumber, double scaleFactor, int rotation);
     void prerenderingStarted();
     void prerenderingStopped();
-    void cacheUpdated();
-    void memoryUsageChanged(qint64 bytes);
 };
 
 /**
@@ -176,86 +149,4 @@ signals:
     void pageRendered(int pageNumber, const QPixmap& pixmap, double scaleFactor,
                       int rotation);
     void renderError(int pageNumber, const QString& error);
-};
-
-/**
- * Reading pattern analyzer for intelligent prerendering
- */
-class ReadingPatternAnalyzer {
-public:
-    struct ReadingSession {
-        QDateTime startTime;
-        QDateTime endTime;
-        QList<int> pagesViewed;
-        QHash<int, qint64> pageViewDurations;
-    };
-
-    void recordPageView(int pageNumber, qint64 duration);
-    void recordNavigation(int fromPage, int toPage);
-    void startNewSession();
-    void endCurrentSession();
-
-    // Pattern analysis
-    QList<int> predictNextPages(int currentPage, int count = 5);
-    double getPageImportance(int pageNumber);
-    bool isSequentialReader() const;
-    bool isRandomAccessReader() const;
-
-    // Statistics
-    double getAverageViewTime(int pageNumber) const;
-    QList<int> getMostViewedPages(int count = 10) const;
-    QHash<int, int> getNavigationFrequency(int fromPage) const;
-
-private:
-    QList<ReadingSession> m_sessions;
-    ReadingSession m_currentSession;
-    QHash<int, QList<qint64>> m_pageViewTimes;
-    QHash<int, QHash<int, int>> m_navigationPatterns;
-
-    void updatePatterns();
-    double calculateTransitionProbability(int fromPage, int toPage) const;
-};
-
-/**
- * Memory-aware cache with intelligent eviction
- */
-class IntelligentCache {
-public:
-    struct CacheEntry {
-        QPixmap pixmap;
-        qint64 timestamp;
-        qint64 memorySize;
-        int accessCount;
-        double importance;
-    };
-
-    explicit IntelligentCache(qint64 maxMemory = 256 * 1024 * 1024);
-
-    void insert(const QString& key, const QPixmap& pixmap,
-                double importance = 1.0);
-    QPixmap get(const QString& key);
-    bool contains(const QString& key) const;
-    void remove(const QString& key);
-    void clear();
-
-    // Configuration
-    void setMaxMemoryUsage(qint64 bytes);
-    void setMaxItems(int items);
-
-    // Statistics
-    qint64 currentMemoryUsage() const { return m_currentMemoryUsage; }
-    int size() const { return m_cache.size(); }
-    double hitRatio() const;
-
-private:
-    void evictItems();
-    double calculateEvictionScore(const CacheEntry& entry) const;
-    qint64 getPixmapMemorySize(const QPixmap& pixmap) const;
-
-    QHash<QString, CacheEntry> m_cache;
-    qint64 m_maxMemoryUsage;
-    int m_maxItems;
-    qint64 m_currentMemoryUsage;
-    int m_hits;
-    int m_misses;
 };

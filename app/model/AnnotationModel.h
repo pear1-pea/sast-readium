@@ -11,6 +11,7 @@
 #include <QRandomGenerator>
 #include <QRectF>
 #include <QString>
+#include <memory>
 
 /**
  * Annotation types supported by the system
@@ -131,7 +132,7 @@ public:
     int getAnnotationCountForPage(int pageNumber) const;
 
     // Document integration
-    void setDocument(Poppler::Document* document);
+    void setDocument(std::shared_ptr<Poppler::Document> document);
     bool loadAnnotationsFromDocument();
     bool saveAnnotationsToDocument();
     void clearAnnotations();
@@ -161,5 +162,5 @@ private:
     QString generateUniqueId() const;
 
     QList<PDFAnnotation> m_annotations;
-    Poppler::Document* m_document;
+    std::shared_ptr<Poppler::Document> m_document;
 };

@@ -4,6 +4,7 @@
 #include <QDebug>
 #include <QImage>
 #include <QObject>
+#include <memory>
 #include "qtmetamacros.h"
 
 class RenderModel : public QObject {
@@ -11,20 +12,20 @@ class RenderModel : public QObject {
 
 public:
     RenderModel(double dpiX = 72.0, double dpiY = 72.0,
-                Poppler::Document* _document = nullptr,
+                std::shared_ptr<Poppler::Document> _document = nullptr,
                 QObject* parent = nullptr);
     QImage renderPage(int pageNum = 0, double xres = 72.0, double yres = 72.0,
                       int x = 0, int y = 0, int w = -1, int h = -1);
     int getPageCount();
-    void setDocument(Poppler::Document* _document);
+    void setDocument(std::shared_ptr<Poppler::Document> _document);
     ~RenderModel() {}
 
 signals:
     void renderPageDone(QImage image);
-    void documentChanged(Poppler::Document* document);
+    void documentChanged(std::shared_ptr<Poppler::Document> document);
 
 private:
-    Poppler::Document* document;
+    std::shared_ptr<Poppler::Document> document;
     double dpiX;
     double dpiY;
 };

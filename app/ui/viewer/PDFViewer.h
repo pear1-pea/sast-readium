@@ -252,13 +252,6 @@ protected:
     void onScrollChanged();
     void scrollToPageInContinuousView(int pageNumber);
 
-    // 缓存管理方法
-    QPixmap getCachedPage(int pageNumber, double zoomFactor, int rotation);
-    void setCachedPage(int pageNumber, const QPixmap& pixmap, double zoomFactor,
-                       int rotation);
-    void clearPageCache();
-    void cleanupCache();
-
     // 缩放相关方法
     void applyZoom(double factor);
     void saveZoomSettings();
@@ -336,16 +329,6 @@ private:
     QShortcut* lastPageShortcut;
     QShortcut* nextPageShortcut;
     QShortcut* prevPageShortcut;
-
-    // 页面缓存
-    struct PageCacheItem {
-        QPixmap pixmap;
-        double zoomFactor;
-        int rotation;
-        qint64 lastAccessed;
-    };
-    QHash<int, PageCacheItem> pageCache;
-    int maxCacheSize;
 
     // 渲染缓存（新增）
     PDFRenderCache m_renderCache;

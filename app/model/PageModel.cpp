@@ -41,7 +41,10 @@ void PageModel::prevPage() {
     }
 }
 
-void PageModel::updateInfo(Poppler::Document* document) {
+void PageModel::updateInfo(std::shared_ptr<Poppler::Document> document) {
+    if (!document) {
+        return;
+    }
     _totalPages = document->numPages();
     _currentPage = 1;
     if (_renderModel && _totalPages > 0) {

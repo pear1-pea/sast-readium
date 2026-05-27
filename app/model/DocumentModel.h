@@ -39,7 +39,6 @@ private:
 
     // 从合并分支添加的成员
     QString currentFilePath;
-    std::unique_ptr<Poppler::Document> document;
     RenderModel* renderModel;
 
 private slots:

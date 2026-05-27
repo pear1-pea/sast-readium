@@ -567,6 +567,7 @@ PDFViewer::PDFViewer(QWidget* parent, bool enableStyling)
     prerenderer = new PDFPrerenderer(this);
     prerenderer->setStrategy(PDFPrerenderer::PrerenderStrategy::Balanced);
     prerenderer->setMaxWorkerThreads(2);  // Use 2 background threads
+    prerenderer->setRenderCache(&m_renderCache);
 
 #ifdef ENABLE_QGRAPHICS_PDF_SUPPORT
     // 初始化QGraphics PDF查看器
@@ -590,9 +591,6 @@ PDFViewer::PDFViewer(QWidget* parent, bool enableStyling)
     scrollTimer = new QTimer(this);
     scrollTimer->setSingleShot(true);
     scrollTimer->setInterval(100);  // 100ms滚动防抖
-
-    // 初始化页面缓存
-    maxCacheSize = 20;  // 最多缓存20页
 
     // 初始化动画效果
     opacityEffect = new QGraphicsOpacityEffect(this);
@@ -881,7 +879,6 @@ void PDFViewer::setDocument(std::shared_ptr<Poppler::Document> doc) {
     try {
         // 清理旧文档
         if (document) {
-            clearPageCache();       // 清理缓存
             m_renderCache.clear();  // 清理渲染缓存
         }
 
@@ -897,6 +894,11 @@ void PDFViewer::setDocument(std::shared_ptr<Poppler::Document> doc) {
             document->setRenderHint(Poppler::Document::TextSlightHinting, true);
             document->setRenderHint(Poppler::Document::ThinLineShape, true);
             document->setRenderHint(Poppler::Document::OverprintPreview, true);
+
+            // Share document with prerenderer
+            if (prerenderer) {
+                prerenderer->setDocument(document.get());
+            }
             // 验证文档有效性
             int numPages = document->numPages();
             if (numPages <= 0) {
@@ -1455,71 +1457,6 @@ void PDFViewer::scrollToPageInContinuousView(int pageNumber) {
 
     // 确保目标页面被渲染
     updateVisiblePages();
-}
-
-QPixmap PDFViewer::getCachedPage(int pageNumber, double zoomFactor,
-                                 int rotation) {
-    auto it = pageCache.find(pageNumber);
-    if (it != pageCache.end()) {
-        const PageCacheItem& item = it.value();
-        // 检查缓存是否匹配当前参数
-        if (qAbs(item.zoomFactor - zoomFactor) < 0.001 &&
-            item.rotation == rotation) {
-            // 更新访问时间
-            const_cast<PageCacheItem&>(item).lastAccessed =
-                QDateTime::currentMSecsSinceEpoch();
-            return item.pixmap;
-        }
-    }
-    return QPixmap();  // 返回空的QPixmap表示缓存未命中
-}
-
-void PDFViewer::setCachedPage(int pageNumber, const QPixmap& pixmap,
-                              double zoomFactor, int rotation) {
-    // 如果缓存已满，清理最旧的条目
-    if (pageCache.size() >= maxCacheSize) {
-        cleanupCache();
-    }
-
-    PageCacheItem item;
-    item.pixmap = pixmap;
-    item.zoomFactor = zoomFactor;
-    item.rotation = rotation;
-    item.lastAccessed = QDateTime::currentMSecsSinceEpoch();
-
-    pageCache[pageNumber] = item;
-}
-
-void PDFViewer::clearPageCache() { pageCache.clear(); }
-
-void PDFViewer::cleanupCache() {
-    if (pageCache.size() <= maxCacheSize / 2) {
-        return;  // 不需要清理
-    }
-
-    // 找到最旧的条目并删除
-    QList<int> keysToRemove;
-    qint64 oldestTime = QDateTime::currentMSecsSinceEpoch();
-
-    for (auto it = pageCache.begin(); it != pageCache.end(); ++it) {
-        if (it.value().lastAccessed < oldestTime) {
-            oldestTime = it.value().lastAccessed;
-        }
-    }
-
-    // 删除超过一半的最旧条目
-    int removeCount = pageCache.size() - maxCacheSize / 2;
-    for (auto it = pageCache.begin(); it != pageCache.end() && removeCount > 0;
-         ++it) {
-        if (it.value().lastAccessed <= oldestTime + 1000) {  // 1秒容差
-            keysToRemove.append(it.key());
-            removeCount--;
-        }
-    }
-
-    for (int key : keysToRemove) {
-        pageCache.remove(key);
-    }
 }
 
 void PDFViewer::toggleTheme() {

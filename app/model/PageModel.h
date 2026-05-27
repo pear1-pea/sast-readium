@@ -22,7 +22,7 @@ public:
     ~PageModel(){};
 
 public slots:
-    void updateInfo(Poppler::Document* document);
+    void updateInfo(std::shared_ptr<Poppler::Document> document);
 
 signals:
     void pageUpdate(int currentPage, int totalPages);

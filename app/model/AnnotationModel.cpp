@@ -395,8 +395,8 @@ int AnnotationModel::getAnnotationCountForPage(int pageNumber) const {
     return count;
 }
 
-void AnnotationModel::setDocument(Poppler::Document* document) {
-    m_document = document;
+void AnnotationModel::setDocument(std::shared_ptr<Poppler::Document> document) {
+    m_document = std::move(document);
     clearAnnotations();
     if (document) {
         loadAnnotationsFromDocument();

@@ -10,6 +10,7 @@
 #include <QtWidgets>
 #include <algorithm>
 #include <cmath>
+#include "PDFRenderCache.h"
 
 // PDFPrerenderer Implementation
 PDFPrerenderer::PDFPrerenderer(QObject* parent)
@@ -17,14 +18,8 @@ PDFPrerenderer::PDFPrerenderer(QObject* parent)
       m_document(nullptr),
       m_strategy(PrerenderStrategy::Balanced),
       m_maxWorkerThreads(QThread::idealThreadCount()),
-      m_maxCacheSize(100),
-      m_maxMemoryUsage(512 * 1024 * 1024)  // 512MB
-      ,
       m_isRunning(false),
       m_isPaused(false),
-      m_currentMemoryUsage(0),
-      m_cacheHits(0),
-      m_cacheMisses(0),
       m_prerenderRange(3) {
     // Setup adaptive analysis timer
     m_adaptiveTimer = new QTimer(this);
@@ -57,9 +52,10 @@ void PDFPrerenderer::setDocument(Poppler::Document* document) {
         worker->setDocument(document);
     }
 
-    // Clear cache when document changes
-    m_cache.clear();
-    m_currentMemoryUsage = 0;
+    // Clear render cache when document changes
+    if (m_renderCache) {
+        m_renderCache->clear();
+    }
 }
 
 void PDFPrerenderer::setStrategy(PrerenderStrategy strategy) {
@@ -72,9 +68,9 @@ void PDFPrerenderer::requestPrerender(int pageNumber, double scaleFactor,
         return;
     }
 
-    // Check if already cached
-    QString cacheKey = getCacheKey(pageNumber, scaleFactor, rotation);
-    if (m_cache.contains(cacheKey)) {
+    // Check if already cached in shared render cache
+    if (m_renderCache &&
+        m_renderCache->contains({pageNumber, scaleFactor, rotation})) {
         return;
     }
 
@@ -98,28 +94,6 @@ void PDFPrerenderer::requestPrerender(int pageNumber, double scaleFactor,
 
     m_renderQueue.enqueue(request);
     m_queueCondition.wakeOne();
-}
-
-QPixmap PDFPrerenderer::getCachedPage(int pageNumber, double scaleFactor,
-                                      int rotation) {
-    QString cacheKey = getCacheKey(pageNumber, scaleFactor, rotation);
-
-    if (m_cache.contains(cacheKey)) {
-        CacheItem& item = m_cache[cacheKey];
-        item.timestamp = QDateTime::currentMSecsSinceEpoch();
-        item.accessCount++;
-        m_cacheHits++;
-        return item.pixmap;
-    }
-
-    m_cacheMisses++;
-    return QPixmap();
-}
-
-bool PDFPrerenderer::hasPrerenderedPage(int pageNumber, double scaleFactor,
-                                        int rotation) {
-    QString cacheKey = getCacheKey(pageNumber, scaleFactor, rotation);
-    return m_cache.contains(cacheKey);
 }
 
 void PDFPrerenderer::startPrerendering() {
@@ -318,45 +292,20 @@ void PDFPrerenderer::onRenderCompleted(int pageNumber, const QPixmap& pixmap,
     if (pixmap.isNull())
         return;
 
-    QString cacheKey = getCacheKey(pageNumber, scaleFactor, rotation);
-    qint64 pixmapSize = getPixmapMemorySize(pixmap);
-
-    // Evict items if necessary
-    while (m_currentMemoryUsage + pixmapSize > m_maxMemoryUsage &&
-           !m_cache.isEmpty()) {
-        evictLRUItems();
+    // Store in shared render cache
+    if (m_renderCache) {
+        m_renderCache->insert({pageNumber, scaleFactor, rotation}, pixmap);
     }
 
-    // Add to cache
-    CacheItem item;
-    item.pixmap = pixmap;
-    item.timestamp = QDateTime::currentMSecsSinceEpoch();
-    item.memorySize = pixmapSize;
-    item.accessCount = 0;
-
-    m_cache[cacheKey] = item;
-    m_currentMemoryUsage += pixmapSize;
-
     emit pagePrerendered(pageNumber, scaleFactor, rotation);
-    emit cacheUpdated();
-    emit memoryUsageChanged(m_currentMemoryUsage);
 }
 
 void PDFPrerenderer::onAdaptiveAnalysis() { analyzeReadingPatterns(); }
-
-QString PDFPrerenderer::getCacheKey(int pageNumber, double scaleFactor,
-                                    int rotation) {
-    return QString("%1_%2_%3")
-        .arg(pageNumber)
-        .arg(scaleFactor, 0, 'f', 3)
-        .arg(rotation);
-}
 
 void PDFPrerenderer::pausePrerendering() { m_isPaused = true; }
 
 void PDFPrerenderer::resumePrerendering() {
     m_isPaused = false;
-    // Wake up worker threads to resume processing
     m_queueCondition.wakeAll();
 }
 
@@ -364,16 +313,14 @@ void PDFPrerenderer::setMaxWorkerThreads(int maxThreads) {
     m_maxWorkerThreads = qBound(1, maxThreads, QThread::idealThreadCount());
 }
 
-void PDFPrerenderer::analyzeReadingPatterns() {
-    // Simple reading pattern analysis
-    // This could be expanded to track user behavior and optimize prerendering
+void PDFPrerenderer::setRenderCache(PDFRenderCache* cache) {
+    m_renderCache = cache;
+}
 
-    // For now, just adjust prerender range based on recent access patterns
+void PDFPrerenderer::analyzeReadingPatterns() {
     if (m_accessHistory.size() > 10) {
-        // Calculate average jump distance
         int totalJumps = 0;
         int jumpCount = 0;
-
         for (int i = 1; i < m_accessHistory.size(); ++i) {
             int jump = qAbs(m_accessHistory[i] - m_accessHistory[i - 1]);
             if (jump > 0) {
@@ -381,10 +328,8 @@ void PDFPrerenderer::analyzeReadingPatterns() {
                 jumpCount++;
             }
         }
-
         if (jumpCount > 0) {
             int avgJump = totalJumps / jumpCount;
-            // Adjust prerender range based on jump patterns
             if (avgJump > 5) {
                 m_prerenderRange = qMin(m_prerenderRange + 1, 10);
             } else if (avgJump < 2) {
@@ -392,36 +337,6 @@ void PDFPrerenderer::analyzeReadingPatterns() {
             }
         }
     }
-}
-
-void PDFPrerenderer::evictLRUItems() {
-    if (m_cache.isEmpty())
-        return;
-
-    // Find least recently used item
-    QString oldestKey;
-    qint64 oldestTime = QDateTime::currentMSecsSinceEpoch();
-
-    for (auto it = m_cache.begin(); it != m_cache.end(); ++it) {
-        if (it->timestamp < oldestTime) {
-            oldestTime = it->timestamp;
-            oldestKey = it.key();
-        }
-    }
-
-    if (!oldestKey.isEmpty()) {
-        m_currentMemoryUsage -= m_cache[oldestKey].memorySize;
-        m_cache.remove(oldestKey);
-    }
-}
-
-qint64 PDFPrerenderer::getPixmapMemorySize(const QPixmap& pixmap) {
-    return pixmap.width() * pixmap.height() * 4;  // 32-bit ARGB
-}
-
-double PDFPrerenderer::cacheHitRatio() const {
-    int total = m_cacheHits + m_cacheMisses;
-    return total > 0 ? static_cast<double>(m_cacheHits) / total : 0.0;
 }
 
 // PDFRenderWorker Implementation
