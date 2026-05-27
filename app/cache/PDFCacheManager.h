@@ -1,30 +1,15 @@
 #pragma once
 
-#include <poppler/qt6/poppler-qt6.h>
-#include <QCache>
+#include <QDateTime>
 #include <QElapsedTimer>
+#include <QHash>
 #include <QMutex>
 #include <QObject>
 #include <QPixmap>
-#include <QQueue>
-#include <QRunnable>
-#include <QSet>
 #include <QSettings>
-#include <QThread>
-#include <QThreadPool>
+#include <QStringList>
 #include <QTimer>
-
-/**
- * Cache item types
- */
-enum class CacheItemType {
-    RenderedPage,   // Rendered page pixmap
-    Thumbnail,      // Page thumbnail
-    TextContent,    // Extracted text content
-    PageImage,      // Raw page image
-    SearchResults,  // Search result data
-    Annotations     // Page annotations
-};
+#include <QVariant>
 
 /**
  * Cache priority levels
@@ -41,22 +26,18 @@ enum class CachePriority {
  */
 struct CacheItem {
     QVariant data;
-    CacheItemType type;
     CachePriority priority;
     qint64 timestamp;
     qint64 accessCount;
     qint64 lastAccessed;
-    int pageNumber;
     QString key;
     qint64 memorySize;
 
     CacheItem()
-        : type(CacheItemType::RenderedPage),
-          priority(CachePriority::Normal),
+        : priority(CachePriority::Normal),
           timestamp(QDateTime::currentMSecsSinceEpoch()),
           accessCount(0),
           lastAccessed(0),
-          pageNumber(-1),
           memorySize(0) {}
 
     void updateAccess() {
@@ -77,7 +58,6 @@ struct CacheStatistics {
     qint64 hitCount;
     qint64 missCount;
     double hitRate;
-    int itemsByType[6];  // One for each CacheItemType
     qint64 averageAccessTime;
     qint64 oldestItemAge;
     qint64 newestItemAge;
@@ -90,31 +70,19 @@ struct CacheStatistics {
           hitRate(0.0),
           averageAccessTime(0),
           oldestItemAge(0),
-          newestItemAge(0) {
-        for (int i = 0; i < 6; ++i) {
-            itemsByType[i] = 0;
-        }
-    }
+          newestItemAge(0) {}
 };
 
 /**
- * Preloading task for background cache population
- */
-class PreloadTask : public QRunnable {
-public:
-    PreloadTask(Poppler::Document* document, int pageNumber, CacheItemType type,
-                QObject* target);
-    void run() override;
-
-private:
-    Poppler::Document* m_document;
-    int m_pageNumber;
-    CacheItemType m_type;
-    QObject* m_target;
-};
-
-/**
- * PDF cache manager with intelligent caching strategies
+ * Generic cache manager with intelligent caching strategies.
+ *
+ * Thread-safe KV cache with configurable eviction, memory thresholds,
+ * statistics, and runtime item management.
+ *
+ * Signals are emitted outside the lock scope to prevent deadlock on
+ * re-entrant calls from connected slots.  Cache state is fully committed
+ * before any emission; itemEvicted is an at-most-once notification, not
+ * a transactional guarantee (TOCTOU possible under concurrent access).
  */
 class PDFCacheManager : public QObject {
     Q_OBJECT
@@ -133,100 +101,73 @@ public:
     void setItemMaxAge(qint64 milliseconds);
     qint64 getItemMaxAge() const { return m_itemMaxAge; }
 
-    // Cache operations
-    bool insert(const QString& key, const QVariant& data, CacheItemType type,
-                CachePriority priority = CachePriority::Normal,
-                int pageNumber = -1);
+    // Core cache operations
+    bool insert(const QString& key, const QVariant& data,
+                CachePriority priority = CachePriority::Normal);
     QVariant get(const QString& key);
     bool contains(const QString& key) const;
     bool remove(const QString& key);
     void clear();
-
-    // Specialized cache operations
-    bool cacheRenderedPage(int pageNumber, const QPixmap& pixmap,
-                           double scaleFactor);
-    QPixmap getRenderedPage(int pageNumber, double scaleFactor);
-
-    bool cacheThumbnail(int pageNumber, const QPixmap& thumbnail);
-    QPixmap getThumbnail(int pageNumber);
-
-    bool cacheTextContent(int pageNumber, const QString& text);
-    QString getTextContent(int pageNumber);
-
-    // Preloading and background operations
-    void enablePreloading(bool enabled);
-    bool isPreloadingEnabled() const { return m_preloadingEnabled; }
-
-    void preloadPages(const QList<int>& pageNumbers, CacheItemType type);
-    void preloadAroundPage(int centerPage, int radius = 2);
-    void setPreloadingStrategy(const QString& strategy);
 
     // Cache management
     void optimizeCache();
     void cleanupExpiredItems();
     bool evictLeastUsedItems(int count);
     void compactCache();
+    void defragmentCache();
 
-    // Statistics and monitoring
+    // Statistics
     CacheStatistics getStatistics() const;
     qint64 getCurrentMemoryUsage() const;
     double getHitRate() const;
     void resetStatistics();
 
-    // Cache policies
+    // Eviction policies
     void setEvictionPolicy(const QString& policy);
     QString getEvictionPolicy() const { return m_evictionPolicy; }
 
     void setPriorityWeights(double lowWeight, double normalWeight,
                             double highWeight);
 
-    // Settings persistence
-    void loadSettings();
-    void saveSettings();
-
-    // Additional utility functions
-    bool exportCacheToFile(const QString& filePath) const;
-    bool importCacheFromFile(const QString& filePath);
-    void defragmentCache();
-
-    // Cache inspection functions
+    // Cache inspection
     QStringList getCacheKeys() const;
-    QStringList getCacheKeysByType(CacheItemType type) const;
     QStringList getCacheKeysByPriority(CachePriority priority) const;
-    int getCacheItemCount(CacheItemType type) const;
-    qint64 getCacheMemoryUsage(CacheItemType type) const;
 
-    // Cache management functions
+    // Runtime item management
     void setCachePriority(const QString& key, CachePriority priority);
     bool promoteToHighPriority(const QString& key);
     void refreshCacheItem(const QString& key);
 
+    // Settings persistence
+    void loadSettings();
+    void saveSettings();
+
 signals:
     void cacheHit(const QString& key, qint64 accessTime);
     void cacheMiss(const QString& key);
-    void itemEvicted(const QString& key, CacheItemType type);
+    void itemEvicted(const QString& key);
     void memoryThresholdExceeded(qint64 currentUsage, qint64 threshold);
-    void preloadCompleted(int pageNumber, CacheItemType type);
     void cacheOptimized(int itemsRemoved, qint64 memoryFreed);
     void cacheDefragmented(int remainingItems);
     void cachePriorityChanged(const QString& key, CachePriority newPriority);
     void cacheItemRefreshed(const QString& key);
-    void cacheExported(const QString& filePath, bool success);
-    void cacheImported(const QString& filePath, bool success);
 
 private slots:
     void performMaintenance();
-    void onPreloadTaskCompleted();
 
 private:
-    QString generateKey(int pageNumber, CacheItemType type,
-                        const QVariant& extra = QVariant()) const;
     void updateStatistics(bool hit);
-    void enforceMemoryLimit();
-    void enforceItemLimit();
     bool shouldEvict(const CacheItem& item) const;
     double calculateEvictionScore(const CacheItem& item) const;
-    void schedulePreload(int pageNumber, CacheItemType type);
+
+    // Locked methods — caller must hold m_cacheMutex
+    void cleanupExpiredLocked(QList<QString>& evicted);
+    bool evictLeastUsedLocked(int count, QList<QString>& evicted);
+    qint64 getCurrentMemoryUsageLocked() const;
+    void enforceMemoryLimitLocked(QList<QString>& evicted);
+    void enforceItemLimitLocked(QList<QString>& evicted);
+
+    // Lock ordering: m_cacheMutex → m_statsMutex (never reverse)
 
     // Cache storage
     mutable QMutex m_cacheMutex;
@@ -249,13 +190,6 @@ private:
     qint64 m_missCount;
     qint64 m_totalAccessTime;
     qint64 m_accessCount;
-
-    // Preloading
-    bool m_preloadingEnabled;
-    QString m_preloadingStrategy;
-    QThreadPool* m_preloadThreadPool;
-    QQueue<QPair<int, CacheItemType>> m_preloadQueue;
-    QSet<QString> m_preloadingItems;
 
     // Maintenance
     QTimer* m_maintenanceTimer;

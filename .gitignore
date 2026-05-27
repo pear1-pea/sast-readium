@@ -232,6 +232,9 @@ Temporary Items
 # Generated config files
 app/config.h
 
+# UI design mockups (generated, not part of source)
+ui/
+
 # Log files
 *.log
 logs/
