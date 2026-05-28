@@ -13,7 +13,8 @@ void Views::initUI() {
 
     _pageLabel =
         new QLabel("Page: " + QString::number(_model->currentPage()), this);
-    _delegate = new PageNavigationDelegate(_pageLabel, this);
+    connect(_delegate, &PageNavigationDelegate::pageTextChanged, _pageLabel,
+            &QLabel::setText);
     connect(_model, &PageModel::pageUpdate, _delegate,
             &PageNavigationDelegate::viewUpdate);
 

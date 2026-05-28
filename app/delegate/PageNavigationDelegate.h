@@ -1,19 +1,18 @@
 #pragma once
 
-#include <QLabel>
 #include <QObject>
+#include <QString>
 
 class PageNavigationDelegate : public QObject {
     Q_OBJECT
 
 public:
-    explicit PageNavigationDelegate(QLabel* pageLabel,
-                                    QObject* parent = nullptr);
-    ~PageNavigationDelegate(){};
+    explicit PageNavigationDelegate(QObject* parent = nullptr);
+    ~PageNavigationDelegate() override = default;
+
+signals:
+    void pageTextChanged(const QString& text);
 
 public slots:
     void viewUpdate(int pageNum);
-
-private:
-    QLabel* _pageLabel;
 };
