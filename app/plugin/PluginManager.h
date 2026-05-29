@@ -11,7 +11,10 @@
 #include <QMenu>
 #include <QObject>
 #include <QPluginLoader>
+#include <QRecursiveMutex>
+#include <QSet>
 #include <QSettings>
+#include <QSharedPointer>
 #include <QStringList>
 #include <QTimer>
 #include <QToolBar>
@@ -146,15 +149,16 @@ public:
     void setPluginEnabled(const QString& pluginName, bool enabled);
 
     // Plugin access
-    IPlugin* getPlugin(const QString& pluginName) const;
+    QSharedPointer<IPlugin> getPlugin(const QString& pluginName) const;
     template <typename T>
-    T* getPlugin(const QString& pluginName) const {
-        return qobject_cast<T*>(getPlugin(pluginName));
+    QSharedPointer<T> getPlugin(const QString& pluginName) const {
+        return qSharedPointerObjectCast<T>(getPlugin(pluginName));
     }
 
-    QList<IPlugin*> getPluginsByType(const QString& interfaceId) const;
-    QList<IDocumentPlugin*> getDocumentPlugins() const;
-    QList<IUIPlugin*> getUIPlugins() const;
+    QList<QSharedPointer<IPlugin>> getPluginsByType(
+        const QString& interfaceId) const;
+    QList<QSharedPointer<IDocumentPlugin>> getDocumentPlugins() const;
+    QList<QSharedPointer<IUIPlugin>> getUIPlugins() const;
 
     // Plugin metadata
     PluginMetadata getPluginMetadata(const QString& pluginName) const;
@@ -227,17 +231,25 @@ private:
     explicit PluginManager(QObject* parent = nullptr);
     Q_DISABLE_COPY(PluginManager)
 
-    bool loadPluginFromFile(const QString& filePath);
+    struct LoadResult {
+        bool ok = false;
+        QString pluginName;
+        QSharedPointer<IPlugin> plugin;
+        QString errorString;
+    };
+    LoadResult loadPluginIO(const QString& filePath);
     void unloadPluginInternal(const QString& pluginName);
     PluginMetadata extractMetadata(QPluginLoader* loader) const;
     bool checkDependencies(const QString& pluginName) const;
     void resolveAndLoadPlugins();
 
     // Plugin storage
-    QHash<QString, QPluginLoader*> m_pluginLoaders;
-    QHash<QString, IPlugin*> m_loadedPlugins;
+    QHash<QString, QSharedPointer<IPlugin>> m_loadedPlugins;
     QHash<QString, PluginMetadata> m_pluginMetadata;
     QHash<QString, QStringList> m_pluginErrors;
+
+    // Loading state: prevents double-loading across threads
+    QSet<QString> m_loadingInProgress;
 
     // Configuration
     QStringList m_pluginDirectories;
@@ -249,4 +261,5 @@ private:
     QHash<QString, qint64> m_pluginModificationTimes;
 
     static PluginManager* s_instance;
+    mutable QRecursiveMutex m_mutex;
 };

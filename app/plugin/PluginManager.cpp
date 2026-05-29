@@ -7,6 +7,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QMutexLocker>
 #include <QStandardPaths>
 #include "utils/LoggingMacros.h"
 
@@ -124,6 +125,7 @@ PluginManager::PluginManager(QObject* parent)
 }
 
 void PluginManager::setPluginDirectories(const QStringList& directories) {
+    QMutexLocker lock(&m_mutex);
     m_pluginDirectories = directories;
 
     // Create directories if they don't exist
@@ -133,10 +135,13 @@ void PluginManager::setPluginDirectories(const QStringList& directories) {
 }
 
 void PluginManager::scanForPlugins() {
+    QMutexLocker lock(&m_mutex);
     LOG_DEBUG("Scanning for plugins in directories: [{}]",
               m_pluginDirectories.join(", ").toStdString());
 
     m_pluginMetadata.clear();
+    m_pluginErrors.clear();
+    m_pluginModificationTimes.clear();
     int pluginCount = 0;
 
     for (const QString& directory : m_pluginDirectories) {
@@ -176,91 +181,114 @@ void PluginManager::scanForPlugins() {
 }
 
 bool PluginManager::loadPlugin(const QString& pluginName) {
-    if (isPluginLoaded(pluginName)) {
-        qDebug() << "Plugin already loaded:" << pluginName;
-        return true;
+    QString filePath;
+    {
+        QMutexLocker lock(&m_mutex);
+
+        if (m_loadedPlugins.contains(pluginName)) {
+            qDebug() << "Plugin already loaded:" << pluginName;
+            return true;
+        }
+
+        // Another thread is already loading this plugin
+        if (m_loadingInProgress.contains(pluginName)) {
+            qDebug() << "Plugin loading in progress:" << pluginName;
+            return false;
+        }
+
+        if (!m_pluginMetadata.contains(pluginName)) {
+            qWarning() << "Plugin not found:" << pluginName;
+            return false;
+        }
+
+        const auto& metadata = m_pluginMetadata[pluginName];
+        if (!metadata.isEnabled) {
+            qDebug() << "Plugin is disabled:" << pluginName;
+            return false;
+        }
+
+        if (!checkDependencies(pluginName)) {
+            qWarning() << "Plugin dependencies not satisfied:" << pluginName;
+            return false;
+        }
+
+        filePath = metadata.filePath;
+        m_loadingInProgress.insert(pluginName);
     }
 
-    if (!m_pluginMetadata.contains(pluginName)) {
-        qWarning() << "Plugin not found:" << pluginName;
-        return false;
-    }
-
-    const PluginMetadata& metadata = m_pluginMetadata[pluginName];
-
-    if (!metadata.isEnabled) {
-        qDebug() << "Plugin is disabled:" << pluginName;
-        return false;
-    }
-
-    // Check dependencies
-    if (!checkDependencies(pluginName)) {
-        qWarning() << "Plugin dependencies not satisfied:" << pluginName;
-        return false;
-    }
-
-    return loadPluginFromFile(metadata.filePath);
-}
-
-bool PluginManager::loadPluginFromFile(const QString& filePath) {
+    // Phase 2: IO + initialization (no lock — dlopen can block)
     QElapsedTimer timer;
     timer.start();
+    auto result = loadPluginIO(filePath);
 
-    QPluginLoader* loader = new QPluginLoader(filePath, this);
+    // Phase 3: update state under lock
+    {
+        QMutexLocker lock(&m_mutex);
+        m_loadingInProgress.remove(pluginName);
+
+        if (result.ok) {
+            m_loadedPlugins[result.pluginName] = result.plugin;
+            if (m_pluginMetadata.contains(result.pluginName)) {
+                m_pluginMetadata[result.pluginName].isLoaded = true;
+                m_pluginMetadata[result.pluginName].loadTime = timer.elapsed();
+            }
+            qDebug() << "Successfully loaded plugin:" << result.pluginName
+                     << "in" << timer.elapsed() << "ms";
+            emit pluginLoaded(result.pluginName);
+        } else {
+            qWarning() << "Failed to load plugin:" << filePath
+                       << result.errorString;
+            m_pluginErrors[QFileInfo(filePath).baseName()].append(
+                result.errorString);
+        }
+    }
+
+    return result.ok;
+}
+
+PluginManager::LoadResult PluginManager::loadPluginIO(const QString& filePath) {
+    QPluginLoader* loader = new QPluginLoader(filePath);
 
     if (!loader->load()) {
-        qWarning() << "Failed to load plugin:" << filePath
-                   << loader->errorString();
-        m_pluginErrors[QFileInfo(filePath).baseName()].append(
-            loader->errorString());
+        QString err = loader->errorString();
         delete loader;
-        return false;
+        return {false, {}, {}, err};
     }
 
     QObject* pluginObject = loader->instance();
     if (!pluginObject) {
-        qWarning() << "Failed to get plugin instance:" << filePath;
         loader->unload();
         delete loader;
-        return false;
+        return {false, {}, {}, "Failed to get plugin instance"};
     }
 
     IPlugin* plugin = qobject_cast<IPlugin*>(pluginObject);
     if (!plugin) {
-        qWarning() << "Plugin does not implement IPlugin interface:"
-                   << filePath;
         loader->unload();
         delete loader;
-        return false;
+        return {false, {}, {}, "Plugin does not implement IPlugin interface"};
     }
 
-    // Initialize plugin
     if (!plugin->initialize()) {
-        qWarning() << "Plugin initialization failed:" << plugin->name();
+        QString name = plugin->name();
         loader->unload();
         delete loader;
-        return false;
+        return {false, name, {}, "Plugin initialization failed"};
     }
 
     QString pluginName = plugin->name();
-    m_pluginLoaders[pluginName] = loader;
-    m_loadedPlugins[pluginName] = plugin;
+    auto sharedPlugin = QSharedPointer<IPlugin>(plugin, [loader](IPlugin* p) {
+        p->shutdown();
+        loader->unload();
+        delete loader;
+    });
 
-    // Update metadata
-    if (m_pluginMetadata.contains(pluginName)) {
-        m_pluginMetadata[pluginName].isLoaded = true;
-        m_pluginMetadata[pluginName].loadTime = timer.elapsed();
-    }
-
-    qDebug() << "Successfully loaded plugin:" << pluginName << "in"
-             << timer.elapsed() << "ms";
-    emit pluginLoaded(pluginName);
-
-    return true;
+    return {true, pluginName, sharedPlugin, {}};
 }
 
 bool PluginManager::unloadPlugin(const QString& pluginName) {
-    if (!isPluginLoaded(pluginName)) {
+    QMutexLocker lock(&m_mutex);
+    if (!m_loadedPlugins.contains(pluginName)) {
         return true;
     }
 
@@ -269,18 +297,8 @@ bool PluginManager::unloadPlugin(const QString& pluginName) {
 }
 
 void PluginManager::unloadPluginInternal(const QString& pluginName) {
-    if (m_loadedPlugins.contains(pluginName)) {
-        IPlugin* plugin = m_loadedPlugins[pluginName];
-        plugin->shutdown();
-        m_loadedPlugins.remove(pluginName);
-    }
-
-    if (m_pluginLoaders.contains(pluginName)) {
-        QPluginLoader* loader = m_pluginLoaders[pluginName];
-        loader->unload();
-        delete loader;
-        m_pluginLoaders.remove(pluginName);
-    }
+    // Remove from hash — shared_ptr custom deleter handles shutdown + unload
+    m_loadedPlugins.remove(pluginName);
 
     // Update metadata
     if (m_pluginMetadata.contains(pluginName)) {
@@ -292,6 +310,7 @@ void PluginManager::unloadPluginInternal(const QString& pluginName) {
 }
 
 void PluginManager::loadAllPlugins() {
+    QMutexLocker lock(&m_mutex);
     QStringList loadOrder =
         PluginDependencyResolver::getLoadOrder(m_pluginMetadata);
 
@@ -303,23 +322,27 @@ void PluginManager::loadAllPlugins() {
 }
 
 void PluginManager::unloadAllPlugins() {
-    QStringList loadedPlugins = getLoadedPlugins();
+    QMutexLocker lock(&m_mutex);
+    QStringList loadedPlugins = m_loadedPlugins.keys();
 
     // Unload in reverse order
     for (int i = loadedPlugins.size() - 1; i >= 0; --i) {
-        unloadPlugin(loadedPlugins[i]);
+        unloadPluginInternal(loadedPlugins[i]);
     }
 }
 
 QStringList PluginManager::getAvailablePlugins() const {
+    QMutexLocker lock(&m_mutex);
     return m_pluginMetadata.keys();
 }
 
 QStringList PluginManager::getLoadedPlugins() const {
+    QMutexLocker lock(&m_mutex);
     return m_loadedPlugins.keys();
 }
 
 QStringList PluginManager::getEnabledPlugins() const {
+    QMutexLocker lock(&m_mutex);
     QStringList enabled;
     for (auto it = m_pluginMetadata.begin(); it != m_pluginMetadata.end();
          ++it) {
@@ -331,10 +354,12 @@ QStringList PluginManager::getEnabledPlugins() const {
 }
 
 bool PluginManager::isPluginLoaded(const QString& pluginName) const {
+    QMutexLocker lock(&m_mutex);
     return m_loadedPlugins.contains(pluginName);
 }
 
 bool PluginManager::isPluginEnabled(const QString& pluginName) const {
+    QMutexLocker lock(&m_mutex);
     if (m_pluginMetadata.contains(pluginName)) {
         return m_pluginMetadata[pluginName].isEnabled;
     }
@@ -342,6 +367,7 @@ bool PluginManager::isPluginEnabled(const QString& pluginName) const {
 }
 
 void PluginManager::setPluginEnabled(const QString& pluginName, bool enabled) {
+    QMutexLocker lock(&m_mutex);
     if (m_pluginMetadata.contains(pluginName)) {
         m_pluginMetadata[pluginName].isEnabled = enabled;
 
@@ -349,24 +375,26 @@ void PluginManager::setPluginEnabled(const QString& pluginName, bool enabled) {
             emit pluginEnabled(pluginName);
         } else {
             emit pluginDisabled(pluginName);
-            if (isPluginLoaded(pluginName)) {
-                unloadPlugin(pluginName);
+            if (m_loadedPlugins.contains(pluginName)) {
+                unloadPluginInternal(pluginName);
             }
         }
     }
 }
 
-IPlugin* PluginManager::getPlugin(const QString& pluginName) const {
-    return m_loadedPlugins.value(pluginName, nullptr);
+QSharedPointer<IPlugin> PluginManager::getPlugin(
+    const QString& pluginName) const {
+    QMutexLocker lock(&m_mutex);
+    return m_loadedPlugins.value(pluginName);
 }
 
-QList<IPlugin*> PluginManager::getPluginsByType(
+QList<QSharedPointer<IPlugin>> PluginManager::getPluginsByType(
     const QString& interfaceId) const {
-    QList<IPlugin*> result;
+    QMutexLocker lock(&m_mutex);
+    QList<QSharedPointer<IPlugin>> result;
 
-    for (IPlugin* plugin : m_loadedPlugins.values()) {
-        QObject* obj = qobject_cast<QObject*>(plugin);
-        if (obj && obj->inherits(interfaceId.toUtf8().constData())) {
+    for (const auto& plugin : m_loadedPlugins.values()) {
+        if (plugin && plugin->inherits(interfaceId.toUtf8().constData())) {
             result.append(plugin);
         }
     }
@@ -374,11 +402,13 @@ QList<IPlugin*> PluginManager::getPluginsByType(
     return result;
 }
 
-QList<IDocumentPlugin*> PluginManager::getDocumentPlugins() const {
-    QList<IDocumentPlugin*> result;
+QList<QSharedPointer<IDocumentPlugin>> PluginManager::getDocumentPlugins()
+    const {
+    QMutexLocker lock(&m_mutex);
+    QList<QSharedPointer<IDocumentPlugin>> result;
 
-    for (IPlugin* plugin : m_loadedPlugins.values()) {
-        IDocumentPlugin* docPlugin = qobject_cast<IDocumentPlugin*>(plugin);
+    for (const auto& plugin : m_loadedPlugins.values()) {
+        auto docPlugin = qSharedPointerObjectCast<IDocumentPlugin>(plugin);
         if (docPlugin) {
             result.append(docPlugin);
         }
@@ -387,11 +417,12 @@ QList<IDocumentPlugin*> PluginManager::getDocumentPlugins() const {
     return result;
 }
 
-QList<IUIPlugin*> PluginManager::getUIPlugins() const {
-    QList<IUIPlugin*> result;
+QList<QSharedPointer<IUIPlugin>> PluginManager::getUIPlugins() const {
+    QMutexLocker lock(&m_mutex);
+    QList<QSharedPointer<IUIPlugin>> result;
 
-    for (IPlugin* plugin : m_loadedPlugins.values()) {
-        IUIPlugin* uiPlugin = qobject_cast<IUIPlugin*>(plugin);
+    for (const auto& plugin : m_loadedPlugins.values()) {
+        auto uiPlugin = qSharedPointerObjectCast<IUIPlugin>(plugin);
         if (uiPlugin) {
             result.append(uiPlugin);
         }
@@ -402,10 +433,12 @@ QList<IUIPlugin*> PluginManager::getUIPlugins() const {
 
 PluginMetadata PluginManager::getPluginMetadata(
     const QString& pluginName) const {
+    QMutexLocker lock(&m_mutex);
     return m_pluginMetadata.value(pluginName, PluginMetadata());
 }
 
 QHash<QString, PluginMetadata> PluginManager::getAllPluginMetadata() const {
+    QMutexLocker lock(&m_mutex);
     return m_pluginMetadata;
 }
 
@@ -447,7 +480,7 @@ bool PluginManager::checkDependencies(const QString& pluginName) const {
     const PluginMetadata& metadata = m_pluginMetadata[pluginName];
 
     for (const QString& dependency : metadata.dependencies) {
-        if (!isPluginLoaded(dependency)) {
+        if (!m_loadedPlugins.contains(dependency)) {
             return false;
         }
     }
@@ -469,10 +502,12 @@ bool PluginManager::validatePlugin(const QString& filePath) const {
 }
 
 QStringList PluginManager::getPluginErrors(const QString& pluginName) const {
+    QMutexLocker lock(&m_mutex);
     return m_pluginErrors.value(pluginName, QStringList());
 }
 
 void PluginManager::loadSettings() {
+    QMutexLocker lock(&m_mutex);
     if (!m_settings)
         return;
 
@@ -489,6 +524,7 @@ void PluginManager::loadSettings() {
 }
 
 void PluginManager::saveSettings() {
+    QMutexLocker lock(&m_mutex);
     if (!m_settings)
         return;
 
@@ -505,6 +541,7 @@ void PluginManager::saveSettings() {
 }
 
 void PluginManager::enableHotReloading(bool enabled) {
+    QMutexLocker lock(&m_mutex);
     m_hotReloadingEnabled = enabled;
 
     if (enabled) {
@@ -523,6 +560,7 @@ void PluginManager::enableHotReloading(bool enabled) {
 }
 
 void PluginManager::checkForPluginChanges() {
+    QMutexLocker lock(&m_mutex);
     if (!m_hotReloadingEnabled)
         return;
 
@@ -536,8 +574,8 @@ void PluginManager::checkForPluginChanges() {
             qDebug() << "Plugin file changed, reloading:" << it.key();
 
             // Unload and reload the plugin
-            if (isPluginLoaded(it.key())) {
-                unloadPlugin(it.key());
+            if (m_loadedPlugins.contains(it.key())) {
+                unloadPluginInternal(it.key());
                 loadPlugin(it.key());
             }
 
@@ -548,6 +586,7 @@ void PluginManager::checkForPluginChanges() {
 
 QJsonObject PluginManager::getPluginConfiguration(
     const QString& pluginName) const {
+    QMutexLocker lock(&m_mutex);
     if (m_pluginMetadata.contains(pluginName)) {
         return m_pluginMetadata[pluginName].configuration;
     }
@@ -556,11 +595,12 @@ QJsonObject PluginManager::getPluginConfiguration(
 
 void PluginManager::setPluginConfiguration(const QString& pluginName,
                                            const QJsonObject& config) {
+    QMutexLocker lock(&m_mutex);
     if (m_pluginMetadata.contains(pluginName)) {
         m_pluginMetadata[pluginName].configuration = config;
 
         // Apply configuration to loaded plugin
-        IPlugin* plugin = getPlugin(pluginName);
+        auto plugin = m_loadedPlugins.value(pluginName);
         if (plugin) {
             plugin->setConfiguration(config);
         }
@@ -568,6 +608,7 @@ void PluginManager::setPluginConfiguration(const QString& pluginName,
 }
 
 QStringList PluginManager::getPluginsWithFeature(const QString& feature) const {
+    QMutexLocker lock(&m_mutex);
     QStringList result;
 
     for (auto it = m_pluginMetadata.begin(); it != m_pluginMetadata.end();
@@ -582,6 +623,7 @@ QStringList PluginManager::getPluginsWithFeature(const QString& feature) const {
 
 QStringList PluginManager::getPluginsForFileType(
     const QString& fileType) const {
+    QMutexLocker lock(&m_mutex);
     QStringList result;
 
     for (auto it = m_pluginMetadata.begin(); it != m_pluginMetadata.end();
@@ -595,11 +637,13 @@ QStringList PluginManager::getPluginsForFileType(
 }
 
 bool PluginManager::isFeatureAvailable(const QString& feature) const {
+    QMutexLocker lock(&m_mutex);
     return !getPluginsWithFeature(feature).isEmpty();
 }
 
 // Additional plugin management functions
 bool PluginManager::installPlugin(const QString& pluginPath) {
+    QMutexLocker lock(&m_mutex);
     QFileInfo fileInfo(pluginPath);
     if (!fileInfo.exists() || !validatePlugin(pluginPath)) {
         qWarning() << "Invalid plugin file:" << pluginPath;
@@ -630,13 +674,14 @@ bool PluginManager::installPlugin(const QString& pluginPath) {
 }
 
 bool PluginManager::uninstallPlugin(const QString& pluginName) {
+    QMutexLocker lock(&m_mutex);
     if (!m_pluginMetadata.contains(pluginName)) {
         return false;
     }
 
     // Unload plugin if it's loaded
-    if (isPluginLoaded(pluginName)) {
-        unloadPlugin(pluginName);
+    if (m_loadedPlugins.contains(pluginName)) {
+        unloadPluginInternal(pluginName);
     }
 
     // Remove plugin file
@@ -658,6 +703,7 @@ bool PluginManager::uninstallPlugin(const QString& pluginName) {
 
 bool PluginManager::updatePlugin(const QString& pluginName,
                                  const QString& newPluginPath) {
+    QMutexLocker lock(&m_mutex);
     if (!m_pluginMetadata.contains(pluginName)) {
         return false;
     }
@@ -668,9 +714,9 @@ bool PluginManager::updatePlugin(const QString& pluginName,
     }
 
     // Unload current plugin
-    bool wasLoaded = isPluginLoaded(pluginName);
+    bool wasLoaded = m_loadedPlugins.contains(pluginName);
     if (wasLoaded) {
-        unloadPlugin(pluginName);
+        unloadPluginInternal(pluginName);
     }
 
     // Replace plugin file
@@ -702,6 +748,7 @@ bool PluginManager::updatePlugin(const QString& pluginName,
 
 QStringList PluginManager::getPluginDependencies(
     const QString& pluginName) const {
+    QMutexLocker lock(&m_mutex);
     if (m_pluginMetadata.contains(pluginName)) {
         return m_pluginMetadata[pluginName].dependencies;
     }
@@ -710,6 +757,7 @@ QStringList PluginManager::getPluginDependencies(
 
 QStringList PluginManager::getPluginsDependingOn(
     const QString& pluginName) const {
+    QMutexLocker lock(&m_mutex);
     QStringList dependents;
 
     for (auto it = m_pluginMetadata.begin(); it != m_pluginMetadata.end();
@@ -723,11 +771,12 @@ QStringList PluginManager::getPluginsDependingOn(
 }
 
 bool PluginManager::canUnloadPlugin(const QString& pluginName) const {
+    QMutexLocker lock(&m_mutex);
     // Check if other loaded plugins depend on this one
     QStringList dependents = getPluginsDependingOn(pluginName);
 
     for (const QString& dependent : dependents) {
-        if (isPluginLoaded(dependent)) {
+        if (m_loadedPlugins.contains(dependent)) {
             return false;
         }
     }
@@ -736,20 +785,55 @@ bool PluginManager::canUnloadPlugin(const QString& pluginName) const {
 }
 
 void PluginManager::reloadPlugin(const QString& pluginName) {
-    if (isPluginLoaded(pluginName)) {
-        unloadPlugin(pluginName);
+    QMutexLocker lock(&m_mutex);
+    if (m_loadedPlugins.contains(pluginName)) {
+        unloadPluginInternal(pluginName);
     }
     loadPlugin(pluginName);
 }
 
 void PluginManager::reloadAllPlugins() {
-    QStringList loadedPlugins = getLoadedPlugins();
+    QMutexLocker lock(&m_mutex);
+    QStringList loadedPlugins = m_loadedPlugins.keys();
 
     // Unload all plugins
-    unloadAllPlugins();
+    for (int i = loadedPlugins.size() - 1; i >= 0; --i) {
+        unloadPluginInternal(loadedPlugins[i]);
+    }
 
     // Rescan for plugins (in case files changed)
-    scanForPlugins();
+    m_pluginMetadata.clear();
+    m_pluginErrors.clear();
+    m_pluginModificationTimes.clear();
+    int pluginCount = 0;
+
+    for (const QString& directory : m_pluginDirectories) {
+        QDir pluginDir(directory);
+        if (!pluginDir.exists())
+            continue;
+
+        QDirIterator it(directory,
+                        QStringList() << "*.dll"
+                                      << "*.so"
+                                      << "*.dylib",
+                        QDir::Files, QDirIterator::Subdirectories);
+
+        while (it.hasNext()) {
+            QString filePath = it.next();
+            if (QPluginLoader(filePath).metaData().isEmpty())
+                continue;
+
+            QPluginLoader loader(filePath);
+            PluginMetadata metadata = extractMetadata(&loader);
+            if (!metadata.name.isEmpty()) {
+                metadata.filePath = filePath;
+                m_pluginMetadata[metadata.name] = metadata;
+                pluginCount++;
+            }
+        }
+    }
+
+    emit pluginsScanned(pluginCount);
 
     // Reload previously loaded plugins
     for (const QString& pluginName : loadedPlugins) {
@@ -761,6 +845,7 @@ void PluginManager::reloadAllPlugins() {
 }
 
 QJsonObject PluginManager::getPluginInfo(const QString& pluginName) const {
+    QMutexLocker lock(&m_mutex);
     QJsonObject info;
 
     if (!m_pluginMetadata.contains(pluginName)) {
@@ -802,6 +887,7 @@ QJsonObject PluginManager::getPluginInfo(const QString& pluginName) const {
 }
 
 void PluginManager::exportPluginList(const QString& filePath) const {
+    QMutexLocker lock(&m_mutex);
     QJsonObject root;
     QJsonArray pluginsArray;
 
@@ -813,7 +899,7 @@ void PluginManager::exportPluginList(const QString& filePath) const {
 
     root["plugins"] = pluginsArray;
     root["totalPlugins"] = m_pluginMetadata.size();
-    root["loadedPlugins"] = getLoadedPlugins().size();
+    root["loadedPlugins"] = m_loadedPlugins.size();
     root["enabledPlugins"] = getEnabledPlugins().size();
     root["exportTime"] = QDateTime::currentDateTime().toString(Qt::ISODate);
 
@@ -827,6 +913,7 @@ void PluginManager::exportPluginList(const QString& filePath) const {
 }
 
 void PluginManager::createPluginReport() const {
+    QMutexLocker lock(&m_mutex);
     QString report;
     QTextStream stream(&report);
 
@@ -835,7 +922,7 @@ void PluginManager::createPluginReport() const {
 
     stream << "Summary:\n";
     stream << "  Total plugins: " << m_pluginMetadata.size() << "\n";
-    stream << "  Loaded plugins: " << getLoadedPlugins().size() << "\n";
+    stream << "  Loaded plugins: " << m_loadedPlugins.size() << "\n";
     stream << "  Enabled plugins: " << getEnabledPlugins().size() << "\n\n";
 
     stream << "Plugin Details:\n";
@@ -877,6 +964,7 @@ void PluginManager::createPluginReport() const {
 }
 
 bool PluginManager::backupPluginConfiguration(const QString& filePath) const {
+    QMutexLocker lock(&m_mutex);
     QJsonObject backup;
     QJsonArray pluginsArray;
 
@@ -906,6 +994,7 @@ bool PluginManager::backupPluginConfiguration(const QString& filePath) const {
 }
 
 bool PluginManager::restorePluginConfiguration(const QString& filePath) {
+    QMutexLocker lock(&m_mutex);
     QFile file(filePath);
     if (!file.open(QIODevice::ReadOnly)) {
         return false;
