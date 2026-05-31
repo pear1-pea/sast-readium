@@ -1,6 +1,7 @@
 #include "ViewWidget.h"
 #include <QDebug>
 #include <QLabel>
+#include <QProgressBar>
 #include "../viewer/PDFViewer.h"
 
 ViewWidget::ViewWidget(DocumentController* controller, DocumentModel* model,

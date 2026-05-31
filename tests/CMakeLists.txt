@@ -43,11 +43,6 @@ set(COMMON_DEFINITIONS
     ${Qt6Test_DEFINITIONS}
 )
 
-# Add QGraphics support definition if enabled
-if(ENABLE_QGRAPHICS_PDF_SUPPORT)
-    list(APPEND COMMON_DEFINITIONS ENABLE_QGRAPHICS_PDF_SUPPORT)
-endif()
-
 # Function to create a test executable
 function(create_test_executable TEST_NAME TEST_SOURCE)
     add_executable(${TEST_NAME} ${TEST_SOURCE})
@@ -64,6 +59,13 @@ function(create_test_executable TEST_NAME TEST_SOURCE)
         ../app/ui/viewer/PDFRenderCache.cpp
         ../app/ui/viewer/PDFAnimations.cpp
         ../app/ui/viewer/PDFPrerenderer.cpp
+
+        # Controller sources
+        ../app/controller/SearchController.cpp
+        ../app/controller/ZoomController.cpp
+
+        # Page widget sources
+        ../app/ui/page/PDFPageWidget.cpp
 
         # Model sources
         ../app/model/DocumentModel.cpp
@@ -83,9 +85,6 @@ function(create_test_executable TEST_NAME TEST_SOURCE)
         ../app/utils/LoggingManager.cpp
         ../app/utils/LoggingMacros.cpp
         ../app/utils/LoggingConfig.cpp
-
-        # QGraphics sources (conditionally compiled)
-        ../app/ui/viewer/QGraphicsPDFViewer.cpp
     )
 
     # Set output directory
