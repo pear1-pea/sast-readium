@@ -4,7 +4,6 @@
 #include <QSettings>
 #include <QTimer>
 
-class MainWindow;
 class WelcomeWidget;
 class DocumentModel;
 
@@ -16,8 +15,7 @@ class WelcomeScreenManager : public QObject {
     Q_OBJECT
 
 public:
-    explicit WelcomeScreenManager(MainWindow* mainWindow,
-                                  WelcomeWidget* welcomeWidget,
+    explicit WelcomeScreenManager(WelcomeWidget* welcomeWidget,
                                   DocumentModel* documentModel,
                                   QObject* parent = nullptr);
     ~WelcomeScreenManager();
@@ -67,7 +65,6 @@ private:
     void scheduleVisibilityCheck();
 
     // 组件引用
-    MainWindow* m_mainWindow;
     WelcomeWidget* m_welcomeWidget;
     DocumentModel* m_documentModel;
 

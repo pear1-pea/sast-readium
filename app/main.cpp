@@ -1,6 +1,7 @@
 #include <config.h>
 #include <QApplication>
 #include "MainWindow.h"
+#include "core/AppBootstrap.h"
 #include "utils/LoggingConfig.h"
 #include "utils/LoggingMacros.h"
 #include "utils/LoggingManager.h"
@@ -41,7 +42,8 @@ int main(int argc, char** argv) {
     LOG_DEBUG("Application metadata configured");
 
     try {
-        MainWindow w;
+        AppComponents deps = AppBootstrap::assemble();
+        MainWindow w(deps);
         w.show();
         LOG_INFO("Main window created and shown successfully");
 

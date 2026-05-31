@@ -4,10 +4,10 @@
 #include <QProgressBar>
 #include "../viewer/PDFViewer.h"
 
-ViewWidget::ViewWidget(DocumentController* controller, DocumentModel* model,
+ViewWidget::ViewWidget(ActionDispatcher* controller, DocumentModel* model,
                        QWidget* parent)
     : QWidget(parent),
-      documentController(controller),
+      m_actionDispatcher(controller),
       documentModel(model),
       outlineModel(nullptr) {
     setupUI();
@@ -79,20 +79,20 @@ void ViewWidget::setOutlineModel(PDFOutlineModel* model) {
 }
 
 void ViewWidget::openDocument(const QString& filePath) {
-    if (documentController) {
-        documentController->openDocument(filePath);
+    if (m_actionDispatcher) {
+        m_actionDispatcher->openDocument(filePath);
     }
 }
 
 void ViewWidget::closeDocument(int index) {
-    if (documentController) {
-        documentController->closeDocument(index);
+    if (m_actionDispatcher) {
+        m_actionDispatcher->closeDocument(index);
     }
 }
 
 void ViewWidget::switchToDocument(int index) {
-    if (documentController) {
-        documentController->switchToDocument(index);
+    if (m_actionDispatcher) {
+        m_actionDispatcher->switchToDocument(index);
     }
 }
 

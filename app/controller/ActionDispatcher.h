@@ -13,7 +13,16 @@
 // 前向声明
 class QWidget;
 
-class DocumentController : public QObject {
+/**
+ * Central action dispatch hub.
+ *
+ * Owns the commandMap (ActionMap → executable lambda) and the
+ * document-operation methods (open/close/switch).  All menu-bar and
+ * tool-bar actions flow through execute().
+ *
+ * Layer: Application (L3).
+ */
+class ActionDispatcher : public QObject {
     Q_OBJECT
 
 private:
@@ -23,9 +32,9 @@ private:
     void initializeCommandMap();
 
 public:
-    DocumentController(DocumentModel* model,
-                       RecentFilesManager* recentFilesManager = nullptr);
-    ~DocumentController() = default;
+    ActionDispatcher(DocumentModel* model,
+                     RecentFilesManager* recentFilesManager = nullptr);
+    ~ActionDispatcher() = default;
     void execute(ActionMap actionID, QWidget* context);
 
     // 多文档操作方法
@@ -50,10 +59,5 @@ public:
 
 signals:
     void documentOperationCompleted(ActionMap action, bool success);
-    void sideBarToggleRequested();
-    void sideBarShowRequested();
-    void sideBarHideRequested();
-    void viewModeChangeRequested(int mode);  // 0=SinglePage, 1=ContinuousScroll
     void pdfActionRequested(ActionMap action);
-    void themeToggleRequested();
 };

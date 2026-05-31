@@ -3,7 +3,7 @@
 #include <QStackedWidget>
 #include <QVBoxLayout>
 #include <QWidget>
-#include "../../controller/DocumentController.h"
+#include "../../controller/ActionDispatcher.h"
 #include "../../model/DocumentModel.h"
 #include "../../model/PDFOutlineModel.h"
 #include "../viewer/PDFViewer.h"
@@ -13,7 +13,7 @@ class ViewWidget : public QWidget {
     Q_OBJECT
 
 public:
-    ViewWidget(DocumentController* controller, DocumentModel* model,
+    ViewWidget(ActionDispatcher* controller, DocumentModel* model,
                QWidget* parent = nullptr);
 
     // 设置目录模型（保留，因为目录模型是动态变化的）
@@ -84,7 +84,7 @@ private:
     QWidget* emptyWidget;
 
     // 数据和控制
-    DocumentController* documentController;
+    ActionDispatcher* m_actionDispatcher;
     DocumentModel* documentModel;
     PDFOutlineModel* outlineModel;
     QList<PDFViewer*> pdfViewers;           // 每个文档对应一个PDFViewer

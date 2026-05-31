@@ -1,5 +1,4 @@
 #include "Views.h"
-#include "controller/PageController.h"
 #include "model/PageModel.h"
 
 Views::Views(PageModel* model, PageNavigationDelegate* delegate,

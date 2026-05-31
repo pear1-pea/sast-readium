@@ -19,15 +19,22 @@
 #include "ui/widgets/WelcomeWidget.h"
 #include "utils/LoggingMacros.h"
 
-MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
+MainWindow::MainWindow(const AppComponents& deps, QWidget* parent)
+    : QMainWindow(parent),
+      m_actionDispatcher(deps.actionDispatcher),
+      m_documentOrchestrator(deps.documentOrchestrator),
+      m_themeManager(deps.themeManager),
+      documentModel(deps.documentModel),
+      pageModel(deps.pageModel),
+      renderModel(deps.renderModel),
+      recentFilesManager(deps.recentFilesManager) {
     LOG_DEBUG("MainWindow: Starting initialization...");
 
     initWindow();
     LOG_DEBUG("MainWindow: Window initialized");
-    initModel();
-    LOG_DEBUG("MainWindow: Models initialized");
-    initController();
-    LOG_DEBUG("MainWindow: Controllers initialized");
+
+    // Models & controllers are assembled by AppBootstrap
+
     initWelcomeScreen();
     LOG_DEBUG("MainWindow: Welcome screen initialized");
     initContent();
@@ -52,12 +59,12 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
                   defaultTheme.toStdString());
 
         // 应用主题
-        loadAndApplyTheme(defaultTheme);
+        m_themeManager->loadTheme(defaultTheme);
 
         // 额外检查：如果主窗口样式表仍然为空，使用备用方法
         if (this->styleSheet().isEmpty()) {
             LOG_WARNING(
-                "MainWindow: StyleSheet is empty after loadAndApplyTheme, "
+                "MainWindow: StyleSheet is empty after ThemeManager, "
                 "forcing fallback theme application");
             QString fallbackStyleSheet = STYLE.getApplicationStyleSheet();
             STYLE.forceApplyTheme(this, fallbackStyleSheet);
@@ -102,7 +109,7 @@ void MainWindow::initContent() {
     sideBar = new SideBar(this);
     rightSideBar = new RightSideBar(this);
     statusBar = new StatusBar(this);
-    viewWidget = new ViewWidget(documentController, documentModel, this);
+    viewWidget = new ViewWidget(m_actionDispatcher, documentModel, this);
 
     setMenuBar(menuBar);
     addToolBar(toolBar);
@@ -111,33 +118,10 @@ void MainWindow::initContent() {
     // 创建主内容区域的QStackedWidget
     m_contentStack = new QStackedWidget(this);
 
-    // 创建主PDF查看器区域（包含侧边栏和视图）
-    QWidget* mainViewerWidget = new QWidget();
-    // 便于调试和样式设置
-    mainViewerWidget->setObjectName("MainViewerWidget");
-
-    QHBoxLayout* mainViewerLayout = new QHBoxLayout(mainViewerWidget);
-    mainViewerLayout->setContentsMargins(0, 0, 0, 0);
-
-    mainSplitter = new QSplitter(Qt::Horizontal, mainViewerWidget);
-    // 便于调试和样式设置
-    mainSplitter->setObjectName("MainSplitter");
-
-    mainSplitter->addWidget(sideBar);
-    mainSplitter->addWidget(viewWidget);
-    mainSplitter->addWidget(rightSideBar);
-    mainSplitter->setCollapsible(0, true);   // Left sidebar collapsible
-    mainSplitter->setCollapsible(1, false);  // ViewWidget not collapsible
-    mainSplitter->setCollapsible(2, true);   // Right sidebar collapsible
-    mainSplitter->setStretchFactor(1, 1);    // ViewWidget gets stretch priority
-
-    // 根据侧边栏的可见性设置初始尺寸
-    int leftWidth = sideBar->isVisible() ? sideBar->getPreferredWidth() : 0;
-    int rightWidth =
-        rightSideBar->isVisible() ? rightSideBar->getPreferredWidth() : 0;
-    mainSplitter->setSizes({leftWidth, 1000, rightWidth});
-
-    mainViewerLayout->addWidget(mainSplitter);
+    // 使用 LayoutManager 创建主查看器布局
+    m_layoutManager =
+        new LayoutManager(sideBar, rightSideBar, viewWidget, this, this);
+    QWidget* mainViewerWidget = m_layoutManager->createLayout();
 
     // 添加页面到堆叠组件
     m_contentStack->addWidget(m_welcomeWidget);   // 索引 0: 欢迎界面
@@ -155,19 +139,6 @@ void MainWindow::initContent() {
     }
 }
 
-void MainWindow::initModel() {
-    renderModel = new RenderModel(this->logicalDpiX(), this->logicalDpiY());
-    documentModel = new DocumentModel(renderModel);
-    pageModel = new PageModel(renderModel);
-    recentFilesManager = new RecentFilesManager(this);
-}
-
-void MainWindow::initController() {
-    documentController =
-        new DocumentController(documentModel, recentFilesManager);
-    pageController = new PageController(pageModel);
-}
-
 void MainWindow::initWelcomeScreen() {
     LOG_DEBUG("MainWindow: Initializing welcome screen...");
 
@@ -180,7 +151,7 @@ void MainWindow::initWelcomeScreen() {
 
     // 创建欢迎界面管理器，一次性传入所有依赖
     m_welcomeScreenManager =
-        new WelcomeScreenManager(this, m_welcomeWidget, documentModel, this);
+        new WelcomeScreenManager(m_welcomeWidget, documentModel, this);
 
     // 设置管理器到欢迎界面
     m_welcomeWidget->setWelcomeScreenManager(m_welcomeScreenManager);
@@ -193,11 +164,11 @@ void MainWindow::initConnection() {
     connect(&StyleManager::instance(), &StyleManager::themeChanged, this,
             [this](Theme theme) {
                 QString themeStr = (theme == Theme::Dark) ? "dark" : "light";
-                loadAndApplyTheme(themeStr);
+                m_themeManager->loadTheme(themeStr);
             });
 
-    connect(menuBar, &MenuBar::onExecuted, documentController,
-            &DocumentController::execute);
+    connect(menuBar, &MenuBar::onExecuted, m_actionDispatcher,
+            &ActionDispatcher::execute);
     connect(menuBar, &MenuBar::onExecuted, this,
             &MainWindow::handleActionExecuted);
 
@@ -207,20 +178,12 @@ void MainWindow::initConnection() {
 
     // 连接工具栏信号
     connect(toolBar, &ToolBar::actionTriggered, this, [this](ActionMap action) {
-        documentController->execute(action, this);
+        m_actionDispatcher->execute(action, this);
     });
 
-    // Connect document controller operation completed signal
-    connect(documentController, &DocumentController::documentOperationCompleted,
+    // Connect action dispatcher operation completed signal
+    connect(m_actionDispatcher, &ActionDispatcher::documentOperationCompleted,
             this, &MainWindow::onDocumentOperationCompleted);
-
-    // 连接文档控制器的侧边栏信号
-    connect(documentController, &DocumentController::sideBarToggleRequested,
-            sideBar, [this]() { sideBar->toggleVisibility(true); });
-    connect(documentController, &DocumentController::sideBarShowRequested,
-            sideBar, [this]() { sideBar->show(true); });
-    connect(documentController, &DocumentController::sideBarHideRequested,
-            sideBar, [this]() { sideBar->hide(true); });
 
     // 连接侧边栏信号
     connect(sideBar, &SideBar::visibilityChanged, this,
@@ -231,10 +194,6 @@ void MainWindow::initConnection() {
             &MainWindow::onThumbnailPageClicked);
     connect(sideBar, &SideBar::pageDoubleClicked, this,
             &MainWindow::onThumbnailPageDoubleClicked);
-
-    // 连接分隔器信号
-    connect(mainSplitter, &QSplitter::splitterMoved, this,
-            &MainWindow::onSplitterMoved);
 
     // 连接文档模型信号以同步目录
     connect(documentModel, &DocumentModel::currentDocumentChanged, this,
@@ -314,17 +273,9 @@ void MainWindow::initConnection() {
     connect(viewWidget, &ViewWidget::currentViewerZoomChanged, this,
             [this](double zoomFactor) { statusBar->setZoomLevel(zoomFactor); });
 
-    // 连接查看模式变化信号
-    connect(documentController, &DocumentController::viewModeChangeRequested,
-            this, &MainWindow::onViewModeChangeRequested);
-
     // 连接PDF操作信号
-    connect(documentController, &DocumentController::pdfActionRequested, this,
+    connect(m_actionDispatcher, &ActionDispatcher::pdfActionRequested, this,
             &MainWindow::onPDFActionRequested);
-
-    // 连接主题切换信号
-    connect(documentController, &DocumentController::themeToggleRequested, this,
-            &MainWindow::onThemeToggleRequested);
 
     // 连接MainWindow的PDF操作信号到ViewWidget
     connect(this, &MainWindow::pdfViewerActionRequested, viewWidget,
@@ -342,12 +293,7 @@ void MainWindow::initConnection() {
     connect(statusBar, &StatusBar::pageJumpRequested, this,
             &MainWindow::onPageJumpRequested);
 
-    // 添加RenderModel连接（从合并分支集成）
-    // TODO: Fix method names when implementing full functionality
-    // connect(renderModel, &RenderModel::renderPageDone, viewWidget,
-    // &ViewWidget::changeImage);
-    connect(renderModel, &RenderModel::documentChanged, pageModel,
-            &PageModel::updateInfo);
+    // 页面/状态栏信号（模型→视图的连接，后续移入 Assembly 层）
     connect(pageModel, &PageModel::pageUpdate, statusBar,
             &StatusBar::setPageInfo);
     connect(documentModel, &DocumentModel::pageUpdate, statusBar,
@@ -381,20 +327,6 @@ void MainWindow::onSideBarVisibilityChanged(bool visible) {
     // 可以在这里添加状态栏消息或其他UI反馈
     QString message = visible ? "侧边栏已显示" : "侧边栏已隐藏";
     statusBar->setMessage(message);
-}
-
-void MainWindow::onSplitterMoved(int pos, int index) {
-    // 当用户拖拽分隔器时，更新侧边栏的首选宽度
-    if (index == 0 && sideBar->isVisible()) {
-        QList<int> sizes = mainSplitter->sizes();
-        if (!sizes.isEmpty()) {
-            int newWidth = sizes[0];
-            if (newWidth > 0) {
-                sideBar->setPreferredWidth(newWidth);
-                sideBar->saveState();  // 保存新的宽度设置
-            }
-        }
-    }
 }
 
 void MainWindow::onCurrentDocumentChangedForOutline(int index) {
@@ -447,11 +379,6 @@ void MainWindow::updateStatusBarInfo() {
     statusBar->setDocumentInfo(fileName, currentPage, totalPages, zoomPercent);
 }
 
-void MainWindow::onViewModeChangeRequested(int mode) {
-    // 将查看模式变化请求传递给当前的PDF查看器
-    viewWidget->setCurrentViewMode(mode);
-}
-
 void MainWindow::onPageJumpRequested(int pageNumber) {
     // 将页码跳转请求传递给当前的PDF查看器
     viewWidget->goToPage(pageNumber);
@@ -469,6 +396,7 @@ void MainWindow::onPDFActionRequested(ActionMap action) {
 
     // 通过ViewWidget路由到当前PDFViewer
     switch (action) {
+        // --- PDF viewer actions ---
         case ActionMap::firstPage:
         case ActionMap::previousPage:
         case ActionMap::nextPage:
@@ -482,98 +410,42 @@ void MainWindow::onPDFActionRequested(ActionMap action) {
         case ActionMap::rotateRight:
             emit pdfViewerActionRequested(action);
             break;
+        // --- Sidebar actions ---
+        case ActionMap::toggleSideBar:
+            m_layoutManager->toggleSideBar();
+            break;
+        case ActionMap::showSideBar:
+            m_layoutManager->showSideBar();
+            break;
+        case ActionMap::hideSideBar:
+            m_layoutManager->hideSideBar();
+            break;
+        // --- View mode ---
+        case ActionMap::setSinglePageMode:
+            viewWidget->setCurrentViewMode(0);
+            break;
+        case ActionMap::setContinuousScrollMode:
+            viewWidget->setCurrentViewMode(1);
+            break;
+        // --- Theme ---
+        case ActionMap::toggleTheme:
+            STYLE.toggleTheme();
+            break;
         default:
             LOG_WARNING("Unhandled PDF action: {}", static_cast<int>(action));
             break;
     }
 }
 
-void MainWindow::onThemeToggleRequested() {
-    // 切换主题
-    STYLE.toggleTheme();
-}
-
 void MainWindow::onOpenRecentFileRequested(const QString& filePath) {
-    // 通过DocumentController打开最近文件
-    if (documentController) {
-        bool success = documentController->openDocument(filePath);
+    // 通过ActionDispatcher打开最近文件
+    if (m_actionDispatcher) {
+        bool success = m_actionDispatcher->openDocument(filePath);
         if (!success) {
             LOG_WARNING("Failed to open recent file: {}",
                         filePath.toStdString());
         }
     }
-}
-
-// function
-void MainWindow::loadAndApplyTheme(const QString& theme) {
-    // 防止重复应用相同主题
-    if (m_currentAppliedTheme == theme) {
-        LOG_DEBUG("Theme {} is already applied, skipping redundant application",
-                  theme.toStdString());
-        return;
-    }
-
-    // 尝试从外部样式文件加载 - 支持多种部署场景
-    QStringList possiblePaths = {
-        // 开发环境：相对于可执行文件的assets目录
-        QString("%1/../assets/styles/%2.qss")
-            .arg(qApp->applicationDirPath(), theme),
-        // 部署环境：可执行文件同级的styles目录
-        QString("%1/styles/%2.qss").arg(qApp->applicationDirPath(), theme),
-        // 备选：相对于工作目录的assets目录
-        QString("assets/styles/%2.qss").arg(theme),
-        // 备选：当前目录的styles子目录
-        QString("styles/%2.qss").arg(theme)};
-
-    QString selectedPath;
-    for (const QString& candidatePath : possiblePaths) {
-        QFileInfo fileInfo(candidatePath);
-        LOG_DEBUG("Checking QSS path: {} exists: {}",
-                  candidatePath.toStdString(), fileInfo.exists());
-
-        if (fileInfo.exists() && fileInfo.isReadable()) {
-            selectedPath = candidatePath;
-            LOG_DEBUG("Selected QSS path: {}", selectedPath.toStdString());
-            break;
-        }
-    }
-
-    if (!selectedPath.isEmpty()) {
-        QFile file(selectedPath);
-        if (file.open(QFile::ReadOnly)) {
-            QString styleSheet = QLatin1String(file.readAll());
-            file.close();
-
-            if (!styleSheet.isEmpty()) {
-                // 通过StyleManager应用样式表，让其统一管理
-                STYLE.applyThemeStyleSheet(styleSheet);
-                m_currentAppliedTheme = theme;
-                LOG_DEBUG("Applied external theme: {} from {} via StyleManager",
-                          theme.toStdString(), selectedPath.toStdString());
-                return;
-            } else {
-                LOG_WARNING("QSS file is empty: {}",
-                            selectedPath.toStdString());
-            }
-        } else {
-            LOG_WARNING("Failed to open QSS file: {}",
-                        selectedPath.toStdString());
-        }
-    }
-
-    // 外部文件不可用时，使用StyleManager作为备选方案
-    LOG_WARNING("No external theme file found for theme: {}",
-                theme.toStdString());
-    LOG_DEBUG("Attempted paths: [{}]", possiblePaths.join(", ").toStdString());
-    LOG_DEBUG("Falling back to StyleManager for theme: {}",
-              theme.toStdString());
-
-    // 使用StyleManager生成并应用默认样式
-    QString fallbackStyleSheet = STYLE.getApplicationStyleSheet();
-    STYLE.applyThemeStyleSheet(fallbackStyleSheet);
-    m_currentAppliedTheme = theme;
-    LOG_DEBUG("Applied fallback theme: {} via StyleManager",
-              theme.toStdString());
 }
 
 void MainWindow::initWelcomeScreenConnections() {
@@ -635,9 +507,9 @@ void MainWindow::onWelcomeFileOpenRequested(const QString& filePath) {
     LOG_DEBUG("MainWindow: Opening file from welcome screen: {}",
               filePath.toStdString());
 
-    // 使用现有的文档控制器打开文件
-    if (documentController) {
-        documentController->openDocument(filePath);
+    // 使用现有的ActionDispatcher打开文件
+    if (m_actionDispatcher) {
+        m_actionDispatcher->openDocument(filePath);
     }
 }
 
@@ -652,9 +524,9 @@ void MainWindow::onWelcomeNewFileRequested() {
 void MainWindow::onWelcomeOpenFileRequested() {
     LOG_DEBUG("MainWindow: Open file requested from welcome screen");
 
-    // 使用现有的文档控制器打开文件对话框
-    if (documentController) {
-        documentController->execute(ActionMap::openFile, this);
+    // 使用现有的ActionDispatcher打开文件对话框
+    if (m_actionDispatcher) {
+        m_actionDispatcher->execute(ActionMap::openFile, this);
     }
 }
 
@@ -676,7 +548,7 @@ void MainWindow::handleActionExecuted(ActionMap id) {
             emit pdfViewerActionRequested(ActionMap::zoomOut);
             break;
         default:
-            // 其他操作通过DocumentController处理
+            // 其他操作通过ActionDispatcher处理
             break;
     }
 }

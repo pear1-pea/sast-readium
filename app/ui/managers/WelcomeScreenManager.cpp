@@ -2,7 +2,6 @@
 #include <QApplication>
 #include <QDebug>
 #include <QTimer>
-#include "../../MainWindow.h"
 #include "../../model/DocumentModel.h"
 #include "../widgets/WelcomeWidget.h"
 
@@ -11,12 +10,10 @@ const QString WelcomeScreenManager::SETTINGS_ENABLED_KEY = "showWelcomeScreen";
 const QString WelcomeScreenManager::SETTINGS_SHOW_ON_STARTUP_KEY =
     "showWelcomeScreenOnStartup";
 
-WelcomeScreenManager::WelcomeScreenManager(MainWindow* mainWindow,
-                                           WelcomeWidget* welcomeWidget,
+WelcomeScreenManager::WelcomeScreenManager(WelcomeWidget* welcomeWidget,
                                            DocumentModel* documentModel,
                                            QObject* parent)
     : QObject(parent),
-      m_mainWindow(mainWindow),
       m_welcomeWidget(welcomeWidget),
       m_documentModel(documentModel),
       m_settings(nullptr),

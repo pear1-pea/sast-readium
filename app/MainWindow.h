@@ -1,13 +1,16 @@
 #pragma once
 
 #include <QMainWindow>
-#include <QSplitter>
+
 #include <QStackedWidget>
-#include "controller/DocumentController.h"
-#include "controller/PageController.h"
+#include "controller/ActionDispatcher.h"
+#include "controller/DocumentOrchestrator.h"
 #include "controller/tool.hpp"
+#include "core/AppComponents.h"
+#include "managers/LayoutManager.h"
 #include "managers/RecentFilesManager.h"
 #include "managers/StyleManager.h"
+#include "managers/ThemeManager.h"
 #include "model/DocumentModel.h"
 #include "model/PageModel.h"
 #include "model/RenderModel.h"
@@ -24,22 +27,18 @@ class MainWindow : public QMainWindow {
     Q_OBJECT
 
 public:
-    MainWindow(QWidget* parent = nullptr);
+    MainWindow(const AppComponents& deps, QWidget* parent = nullptr);
     ~MainWindow() noexcept;
 
 private slots:
-    void loadAndApplyTheme(const QString& theme);
     void onDocumentOperationCompleted(ActionMap action, bool success);
     void onSideBarVisibilityChanged(bool visible);
-    void onSplitterMoved(int pos, int index);
     void onCurrentDocumentChangedForOutline(int index);
     void updateStatusBarInfo();
-    void onViewModeChangeRequested(int mode);
     void onPageJumpRequested(int pageNumber);
     void onThumbnailPageClicked(int pageNumber);
     void onThumbnailPageDoubleClicked(int pageNumber);
     void onPDFActionRequested(ActionMap action);
-    void onThemeToggleRequested();
     void onOpenRecentFileRequested(const QString& filePath);
     void handleActionExecuted(ActionMap id);
 
@@ -60,8 +59,6 @@ private slots:
 private:
     void initWindow();
     void initContent();
-    void initModel();
-    void initController();
     void initConnection();
     void initWelcomeScreen();
     void initWelcomeScreenConnections();
@@ -77,15 +74,15 @@ private:
     StatusBar* statusBar;
     ViewWidget* viewWidget;
 
-    QSplitter* mainSplitter;
+    LayoutManager* m_layoutManager;
 
     // Welcome screen components
     QStackedWidget* m_contentStack;
     WelcomeWidget* m_welcomeWidget;
     WelcomeScreenManager* m_welcomeScreenManager;
 
-    DocumentController* documentController;
-    PageController* pageController;
+    ActionDispatcher* m_actionDispatcher;
+    DocumentOrchestrator* m_documentOrchestrator;
 
     DocumentModel* documentModel;
     PageModel* pageModel;
@@ -93,8 +90,7 @@ private:
 
     RecentFilesManager* recentFilesManager;
 
-    // Theme state tracking
-    QString m_currentAppliedTheme;
+    ThemeManager* m_themeManager;
 
 signals:
     void pdfViewerActionRequested(ActionMap action);
