@@ -1,15 +1,12 @@
 #include "ViewWidget.h"
 #include <QDebug>
+#include <QFileInfo>
 #include <QLabel>
 #include <QProgressBar>
 #include "../viewer/PDFViewer.h"
 
-ViewWidget::ViewWidget(ActionDispatcher* controller, DocumentModel* model,
-                       QWidget* parent)
-    : QWidget(parent),
-      m_actionDispatcher(controller),
-      documentModel(model),
-      outlineModel(nullptr) {
+ViewWidget::ViewWidget(DocumentModel* model, QWidget* parent)
+    : QWidget(parent), documentModel(model), outlineModel(nullptr) {
     setupUI();
 
     // 立即连接 documentModel 信号（不再需要等 setter 调用）
@@ -76,24 +73,6 @@ void ViewWidget::setupConnections() {
 
 void ViewWidget::setOutlineModel(PDFOutlineModel* model) {
     outlineModel = model;
-}
-
-void ViewWidget::openDocument(const QString& filePath) {
-    if (m_actionDispatcher) {
-        m_actionDispatcher->openDocument(filePath);
-    }
-}
-
-void ViewWidget::closeDocument(int index) {
-    if (m_actionDispatcher) {
-        m_actionDispatcher->closeDocument(index);
-    }
-}
-
-void ViewWidget::switchToDocument(int index) {
-    if (m_actionDispatcher) {
-        m_actionDispatcher->switchToDocument(index);
-    }
 }
 
 void ViewWidget::goToPage(int pageNumber) {
@@ -405,9 +384,11 @@ void ViewWidget::onDocumentLoadingFailed(const QString& error,
     // 这里暂时只输出调试信息
 }
 
-void ViewWidget::onTabCloseRequested(int index) { closeDocument(index); }
+void ViewWidget::onTabCloseRequested(int index) {
+    emit tabCloseRequested(index);
+}
 
-void ViewWidget::onTabSwitched(int index) { switchToDocument(index); }
+void ViewWidget::onTabSwitched(int index) { emit tabSwitched(index); }
 
 void ViewWidget::onTabMoved(int from, int to) {
     // 标签页移动时，需要同步移动PDF查看器

@@ -1,5 +1,4 @@
 #include "AppBootstrap.h"
-#include "controller/ActionDispatcher.h"
 #include "controller/DocumentOrchestrator.h"
 #include "managers/RecentFilesManager.h"
 #include "managers/ThemeManager.h"
@@ -18,8 +17,6 @@ AppComponents AppBootstrap::assemble(double dpiX, double dpiY) {
 
     // ── Layer 3: Application (Controllers + Orchestrators) ──
     deps.themeManager = new ThemeManager();
-    deps.actionDispatcher =
-        new ActionDispatcher(deps.documentModel, deps.recentFilesManager);
     deps.documentOrchestrator =
         new DocumentOrchestrator(deps.documentModel, deps.pageModel,
                                  deps.renderModel, deps.recentFilesManager);

@@ -3,7 +3,7 @@
 #include <QStackedWidget>
 #include <QVBoxLayout>
 #include <QWidget>
-#include "../../controller/ActionDispatcher.h"
+#include "../../controller/tool.hpp"
 #include "../../model/DocumentModel.h"
 #include "../../model/PDFOutlineModel.h"
 #include "../viewer/PDFViewer.h"
@@ -13,16 +13,10 @@ class ViewWidget : public QWidget {
     Q_OBJECT
 
 public:
-    ViewWidget(ActionDispatcher* controller, DocumentModel* model,
-               QWidget* parent = nullptr);
+    ViewWidget(DocumentModel* model, QWidget* parent = nullptr);
 
     // 设置目录模型（保留，因为目录模型是动态变化的）
     void setOutlineModel(PDFOutlineModel* model);
-
-    // 文档操作
-    void openDocument(const QString& filePath);
-    void closeDocument(int index);
-    void switchToDocument(int index);
 
     // 页面导航
     void goToPage(int pageNumber);
@@ -76,6 +70,12 @@ signals:
     void currentViewerZoomChanged(double zoomFactor);
     void currentOutlineModelChanged(PDFOutlineModel* model);
 
+    /** Emitted when the user requests to close a tab (via tab bar). */
+    void tabCloseRequested(int index);
+
+    /** Emitted when the user switches to a different tab. */
+    void tabSwitched(int index);
+
 private:
     // UI组件
     QVBoxLayout* mainLayout;
@@ -84,7 +84,6 @@ private:
     QWidget* emptyWidget;
 
     // 数据和控制
-    ActionDispatcher* m_actionDispatcher;
     DocumentModel* documentModel;
     PDFOutlineModel* outlineModel;
     QList<PDFViewer*> pdfViewers;           // 每个文档对应一个PDFViewer

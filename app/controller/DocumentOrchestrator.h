@@ -2,6 +2,7 @@
 
 #include <QObject>
 #include <QString>
+#include <QStringList>
 
 class DocumentModel;
 class PageModel;
@@ -11,11 +12,11 @@ class RecentFilesManager;
 /**
  * Coordinates document-lifecycle across models.
  *
- * Owns the Model↔Model wiring and exposes clean lifecycle signals.
- * View-level routing (StatusBar, ToolBar, MenuBar, SideBar) is handled
- * by the Assembly layer (AppBootstrap / MainWindow).
+ * Owns the Model↔Model wiring, exposes clean lifecycle signals, and
+ * provides document CRUD operations (open/close/switch) that were
+ * previously scattered between ActionDispatcher and MainWindow.
  *
- * Layer: Application (L3).
+ * Layer: Controller (L2).
  */
 class DocumentOrchestrator : public QObject {
     Q_OBJECT
@@ -33,6 +34,13 @@ public:
     RenderModel* renderModel() const { return m_renderModel; }
     RecentFilesManager* recentFilesManager() const { return m_recentFiles; }
 
+    // --- Document CRUD ---
+    bool openDocument(const QString& filePath);
+    bool openDocuments(const QStringList& filePaths);
+    bool closeDocument(int index);
+    bool closeCurrentDocument();
+    void switchToDocument(int index);
+
 signals:
     /** Document was opened — relays DocumentModel::documentOpened. */
     void documentOpened(int index, const QString& fileName);
@@ -41,6 +49,7 @@ signals:
 
 private:
     void setupModelConnections();
+    void addToRecentFiles(const QString& filePath);
 
     DocumentModel* m_documentModel;
     PageModel* m_pageModel;

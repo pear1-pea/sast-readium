@@ -3,7 +3,6 @@
 #include <QMainWindow>
 
 #include <QStackedWidget>
-#include "controller/ActionDispatcher.h"
 #include "controller/DocumentOrchestrator.h"
 #include "controller/tool.hpp"
 #include "core/AppComponents.h"
@@ -31,16 +30,13 @@ public:
     ~MainWindow() noexcept;
 
 private slots:
-    void onDocumentOperationCompleted(ActionMap action, bool success);
     void onSideBarVisibilityChanged(bool visible);
     void onCurrentDocumentChangedForOutline(int index);
     void updateStatusBarInfo();
     void onPageJumpRequested(int pageNumber);
     void onThumbnailPageClicked(int pageNumber);
     void onThumbnailPageDoubleClicked(int pageNumber);
-    void onPDFActionRequested(ActionMap action);
     void onOpenRecentFileRequested(const QString& filePath);
-    void handleActionExecuted(ActionMap id);
 
     // 目录相关的槽函数
     void onOutlineModelChanged(PDFOutlineModel* model);
@@ -63,6 +59,14 @@ private:
     void initWelcomeScreen();
     void initWelcomeScreenConnections();
 
+    // Route an ActionMap from MenuBar / ToolBar to the right component.
+    void routeAction(ActionMap action);
+    // Dialog-based file operations (L5 — needs QWidget* parent).
+    void openFileDialog();
+    void openFolderDialog();
+    void saveDocumentAs();
+    void showDocumentMetadata();
+
     // 目录相关的辅助函数
     void setupOutlineConnections();
     void updateOutlineHighlight(int pageNumber);
@@ -81,7 +85,6 @@ private:
     WelcomeWidget* m_welcomeWidget;
     WelcomeScreenManager* m_welcomeScreenManager;
 
-    ActionDispatcher* m_actionDispatcher;
     DocumentOrchestrator* m_documentOrchestrator;
 
     DocumentModel* documentModel;

@@ -1,27 +1,23 @@
 #include "MainWindow.h"
 #include <QApplication>
-#include <QBoxLayout>
-#include <QDebug>
-#include <QFile>
+#include <QFileDialog>
 #include <QFileInfo>
-#include <QFrame>
-#include <QLabel>
-#include <QLatin1String>
-#include <QMainWindow>
-#include <QStackedWidget>
-#include <QStringList>
-#include <QWidget>
+#include <QMessageBox>
+#include <QStandardPaths>
+#include <QTimer>
 #include "managers/FileTypeIconManager.h"
 #include "managers/StyleManager.h"
 #include "model/RenderModel.h"
+#include "ui/dialogs/DocumentMetadataDialog.h"
 #include "ui/managers/WelcomeScreenManager.h"
 #include "ui/thumbnail/ThumbnailListView.h"
 #include "ui/widgets/WelcomeWidget.h"
+#include "utils/DocumentCopy.h"
+#include "utils/FileUtils.h"
 #include "utils/LoggingMacros.h"
 
 MainWindow::MainWindow(const AppComponents& deps, QWidget* parent)
     : QMainWindow(parent),
-      m_actionDispatcher(deps.actionDispatcher),
       m_documentOrchestrator(deps.documentOrchestrator),
       m_themeManager(deps.themeManager),
       documentModel(deps.documentModel),
@@ -109,7 +105,7 @@ void MainWindow::initContent() {
     sideBar = new SideBar(this);
     rightSideBar = new RightSideBar(this);
     statusBar = new StatusBar(this);
-    viewWidget = new ViewWidget(m_actionDispatcher, documentModel, this);
+    viewWidget = new ViewWidget(documentModel, this);
 
     setMenuBar(menuBar);
     addToolBar(toolBar);
@@ -160,54 +156,58 @@ void MainWindow::initWelcomeScreen() {
 }
 
 void MainWindow::initConnection() {
-    // 监听 StyleManager 的主题变更信号，确保从任何地方切换主题都能立即生效
+    // 监听 StyleManager 的主题变更信号
     connect(&StyleManager::instance(), &StyleManager::themeChanged, this,
             [this](Theme theme) {
                 QString themeStr = (theme == Theme::Dark) ? "dark" : "light";
                 m_themeManager->loadTheme(themeStr);
             });
 
-    connect(menuBar, &MenuBar::onExecuted, m_actionDispatcher,
-            &ActionDispatcher::execute);
-    connect(menuBar, &MenuBar::onExecuted, this,
-            &MainWindow::handleActionExecuted);
+    // MenuBar 动作路由
+    connect(menuBar, &MenuBar::onExecuted, this, [this](ActionMap action) {
+        if (action == ActionMap::fullScreen) {
+            if (isFullScreen())
+                showNormal();
+            else
+                showFullScreen();
+        } else {
+            routeAction(action);
+        }
+    });
 
     // 连接最近文件信号
     connect(menuBar, &MenuBar::openRecentFileRequested, this,
             &MainWindow::onOpenRecentFileRequested);
 
-    // 连接工具栏信号
-    connect(toolBar, &ToolBar::actionTriggered, this, [this](ActionMap action) {
-        m_actionDispatcher->execute(action, this);
-    });
+    // ToolBar 动作路由
+    connect(toolBar, &ToolBar::actionTriggered, this,
+            [this](ActionMap action) { routeAction(action); });
 
-    // Connect action dispatcher operation completed signal
-    connect(m_actionDispatcher, &ActionDispatcher::documentOperationCompleted,
-            this, &MainWindow::onDocumentOperationCompleted);
-
-    // 连接侧边栏信号
+    // 侧边栏信号
     connect(sideBar, &SideBar::visibilityChanged, this,
             &MainWindow::onSideBarVisibilityChanged);
-
-    // 连接缩略图点击信号
     connect(sideBar, &SideBar::pageClicked, this,
             &MainWindow::onThumbnailPageClicked);
     connect(sideBar, &SideBar::pageDoubleClicked, this,
             &MainWindow::onThumbnailPageDoubleClicked);
 
-    // 连接文档模型信号以同步目录
+    // ViewWidget 标签信号 → DocumentOrchestrator
+    connect(
+        viewWidget, &ViewWidget::tabCloseRequested, this,
+        [this](int index) { m_documentOrchestrator->closeDocument(index); });
+    connect(viewWidget, &ViewWidget::tabSwitched, this, [this](int index) {
+        m_documentOrchestrator->switchToDocument(index);
+    });
+
+    // 文档模型信号以同步目录
     connect(documentModel, &DocumentModel::currentDocumentChanged, this,
             &MainWindow::onCurrentDocumentChangedForOutline);
-
-    // 连接ViewWidget的目录模型变化信号
     connect(viewWidget, &ViewWidget::currentOutlineModelChanged, this,
             &MainWindow::onOutlineModelChanged);
-
-    // 连接页面变化信号以更新目录高亮
     connect(viewWidget, &ViewWidget::currentViewerPageChanged, this,
             &MainWindow::onPageChangedForOutlineHighlight);
 
-    // 连接文档模型信号以更新状态栏
+    // 文档模型信号以更新状态栏
     connect(documentModel, &DocumentModel::documentOpened, this,
             [this](int index, const QString& fileName) {
                 statusBar->hideLoadingProgress();
@@ -220,7 +220,7 @@ void MainWindow::initConnection() {
         toolBar->setActionsEnabled(false);
     });
 
-    // 连接异步加载进度信号
+    // 异步加载进度信号
     connect(documentModel, &DocumentModel::loadingStarted, this,
             [this](const QString& filePath) {
                 QFileInfo fileInfo(filePath);
@@ -237,90 +237,53 @@ void MainWindow::initConnection() {
                 statusBar->setMessage(QString("加载失败: %1").arg(error));
             });
 
-    // 连接文档打开/关闭状态变化
+    // 文档打开/关闭 — 工具栏状态 + 欢迎界面
     connect(documentModel, &DocumentModel::documentOpened, this,
             [this](int, const QString&) {
                 toolBar->setActionsEnabled(true);
-                // 通知欢迎界面管理器文档已打开
-                if (m_welcomeScreenManager) {
+                if (m_welcomeScreenManager)
                     m_welcomeScreenManager->onDocumentOpened();
-                }
             });
     connect(documentModel, &DocumentModel::documentClosed, this, [this](int) {
         if (documentModel->isEmpty()) {
             toolBar->setActionsEnabled(false);
-            // 通知欢迎界面管理器所有文档已关闭
-            if (m_welcomeScreenManager) {
+            if (m_welcomeScreenManager)
                 m_welcomeScreenManager->onAllDocumentsClosed();
-            }
         } else {
-            // 通知欢迎界面管理器文档已关闭
-            if (m_welcomeScreenManager) {
+            if (m_welcomeScreenManager)
                 m_welcomeScreenManager->onDocumentClosed();
-            }
         }
     });
 
-    // 连接ViewWidget的PDF查看器状态信号
+    // ViewWidget 状态信号 → 状态栏
     connect(viewWidget, &ViewWidget::currentViewerPageChanged, this,
             [this](int pageNumber, int totalPages) {
                 statusBar->setPageInfo(pageNumber, totalPages);
             });
-
-    // 连接页面变化信号以同步缩略图高光
     connect(viewWidget, &ViewWidget::currentViewerPageChanged, this,
             &MainWindow::onPageChangedForThumbnailSync);
     connect(viewWidget, &ViewWidget::currentViewerZoomChanged, this,
             [this](double zoomFactor) { statusBar->setZoomLevel(zoomFactor); });
 
-    // 连接PDF操作信号
-    connect(m_actionDispatcher, &ActionDispatcher::pdfActionRequested, this,
-            &MainWindow::onPDFActionRequested);
-
-    // 连接MainWindow的PDF操作信号到ViewWidget
+    // PDF 操作信号 → ViewWidget
     connect(this, &MainWindow::pdfViewerActionRequested, viewWidget,
             &ViewWidget::executePDFAction);
 
-    // 连接状态栏缩放控制信号
+    // 状态栏缩放控制
     connect(statusBar, &StatusBar::zoomChanged, viewWidget,
             &ViewWidget::setCurrentZoom);
     connect(statusBar, &StatusBar::zoomInClicked, this,
             [this]() { emit pdfViewerActionRequested(ActionMap::zoomIn); });
     connect(statusBar, &StatusBar::zoomOutClicked, this,
             [this]() { emit pdfViewerActionRequested(ActionMap::zoomOut); });
-
-    // 连接状态栏页码跳转信号
     connect(statusBar, &StatusBar::pageJumpRequested, this,
             &MainWindow::onPageJumpRequested);
 
-    // 页面/状态栏信号（模型→视图的连接，后续移入 Assembly 层）
+    // 页面/状态栏信号（模型→视图）
     connect(pageModel, &PageModel::pageUpdate, statusBar,
             &StatusBar::setPageInfo);
     connect(documentModel, &DocumentModel::pageUpdate, statusBar,
             &StatusBar::setPageInfo);
-    // connect(viewWidget, &ViewWidget::scaleChanged, statusBar,
-    // &StatusBar::setZoomInfo);
-}
-
-void MainWindow::onDocumentOperationCompleted(ActionMap action, bool success) {
-    QString message;
-    switch (action) {
-        case ActionMap::openFile:
-        case ActionMap::newTab:
-            message = success ? "文档打开成功" : "文档打开失败";
-            break;
-        case ActionMap::closeTab:
-        case ActionMap::closeCurrentTab:
-            message = success ? "文档关闭成功" : "文档关闭失败";
-            break;
-        case ActionMap::closeAllTabs:
-            message = success ? "所有文档已关闭" : "关闭文档时出错";
-            break;
-        default:
-            return;
-    }
-
-    statusBar->setMessage(message);
 }
 
 void MainWindow::onSideBarVisibilityChanged(bool visible) {
@@ -384,63 +347,9 @@ void MainWindow::onPageJumpRequested(int pageNumber) {
     viewWidget->goToPage(pageNumber);
 }
 
-void MainWindow::onPDFActionRequested(ActionMap action) {
-    // 获取当前活动的PDF查看器并执行相应操作
-    if (!viewWidget->hasDocuments()) {
-        return;  // 没有文档时不执行操作
-    }
-
-    int currentIndex = viewWidget->getCurrentDocumentIndex();
-    if (currentIndex < 0)
-        return;
-
-    // 通过ViewWidget路由到当前PDFViewer
-    switch (action) {
-        // --- PDF viewer actions ---
-        case ActionMap::firstPage:
-        case ActionMap::previousPage:
-        case ActionMap::nextPage:
-        case ActionMap::lastPage:
-        case ActionMap::zoomIn:
-        case ActionMap::zoomOut:
-        case ActionMap::fitToWidth:
-        case ActionMap::fitToPage:
-        case ActionMap::fitToHeight:
-        case ActionMap::rotateLeft:
-        case ActionMap::rotateRight:
-            emit pdfViewerActionRequested(action);
-            break;
-        // --- Sidebar actions ---
-        case ActionMap::toggleSideBar:
-            m_layoutManager->toggleSideBar();
-            break;
-        case ActionMap::showSideBar:
-            m_layoutManager->showSideBar();
-            break;
-        case ActionMap::hideSideBar:
-            m_layoutManager->hideSideBar();
-            break;
-        // --- View mode ---
-        case ActionMap::setSinglePageMode:
-            viewWidget->setCurrentViewMode(0);
-            break;
-        case ActionMap::setContinuousScrollMode:
-            viewWidget->setCurrentViewMode(1);
-            break;
-        // --- Theme ---
-        case ActionMap::toggleTheme:
-            STYLE.toggleTheme();
-            break;
-        default:
-            LOG_WARNING("Unhandled PDF action: {}", static_cast<int>(action));
-            break;
-    }
-}
-
 void MainWindow::onOpenRecentFileRequested(const QString& filePath) {
-    // 通过ActionDispatcher打开最近文件
-    if (m_actionDispatcher) {
-        bool success = m_actionDispatcher->openDocument(filePath);
+    if (m_documentOrchestrator) {
+        bool success = m_documentOrchestrator->openDocument(filePath);
         if (!success) {
             LOG_WARNING("Failed to open recent file: {}",
                         filePath.toStdString());
@@ -507,50 +416,22 @@ void MainWindow::onWelcomeFileOpenRequested(const QString& filePath) {
     LOG_DEBUG("MainWindow: Opening file from welcome screen: {}",
               filePath.toStdString());
 
-    // 使用现有的ActionDispatcher打开文件
-    if (m_actionDispatcher) {
-        m_actionDispatcher->openDocument(filePath);
+    if (m_documentOrchestrator) {
+        m_documentOrchestrator->openDocument(filePath);
     }
 }
 
 void MainWindow::onWelcomeNewFileRequested() {
     LOG_DEBUG("MainWindow: New file requested from welcome screen");
 
-    // 这里可以实现新建文件的逻辑
-    // 目前PDF阅读器可能不支持新建文件，所以可以显示打开文件对话框
+    // 目前PDF阅读器不支持新建文件，显示打开文件对话框
     onWelcomeOpenFileRequested();
 }
 
 void MainWindow::onWelcomeOpenFileRequested() {
     LOG_DEBUG("MainWindow: Open file requested from welcome screen");
 
-    // 使用现有的ActionDispatcher打开文件对话框
-    if (m_actionDispatcher) {
-        m_actionDispatcher->execute(ActionMap::openFile, this);
-    }
-}
-
-void MainWindow::handleActionExecuted(ActionMap id) {
-    switch (id) {
-        case ActionMap::fullScreen:
-            if (isFullScreen()) {
-                showNormal();
-            } else {
-                showFullScreen();
-            }
-            break;
-        case ActionMap::zoomIn:
-            // 通过现有的PDF操作信号处理缩放
-            emit pdfViewerActionRequested(ActionMap::zoomIn);
-            break;
-        case ActionMap::zoomOut:
-            // 通过现有的PDF操作信号处理缩放
-            emit pdfViewerActionRequested(ActionMap::zoomOut);
-            break;
-        default:
-            // 其他操作通过ActionDispatcher处理
-            break;
-    }
+    openFileDialog();
 }
 
 // 目录相关的新增函数实现
@@ -649,4 +530,192 @@ void MainWindow::onPageChangedForThumbnailSync(int pageNumber, int totalPages) {
     }
 
     Q_UNUSED(totalPages)  // 避免未使用参数的警告
+}
+
+// ---------------------------------------------------------------------------
+//  Action routing (replaces the former ActionDispatcher command-map)
+// ---------------------------------------------------------------------------
+
+void MainWindow::routeAction(ActionMap action) {
+    switch (action) {
+        // --- PDF viewer actions → ViewWidget ---
+        case ActionMap::firstPage:
+        case ActionMap::previousPage:
+        case ActionMap::nextPage:
+        case ActionMap::lastPage:
+        case ActionMap::zoomIn:
+        case ActionMap::zoomOut:
+        case ActionMap::fitToWidth:
+        case ActionMap::fitToPage:
+        case ActionMap::fitToHeight:
+        case ActionMap::rotateLeft:
+        case ActionMap::rotateRight:
+            emit pdfViewerActionRequested(action);
+            break;
+
+        // --- Sidebar actions → LayoutManager ---
+        case ActionMap::toggleSideBar:
+            m_layoutManager->toggleSideBar();
+            break;
+        case ActionMap::showSideBar:
+            m_layoutManager->showSideBar();
+            break;
+        case ActionMap::hideSideBar:
+            m_layoutManager->hideSideBar();
+            break;
+
+        // --- View mode → ViewWidget ---
+        case ActionMap::setSinglePageMode:
+            viewWidget->setCurrentViewMode(0);
+            break;
+        case ActionMap::setContinuousScrollMode:
+            viewWidget->setCurrentViewMode(1);
+            break;
+
+        // --- Theme → StyleManager ---
+        case ActionMap::toggleTheme:
+            STYLE.toggleTheme();
+            break;
+
+        // --- File / tab operations (dialog + orchestrate) ---
+        case ActionMap::openFile:
+            openFileDialog();
+            break;
+        case ActionMap::openFolder:
+            openFolderDialog();
+            break;
+        case ActionMap::newTab:
+            openFileDialog();
+            break;
+        case ActionMap::closeTab:
+        case ActionMap::closeCurrentTab:
+            m_documentOrchestrator->closeCurrentDocument();
+            break;
+        case ActionMap::closeAllTabs: {
+            bool success = true;
+            while (!documentModel->isEmpty()) {
+                if (!m_documentOrchestrator->closeDocument(0)) {
+                    success = false;
+                    break;
+                }
+            }
+            break;
+        }
+        case ActionMap::nextTab: {
+            int current = documentModel->getCurrentDocumentIndex();
+            int count = documentModel->getDocumentCount();
+            if (count > 1)
+                m_documentOrchestrator->switchToDocument((current + 1) % count);
+            break;
+        }
+        case ActionMap::prevTab: {
+            int current = documentModel->getCurrentDocumentIndex();
+            int count = documentModel->getDocumentCount();
+            if (count > 1)
+                m_documentOrchestrator->switchToDocument((current - 1 + count) %
+                                                         count);
+            break;
+        }
+        case ActionMap::saveAs:
+            saveDocumentAs();
+            break;
+        case ActionMap::showDocumentMetadata:
+            showDocumentMetadata();
+            break;
+
+        // --- Recent files ---
+        case ActionMap::clearRecentFiles:
+            if (recentFilesManager)
+                recentFilesManager->clearRecentFiles();
+            break;
+
+        default:
+            LOG_WARNING("Unhandled action in MainWindow routing: {}",
+                        static_cast<int>(action));
+            break;
+    }
+}
+
+void MainWindow::openFileDialog() {
+    QStringList filePaths = QFileDialog::getOpenFileNames(
+        this, tr("Open PDF Files"),
+        QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation),
+        tr("PDF Files (*.pdf)"));
+    if (!filePaths.isEmpty()) {
+        m_documentOrchestrator->openDocuments(filePaths);
+    }
+}
+
+void MainWindow::openFolderDialog() {
+    QString folderPath = QFileDialog::getExistingDirectory(
+        this, tr("Open Folder"),
+        QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation),
+        QFileDialog::ShowDirsOnly | QFileDialog::DontResolveSymlinks);
+    if (!folderPath.isEmpty()) {
+        QStringList pdfFiles = FileUtils::scanFolderForPDFs(folderPath);
+        if (!pdfFiles.isEmpty()) {
+            m_documentOrchestrator->openDocuments(pdfFiles);
+        }
+    }
+}
+
+void MainWindow::saveDocumentAs() {
+    if (!documentModel || documentModel->isEmpty()) {
+        QMessageBox::information(this, tr("提示"), tr("请先打开一个PDF文档"));
+        return;
+    }
+
+    QString currentFilePath = documentModel->getCurrentFilePath();
+    QString currentFileName = documentModel->getCurrentFileName();
+    QString suggestedName = currentFileName.isEmpty()
+                                ? "document_copy.pdf"
+                                : currentFileName + "_copy.pdf";
+
+    QString destPath = QFileDialog::getSaveFileName(
+        this, tr("另存副本"),
+        QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation) +
+            "/" + suggestedName,
+        tr("PDF Files (*.pdf)"));
+
+    if (destPath.isEmpty())
+        return;
+
+    if (!destPath.toLower().endsWith(".pdf"))
+        destPath += ".pdf";
+
+    // Check overwrite
+    if (QFile::exists(destPath)) {
+        int ret = QMessageBox::question(
+            this, tr("文件已存在"),
+            tr("目标文件已存在：\n%1\n\n是否覆盖？").arg(destPath),
+            QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+        if (ret != QMessageBox::Yes)
+            return;
+    }
+
+    DocumentCopy::Result result =
+        DocumentCopy::copyFile(currentFilePath, destPath);
+
+    if (result.success) {
+        QMessageBox::information(
+            this, tr("保存成功"),
+            tr("文档副本已成功保存到：\n%1").arg(destPath));
+    } else {
+        QMessageBox::critical(this, tr("保存失败"), result.errorMessage);
+    }
+}
+
+void MainWindow::showDocumentMetadata() {
+    if (!documentModel || documentModel->isEmpty()) {
+        QMessageBox::information(this, tr("提示"), tr("请先打开一个PDF文档"));
+        return;
+    }
+
+    QString currentFilePath = documentModel->getCurrentFilePath();
+    auto currentDoc = documentModel->getCurrentDocument();
+
+    auto* dialog = new DocumentMetadataDialog(this);
+    dialog->setDocument(currentDoc, currentFilePath);
+    dialog->exec();
+    dialog->deleteLater();
 }

@@ -2,7 +2,6 @@
 
 #include <QString>
 
-class ActionDispatcher;
 class DocumentModel;
 class DocumentOrchestrator;
 class PageModel;
@@ -17,7 +16,6 @@ class ThemeManager;
  * All pointers are owned by their respective QObject trees.
  */
 struct AppComponents {
-    ActionDispatcher* actionDispatcher = nullptr;
     DocumentOrchestrator* documentOrchestrator = nullptr;
     ThemeManager* themeManager = nullptr;
 
