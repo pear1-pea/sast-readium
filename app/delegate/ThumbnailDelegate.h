@@ -81,9 +81,6 @@ private:
     void setLightTheme();
     void setDarkTheme();
 
-    Qt::TransformationMode getOptimalTransformationMode(
-        const QSize& sourceSize, const QSize& targetSize) const;
-
     QPixmap cachedShadowPixmap() const;
 
 private:

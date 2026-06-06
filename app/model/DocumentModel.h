@@ -1,17 +1,16 @@
 #pragma once
 
 #include <poppler/qt6/poppler-qt6.h>
-#include <QFileDialog>
 #include <QObject>
+#include <QSet>
 #include <QString>
+#include <QStringList>
 #include <memory>
 #include <vector>
 #include "AsyncDocumentLoader.h"
-#include "RenderModel.h"
 #include "qtmetamacros.h"
 
-// Forward declarations
-class RecentFilesManager;
+class RenderModel;
 
 struct DocumentInfo {
     QString filePath;
@@ -34,19 +33,18 @@ private:
     // 异步加载器
     AsyncDocumentLoader* asyncLoader;
 
+    // 正在加载中的文件路径（防止重复加载）
+    QSet<QString> m_loadingPaths;
+
     // 多文档加载队列
     QStringList pendingFiles;
-
-    // 从合并分支添加的成员
-    QString currentFilePath;
-    RenderModel* renderModel;
 
 private slots:
     void onDocumentLoaded(Poppler::Document* document, const QString& filePath);
 
 public:
     DocumentModel();
-    DocumentModel(RenderModel* _renderModel);
+    explicit DocumentModel(RenderModel* /*unused*/) : DocumentModel() {}
     ~DocumentModel() = default;
 
     // 多文档管理
@@ -67,7 +65,6 @@ public:
     std::shared_ptr<Poppler::Document> getDocument(int index) const;
     bool isEmpty() const;
     bool isValidIndex(int index) const;
-    bool isNULL();
 
 signals:
     void documentOpened(int index, const QString& fileName);

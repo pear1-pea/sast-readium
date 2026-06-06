@@ -228,7 +228,7 @@ private slots:
     void checkForPluginChanges();
 
 private:
-    explicit PluginManager(QObject* parent = nullptr);
+    PluginManager();
     Q_DISABLE_COPY(PluginManager)
 
     struct LoadResult {
@@ -260,6 +260,5 @@ private:
     QTimer* m_hotReloadTimer;
     QHash<QString, qint64> m_pluginModificationTimes;
 
-    static PluginManager* s_instance;
     mutable QRecursiveMutex m_mutex;
 };

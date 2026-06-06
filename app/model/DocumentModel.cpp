@@ -1,37 +1,16 @@
 #include "DocumentModel.h"
 #include <QFileInfo>
-#include "RenderModel.h"
 #include "utils/LoggingMacros.h"
 
-// 添加支持RenderModel的构造函数
-DocumentModel::DocumentModel(RenderModel* _renderModel)
-    : renderModel(_renderModel), currentDocumentIndex(-1) {
-    LOG_DEBUG("DocumentModel created with RenderModel");
-    // 初始化异步加载器
-    asyncLoader = new AsyncDocumentLoader(this);
-
-    // 连接异步加载器信号
-    connect(asyncLoader, &AsyncDocumentLoader::documentLoaded, this,
-            &DocumentModel::onDocumentLoaded);
-    connect(asyncLoader, &AsyncDocumentLoader::loadingProgressChanged, this,
-            &DocumentModel::loadingProgressChanged);
-    connect(asyncLoader, &AsyncDocumentLoader::loadingMessageChanged, this,
-            &DocumentModel::loadingMessageChanged);
-    connect(asyncLoader, &AsyncDocumentLoader::loadingFailed, this,
-            &DocumentModel::loadingFailed);
-}
-
 DocumentModel::DocumentModel() : currentDocumentIndex(-1) {
-    // 初始化异步加载器
     asyncLoader = new AsyncDocumentLoader(this);
 
-    // 连接异步加载器信号
+    connect(asyncLoader, &AsyncDocumentLoader::documentLoaded, this,
+            &DocumentModel::onDocumentLoaded);
     connect(asyncLoader, &AsyncDocumentLoader::loadingProgressChanged, this,
             &DocumentModel::loadingProgressChanged);
     connect(asyncLoader, &AsyncDocumentLoader::loadingMessageChanged, this,
             &DocumentModel::loadingMessageChanged);
-    connect(asyncLoader, &AsyncDocumentLoader::documentLoaded, this,
-            &DocumentModel::onDocumentLoaded);
     connect(asyncLoader, &AsyncDocumentLoader::loadingFailed, this,
             &DocumentModel::loadingFailed);
 }
@@ -51,10 +30,14 @@ bool DocumentModel::openFromFile(const QString& filePath) {
         }
     }
 
-    // 发送加载开始信号
-    emit loadingStarted(filePath);
+    // 检查文档是否正在异步加载中
+    if (m_loadingPaths.contains(filePath)) {
+        LOG_DEBUG("File is already being loaded: {}", filePath.toStdString());
+        return true;
+    }
 
-    // 使用异步加载器加载文档
+    m_loadingPaths.insert(filePath);
+    emit loadingStarted(filePath);
     asyncLoader->loadDocument(filePath);
 
     return true;  // 异步加载，立即返回true
@@ -65,14 +48,13 @@ bool DocumentModel::openFromFiles(const QStringList& filePaths) {
         return false;
     }
 
-    // 过滤掉已经打开的文档
+    // 过滤掉已经打开或正在加载中的文档
     QStringList newFilePaths;
     for (const QString& filePath : filePaths) {
         if (filePath.isEmpty() || !QFile::exists(filePath)) {
             continue;
         }
 
-        // 检查是否已经打开
         bool alreadyOpen = false;
         for (size_t i = 0; i < documents.size(); ++i) {
             if (documents[i]->filePath == filePath) {
@@ -81,7 +63,7 @@ bool DocumentModel::openFromFiles(const QStringList& filePaths) {
             }
         }
 
-        if (!alreadyOpen) {
+        if (!alreadyOpen && !m_loadingPaths.contains(filePath)) {
             newFilePaths.append(filePath);
         }
     }
@@ -101,17 +83,16 @@ bool DocumentModel::openFromFiles(const QStringList& filePaths) {
 
     // 优化加载策略：先加载第一个文档
     QString firstFile = newFilePaths.first();
+    m_loadingPaths.insert(firstFile);
     emit loadingStarted(firstFile);
     asyncLoader->loadDocument(firstFile);
 
     // 如果有多个文档，暂时简化实现：逐个加载其他文档
     if (newFilePaths.size() > 1) {
         QStringList remainingFiles = newFilePaths.mid(1);
-        // 为每个文档发送加载开始信号，创建占位标签页
-        for (const QString& filePath : remainingFiles) {
-            emit loadingStarted(filePath);
+        for (const QString& path : remainingFiles) {
+            m_loadingPaths.insert(path);
         }
-        // 暂时简化：将其他文件路径存储起来，等第一个加载完成后再处理
         pendingFiles = remainingFiles;
     }
 
@@ -120,17 +101,22 @@ bool DocumentModel::openFromFiles(const QStringList& filePaths) {
 
 void DocumentModel::onDocumentLoaded(Poppler::Document* document,
                                      const QString& filePath) {
+    m_loadingPaths.remove(filePath);
+
     if (!document) {
         emit loadingFailed("文档加载失败", filePath);
+        // 继续加载下一个队列中的文档
+        if (!pendingFiles.isEmpty()) {
+            QString nextFile = pendingFiles.takeFirst();
+            emit loadingStarted(nextFile);
+            asyncLoader->loadDocument(nextFile);
+        }
         return;
     }
 
-    // 创建unique_ptr管理文档
-    std::unique_ptr<Poppler::Document> popplerDoc(document);
-
     // 创建文档信息
-    auto docInfo =
-        std::make_unique<DocumentInfo>(filePath, std::move(popplerDoc));
+    auto docInfo = std::make_shared<DocumentInfo>(
+        filePath, std::shared_ptr<Poppler::Document>(document));
     documents.push_back(std::move(docInfo));
 
     int newIndex = static_cast<int>(documents.size() - 1);
@@ -144,11 +130,7 @@ void DocumentModel::onDocumentLoaded(Poppler::Document* document,
     if (!pendingFiles.isEmpty()) {
         QString nextFile = pendingFiles.takeFirst();
         LOG_DEBUG("Loading next file from queue: {}", nextFile.toStdString());
-
-        // 发送加载开始信号
         emit loadingStarted(nextFile);
-
-        // 开始加载下一个文档
         asyncLoader->loadDocument(nextFile);
     }
 }
@@ -158,8 +140,18 @@ bool DocumentModel::closeDocument(int index) {
         return false;
     }
 
-    documents.erase(documents.begin() + index);
+    // 清理加载状态：防止异步回调操作已关闭的文档
+    const QString filePath = documents[index]->filePath;
+    m_loadingPaths.remove(filePath);
+    pendingFiles.removeAll(filePath);
+    if (asyncLoader->currentFilePath() == filePath) {
+        asyncLoader->cancelLoading();
+    }
+
+    // 在删除之前发出信号，此时 vector 状态一致，listener 可安全访问
     emit documentClosed(index);
+
+    documents.erase(documents.begin() + index);
 
     // 调整当前文档索引
     if (documents.empty()) {

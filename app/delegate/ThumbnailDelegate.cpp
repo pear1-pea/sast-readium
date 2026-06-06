@@ -357,16 +357,3 @@ void ThumbnailDelegate::paintErrorIndicator(
                           errorMessage);
     }
 }
-
-Qt::TransformationMode ThumbnailDelegate::getOptimalTransformationMode(
-    const QSize& sourceSize, const QSize& targetSize) const {
-    double scaleRatio =
-        qMin(static_cast<double>(targetSize.width()) / sourceSize.width(),
-             static_cast<double>(targetSize.height()) / sourceSize.height());
-
-    if (scaleRatio > 0.75 || targetSize.width() <= 150 ||
-        targetSize.height() <= 200) {
-        return Qt::FastTransformation;
-    }
-    return Qt::SmoothTransformation;
-}

@@ -11,8 +11,33 @@
 #include <QStandardPaths>
 #include "utils/LoggingMacros.h"
 
-// Static instance
-PluginManager* PluginManager::s_instance = nullptr;
+// PluginManager Implementation
+PluginManager& PluginManager::instance() {
+    static PluginManager instance;
+    return instance;
+}
+
+PluginManager::PluginManager()
+    : QObject(nullptr),
+      m_settings(nullptr),
+      m_hotReloadingEnabled(false),
+      m_hotReloadTimer(nullptr) {
+    m_settings = new QSettings("SAST", "Readium-Plugins", this);
+
+    QStringList defaultDirs;
+    defaultDirs << QApplication::applicationDirPath() + "/plugins";
+    defaultDirs << QStandardPaths::writableLocation(
+                       QStandardPaths::AppDataLocation) +
+                       "/plugins";
+    setPluginDirectories(defaultDirs);
+
+    m_hotReloadTimer = new QTimer(this);
+    m_hotReloadTimer->setInterval(5000);
+    connect(m_hotReloadTimer, &QTimer::timeout, this,
+            &PluginManager::checkForPluginChanges);
+
+    loadSettings();
+}
 
 // PluginDependencyResolver Implementation
 QStringList PluginDependencyResolver::resolveDependencies(
@@ -89,39 +114,6 @@ void PluginDependencyResolver::visitPlugin(
 
     visited[pluginName] = 2;  // Mark as visited
     result.append(pluginName);
-}
-
-// PluginManager Implementation
-PluginManager& PluginManager::instance() {
-    if (!s_instance) {
-        s_instance = new PluginManager(qApp);
-    }
-    return *s_instance;
-}
-
-PluginManager::PluginManager(QObject* parent)
-    : QObject(parent),
-      m_settings(nullptr),
-      m_hotReloadingEnabled(false),
-      m_hotReloadTimer(nullptr) {
-    // Initialize settings
-    m_settings = new QSettings("SAST", "Readium-Plugins", this);
-
-    // Setup default plugin directories
-    QStringList defaultDirs;
-    defaultDirs << QApplication::applicationDirPath() + "/plugins";
-    defaultDirs << QStandardPaths::writableLocation(
-                       QStandardPaths::AppDataLocation) +
-                       "/plugins";
-    setPluginDirectories(defaultDirs);
-
-    // Setup hot reloading timer
-    m_hotReloadTimer = new QTimer(this);
-    m_hotReloadTimer->setInterval(5000);  // Check every 5 seconds
-    connect(m_hotReloadTimer, &QTimer::timeout, this,
-            &PluginManager::checkForPluginChanges);
-
-    loadSettings();
 }
 
 void PluginManager::setPluginDirectories(const QStringList& directories) {
