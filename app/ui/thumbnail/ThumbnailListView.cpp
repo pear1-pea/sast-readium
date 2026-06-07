@@ -59,6 +59,7 @@ ThumbnailListView::ThumbnailListView(QWidget* parent)
     setupAnimations();
     setupContextMenu();
     connectSignals();
+    m_animationClock.start();
 }
 
 ThumbnailListView::~ThumbnailListView() {
@@ -139,14 +140,13 @@ void ThumbnailListView::setupAnimations() {
     connect(m_viewportUpdateTimer, &QTimer::timeout, this,
             &ThumbnailListView::optimizedUpdateVisibleRange);
 
-    // Delegate animation driver (~30fps) — keeps viewport repainting so
-    // the delegate can lerp hover/selection opacity and rotate spinners
-    // in its paint() method.
+    // Delegate animation driver (~30fps) — advances lerp/states and triggers
+    // repaint. Started on demand by restartAnimationTimer().
     m_delegateAnimationTimer = new QTimer(this);
     m_delegateAnimationTimer->setInterval(DELEGATE_ANIMATION_INTERVAL);
     connect(m_delegateAnimationTimer, &QTimer::timeout, this,
             &ThumbnailListView::onDelegateAnimationTick);
-    m_delegateAnimationTimer->start();
+    // NOT started here — starts on first hover/loading
 }
 
 void ThumbnailListView::setupContextMenu() {
@@ -242,7 +242,7 @@ void ThumbnailListView::setThumbnailDelegate(ThumbnailDelegate* delegate) {
     // State_MouseOver; the entered signal ensures repaint on item change.
     viewport()->setAttribute(Qt::WA_Hover);
     connect(this, &QAbstractItemView::entered, this,
-            [this]() { viewport()->update(); });
+            [this]() { restartAnimationTimer(); });
 
     updateItemSizes();
 }
@@ -405,6 +405,10 @@ QList<int> ThumbnailListView::selectedPages() const {
 
 void ThumbnailListView::setAnimationEnabled(bool enabled) {
     m_animationEnabled = enabled;
+    if (!enabled) {
+        m_animationStates.clear();
+        m_delegateAnimationTimer->stop();
+    }
 }
 
 void ThumbnailListView::setSmoothScrolling(bool enabled) {
@@ -604,7 +608,93 @@ void ThumbnailListView::onScrollAnimationFinished() {
 
 void ThumbnailListView::onPreloadTimer() { updatePreloadRange(); }
 
-void ThumbnailListView::onDelegateAnimationTick() { viewport()->update(); }
+void ThumbnailListView::onDelegateAnimationTick() {
+    advanceAnimationStates();
+    viewport()->update();
+    if (!hasActiveAnimations())
+        m_delegateAnimationTimer->stop();
+}
+
+void ThumbnailListView::advanceAnimationStates() {
+    if (!m_animationEnabled)
+        return;
+
+    ThumbnailModel* model = qobject_cast<ThumbnailModel*>(this->model());
+    if (!model)
+        return;
+
+    QPair<int, int> visible = calculateVisibleRange();
+    if (visible.first < 0 || visible.second < 0)
+        return;
+
+    // Determine which item (if any) is under the mouse cursor
+    QPoint cursorPos = viewport()->mapFromGlobal(QCursor::pos());
+    QModelIndex hoveredIndex = indexAt(cursorPos);
+
+    qint64 elapsed = m_animationClock.elapsed();
+
+    for (int page = visible.first; page <= visible.second; ++page) {
+        QModelIndex idx = model->index(page, 0);
+        if (!idx.isValid())
+            continue;
+
+        bool isHovered = (idx == hoveredIndex);
+        bool isSelected = selectionModel()->isSelected(idx);
+        bool isLoading = idx.data(ThumbnailModel::LoadingRole).toBool();
+
+        AnimationState& state = m_animationStates[page];
+
+        // Exponential interpolation toward target values
+        qreal hoverTarget = isHovered ? 1.0 : 0.0;
+        qreal selTarget = isSelected ? 1.0 : 0.0;
+        state.hoverOpacity +=
+            (hoverTarget - state.hoverOpacity) * HOVER_LERP_FACTOR;
+        state.selectionOpacity +=
+            (selTarget - state.selectionOpacity) * SELECTION_LERP_FACTOR;
+
+        // Compute spinner angle only for loading items
+        if (isLoading)
+            state.spinnerAngle = elapsed * SPINNER_DEG_PER_MS + page * 20.0;
+    }
+}
+
+bool ThumbnailListView::hasActiveAnimations() const {
+    if (!m_animationEnabled)
+        return false;
+
+    // Check if any lerp state is still transitioning
+    for (auto it = m_animationStates.constBegin();
+         it != m_animationStates.constEnd(); ++it) {
+        qreal h = it->hoverOpacity;
+        qreal s = it->selectionOpacity;
+        if ((h > LERP_EPSILON && h < 1.0 - LERP_EPSILON) ||
+            (s > LERP_EPSILON && s < 1.0 - LERP_EPSILON))
+            return true;
+    }
+
+    // Check if any visible item is still loading
+    ThumbnailModel* model = qobject_cast<ThumbnailModel*>(this->model());
+    if (model) {
+        QPair<int, int> visible = calculateVisibleRange();
+        for (int page = visible.first; page <= visible.second; ++page) {
+            if (model->isThumbnailLoading(page))
+                return true;
+        }
+    }
+
+    return false;
+}
+
+void ThumbnailListView::restartAnimationTimer() {
+    if (m_animationEnabled && !m_delegateAnimationTimer->isActive())
+        m_delegateAnimationTimer->start();
+}
+
+const ThumbnailListView::AnimationState* ThumbnailListView::animationState(
+    int pageNumber) const {
+    auto it = m_animationStates.find(pageNumber);
+    return it != m_animationStates.end() ? &it.value() : nullptr;
+}
 
 void ThumbnailListView::updateVisibleRange() {
     ThumbnailModel* thumbnailModel = qobject_cast<ThumbnailModel*>(model());

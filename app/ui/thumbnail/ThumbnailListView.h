@@ -1,6 +1,8 @@
 #pragma once
 
 #include <QAction>
+#include <QElapsedTimer>
+#include <QHash>
 #include <QListView>
 #include <QMenu>
 #include <QPropertyAnimation>
@@ -64,6 +66,14 @@ public:
     // 视觉效果
     void setAnimationEnabled(bool enabled);
     bool animationEnabled() const { return m_animationEnabled; }
+
+    /// Pre-computed per-page animation state, driven by delegateAnimationTimer.
+    struct AnimationState {
+        qreal hoverOpacity = 0.0;
+        qreal selectionOpacity = 0.0;
+        qreal spinnerAngle = 0.0;
+    };
+    const AnimationState* animationState(int pageNumber) const;
 
     void setSmoothScrolling(bool enabled);
     bool smoothScrolling() const { return m_smoothScrolling; }
@@ -148,6 +158,11 @@ private:
     void showContextMenu(const QPoint& position);
     void updateContextMenuActions();
 
+    // Animation state management
+    void advanceAnimationStates();
+    bool hasActiveAnimations() const;
+    void restartAnimationTimer();
+
     // Context menu functionality
     void copyPageToClipboard(int pageNumber);
     void exportPageToFile(int pageNumber);
@@ -193,8 +208,10 @@ private:
     int m_lastVisibleStart;
     int m_lastVisibleEnd;
 
-    // Delegate animation driver (30fps tick → viewport repaint)
+    // Delegate animation driver — advances lerp states and triggers repaint
     QTimer* m_delegateAnimationTimer;
+    QHash<int, AnimationState> m_animationStates;
+    QElapsedTimer m_animationClock;
 
     // Progressive loading (two-stage rendering coordinator)
     ProgressiveThumbnailLoader* m_progressiveLoader;
@@ -224,7 +241,11 @@ private:
     static constexpr int PRELOAD_COUNT_MEDIUM = 10;
     static constexpr int PRELOAD_COUNT_FAST = 20;
     static constexpr int DELEGATE_ANIMATION_INTERVAL = 33;  // ms (~30fps)
-    static constexpr int VIEWPORT_DEBOUNCE_SLOW = 50;       // ms
-    static constexpr int VIEWPORT_DEBOUNCE_MEDIUM = 100;    // ms
-    static constexpr int VIEWPORT_DEBOUNCE_FAST = 200;      // ms
+    static constexpr qreal HOVER_LERP_FACTOR = 0.18;
+    static constexpr qreal SELECTION_LERP_FACTOR = 0.12;
+    static constexpr qreal LERP_EPSILON = 0.005;
+    static constexpr qreal SPINNER_DEG_PER_MS = 0.3;
+    static constexpr int VIEWPORT_DEBOUNCE_SLOW = 50;     // ms
+    static constexpr int VIEWPORT_DEBOUNCE_MEDIUM = 100;  // ms
+    static constexpr int VIEWPORT_DEBOUNCE_FAST = 200;    // ms
 };

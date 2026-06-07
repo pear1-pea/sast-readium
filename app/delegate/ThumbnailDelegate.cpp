@@ -4,6 +4,7 @@
 #include <QDebug>
 #include <QPainter>
 #include "model/ThumbnailModel.h"
+#include "ui/thumbnail/ThumbnailListView.h"
 
 // Chrome-style color constants
 const QColor ThumbnailDelegate::GOOGLE_BLUE = QColor(66, 133, 244);
@@ -28,7 +29,7 @@ ThumbnailDelegate::ThumbnailDelegate(QObject* parent)
     setLightTheme();
     m_pageNumberFont = QFont("Arial", 9);
     m_errorFont = QFont("Arial", 8);
-    m_animationClock.start();
+    regenerateShadowPixmap();
 }
 
 ThumbnailDelegate::~ThumbnailDelegate() = default;
@@ -60,18 +61,12 @@ void ThumbnailDelegate::paint(QPainter* painter,
     QRect thumbnailRect = getThumbnailRect(option.rect);
     QRect pageNumberRect = getPageNumberRect(thumbnailRect);
 
-    // Lerp hover/selection opacity when animations are enabled
-    if (m_animationEnabled) {
-        AnimationState& state = m_itemStates[pageNumber];
-        lerpAnimationState(state, option);
-    }
-
     paintBackground(painter, option.rect, option);
 
     if (m_shadowEnabled)
         paintShadow(painter, thumbnailRect, option);
 
-    paintBorder(painter, thumbnailRect, option);
+    paintBorder(painter, thumbnailRect, pageNumber, option);
 
     if (hasError) {
         paintErrorIndicator(painter, thumbnailRect, errorMessage, option);
@@ -89,6 +84,7 @@ void ThumbnailDelegate::paint(QPainter* painter,
 void ThumbnailDelegate::setThumbnailSize(const QSize& size) {
     if (m_thumbnailSize != size) {
         m_thumbnailSize = size;
+        regenerateShadowPixmap();
         emit sizeHintChanged(QModelIndex());
     }
 }
@@ -108,8 +104,6 @@ void ThumbnailDelegate::setShadowEnabled(bool enabled) {
 
 void ThumbnailDelegate::setAnimationEnabled(bool enabled) {
     m_animationEnabled = enabled;
-    if (!enabled)
-        m_itemStates.clear();
 }
 
 void ThumbnailDelegate::setTheme(Theme theme) {
@@ -124,11 +118,11 @@ void ThumbnailDelegate::setLightTheme() {
     m_borderColorNormal = LIGHT_BORDER;
     m_borderColorHovered = GOOGLE_BLUE.lighter(150);
     m_borderColorSelected = GOOGLE_BLUE;
-    m_shadowColor = QColor(0, 0, 0, 50);
     m_pageNumberBgColor = QColor(0, 0, 0, 0);
     m_pageNumberTextColor = QColor(60, 60, 60);
     m_loadingColor = GOOGLE_BLUE;
     m_errorColor = GOOGLE_RED;
+    m_overlayColor = QColor(255, 255, 255, 200);
 }
 
 void ThumbnailDelegate::setDarkTheme() {
@@ -136,11 +130,11 @@ void ThumbnailDelegate::setDarkTheme() {
     m_borderColorNormal = DARK_BORDER;
     m_borderColorHovered = GOOGLE_BLUE.lighter(150);
     m_borderColorSelected = GOOGLE_BLUE;
-    m_shadowColor = QColor(0, 0, 0, 100);
     m_pageNumberBgColor = QColor(0, 0, 0, 0);
     m_pageNumberTextColor = DARK_TEXT;
     m_loadingColor = GOOGLE_BLUE;
     m_errorColor = GOOGLE_RED;
+    m_overlayColor = QColor(0, 0, 0, 200);
 }
 
 void ThumbnailDelegate::setCustomColors(const QColor& background,
@@ -153,17 +147,6 @@ void ThumbnailDelegate::setCustomColors(const QColor& background,
     m_borderColorSelected = accent;
     m_pageNumberTextColor = text;
     m_loadingColor = accent;
-}
-
-void ThumbnailDelegate::lerpAnimationState(
-    AnimationState& state, const QStyleOptionViewItem& option) const {
-    qreal hoverTarget = (option.state & QStyle::State_MouseOver) ? 1.0 : 0.0;
-    qreal selTarget = (option.state & QStyle::State_Selected) ? 1.0 : 0.0;
-
-    state.hoverOpacity +=
-        (hoverTarget - state.hoverOpacity) * HOVER_LERP_FACTOR;
-    state.selectionOpacity +=
-        (selTarget - state.selectionOpacity) * SELECTION_LERP_FACTOR;
 }
 
 QRect ThumbnailDelegate::getThumbnailRect(const QRect& itemRect) const {
@@ -194,12 +177,10 @@ void ThumbnailDelegate::paintThumbnail(
         return;
     }
 
-    // Keep aspect ratio, center within rect
-    QPixmap displayPixmap = pixmap.scaled(rect.size(), Qt::KeepAspectRatio,
-                                          Qt::SmoothTransformation);
-    int x = rect.x() + (rect.width() - displayPixmap.width()) / 2;
-    int y = rect.y() + (rect.height() - displayPixmap.height()) / 2;
-    painter->drawPixmap(x, y, displayPixmap);
+    // Pixmap is already pre-scaled by ThumbnailModel — center and draw
+    int x = rect.x() + (rect.width() - pixmap.width()) / 2;
+    int y = rect.y() + (rect.height() - pixmap.height()) / 2;
+    painter->drawPixmap(x, y, pixmap);
 }
 
 void ThumbnailDelegate::paintBackground(
@@ -210,6 +191,7 @@ void ThumbnailDelegate::paintBackground(
 }
 
 void ThumbnailDelegate::paintBorder(QPainter* painter, const QRect& rect,
+                                    int pageNumber,
                                     const QStyleOptionViewItem& option) const {
     QColor borderColor = m_borderColorNormal;
 
@@ -219,19 +201,19 @@ void ThumbnailDelegate::paintBorder(QPainter* painter, const QRect& rect,
         borderColor = m_borderColorHovered;
     }
 
-    // Apply hover opacity lerp to border
+    // Apply hover opacity lerp from view's pre-computed state
     if (m_animationEnabled) {
-        int pageNumber = option.index.row();
-        auto it = m_itemStates.find(pageNumber);
-        if (it != m_itemStates.end()) {
-            qreal hoverBlend = it->hoverOpacity;
-            borderColor = QColor::fromRgbF(
-                m_borderColorNormal.redF() * (1.0 - hoverBlend) +
-                    m_borderColorHovered.redF() * hoverBlend,
-                m_borderColorNormal.greenF() * (1.0 - hoverBlend) +
-                    m_borderColorHovered.greenF() * hoverBlend,
-                m_borderColorNormal.blueF() * (1.0 - hoverBlend) +
-                    m_borderColorHovered.blueF() * hoverBlend);
+        if (auto* view = qobject_cast<const ThumbnailListView*>(parent())) {
+            if (const auto* state = view->animationState(pageNumber)) {
+                qreal hoverBlend = state->hoverOpacity;
+                borderColor = QColor::fromRgbF(
+                    m_borderColorNormal.redF() * (1.0 - hoverBlend) +
+                        m_borderColorHovered.redF() * hoverBlend,
+                    m_borderColorNormal.greenF() * (1.0 - hoverBlend) +
+                        m_borderColorHovered.greenF() * hoverBlend,
+                    m_borderColorNormal.blueF() * (1.0 - hoverBlend) +
+                        m_borderColorHovered.blueF() * hoverBlend);
+            }
         }
     }
 
@@ -245,13 +227,11 @@ void ThumbnailDelegate::paintBorder(QPainter* painter, const QRect& rect,
         painter->drawRect(rect);
 }
 
-QPixmap ThumbnailDelegate::cachedShadowPixmap() const {
-    // 9-slice shadow: generate a pixmap with blurred edges and solid corners
+QPixmap ThumbnailDelegate::cachedShadowPixmap() const { return m_cachedShadow; }
+
+void ThumbnailDelegate::regenerateShadowPixmap() {
     QSize shadowSize =
         m_thumbnailSize + QSize(2 * m_shadowOffset, 2 * m_shadowOffset);
-    static QPixmap cache;
-    if (cache.size() == shadowSize && m_shadowOffset == 2)
-        return cache;
 
     int r = SHADOW_BLUR_RADIUS;
     int w = shadowSize.width();
@@ -276,9 +256,7 @@ QPixmap ThumbnailDelegate::cachedShadowPixmap() const {
         }
     }
 
-    // Crop to the actual shadow size
-    cache = QPixmap::fromImage(img.copy(r, r, w, h));
-    return cache;
+    m_cachedShadow = QPixmap::fromImage(img.copy(r, r, w, h));
 }
 
 void ThumbnailDelegate::paintShadow(QPainter* painter, const QRect& rect,
@@ -314,10 +292,14 @@ void ThumbnailDelegate::paintLoadingIndicator(
     int pageNumber) const {
     Q_UNUSED(option)
 
-    painter->fillRect(rect, QColor(255, 255, 255, 200));
+    painter->fillRect(rect, m_overlayColor);
 
-    qreal elapsed = m_animationClock.elapsed();
-    qreal angle = elapsed * SPINNER_DEG_PER_MS + pageNumber * 20.0;
+    // Read pre-computed spinner angle from view's animation state
+    qreal angle = 0.0;
+    if (auto* view = qobject_cast<const ThumbnailListView*>(parent())) {
+        if (const auto* state = view->animationState(pageNumber))
+            angle = state->spinnerAngle;
+    }
 
     QRect spinnerRect(rect.center().x() - LOADING_SPINNER_SIZE / 2,
                       rect.center().y() - LOADING_SPINNER_SIZE / 2,
@@ -337,22 +319,31 @@ void ThumbnailDelegate::paintErrorIndicator(
     const QStyleOptionViewItem& option) const {
     Q_UNUSED(option)
 
-    painter->fillRect(rect, QColor(255, 255, 255, 200));
+    painter->fillRect(rect, m_overlayColor);
     painter->setPen(QPen(m_errorColor, 2));
     painter->setBrush(Qt::NoBrush);
 
-    QRect iconRect(rect.center().x() - 12, rect.center().y() - 12, 24, 24);
+    // Icon size proportional to rect, capped at 24px minimum
+    int iconSize = qMax(24, qMin(rect.width(), rect.height()) / 3);
+    int half = iconSize / 2;
+    int cx = rect.center().x();
+    int cy = rect.center().y();
+    QRect iconRect(cx - half, cy - half, iconSize, iconSize);
     painter->drawEllipse(iconRect);
 
+    // Exclamation mark — relative to iconSize
     painter->setPen(QPen(m_errorColor, 3, Qt::SolidLine, Qt::RoundCap));
-    painter->drawLine(iconRect.center().x(), iconRect.top() + 6,
-                      iconRect.center().x(), iconRect.center().y() + 2);
-    painter->drawPoint(iconRect.center().x(), iconRect.bottom() - 4);
+    int lineTop = iconRect.top() + iconSize / 4;
+    int lineMid = iconRect.center().y() + iconSize / 10;
+    painter->drawLine(cx, lineTop, cx, lineMid);
+    painter->drawPoint(cx, iconRect.bottom() - iconSize / 7);
 
     if (!errorMessage.isEmpty() && rect.height() > 60) {
         painter->setPen(m_errorColor);
         painter->setFont(m_errorFont);
-        QRect textRect = rect.adjusted(4, iconRect.bottom() + 4, -4, -4);
+        int margin = qMax(4, rect.width() / 20);
+        QRect textRect =
+            rect.adjusted(margin, iconRect.bottom() + margin, -margin, -margin);
         painter->drawText(textRect, Qt::AlignCenter | Qt::TextWordWrap,
                           errorMessage);
     }

@@ -183,6 +183,10 @@ void MainWindow::initConnection() {
     connect(toolBar, &ToolBar::actionTriggered, this,
             [this](ActionMap action) { routeAction(action); });
 
+    // StatusBar 导航按钮路由（上一页/下一页等）
+    connect(statusBar, &StatusBar::actionTriggered, this,
+            [this](ActionMap action) { routeAction(action); });
+
     // 侧边栏信号
     connect(sideBar, &SideBar::visibilityChanged, this,
             &MainWindow::onSideBarVisibilityChanged);
