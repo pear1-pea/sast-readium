@@ -41,12 +41,6 @@ option("enable_clangd")
     set_showmenu(true)
 option_end()
 
-option("enable_qgraphics_pdf")
-    set_default(false)
-    set_description("Enable QGraphics-based PDF rendering support")
-    set_showmenu(true)
-option_end()
-
 option("enable_tests")
     set_default(false)
     set_description("Enable building tests")
@@ -127,11 +121,6 @@ target("sast-readium")
         add_defines("QT_NO_DEBUG")
     end
 
-    -- QGraphics PDF support
-    if has_config("enable_qgraphics_pdf") then
-        add_defines("ENABLE_QGRAPHICS_PDF_SUPPORT")
-    end
-
     local moc_headers = {
         "app/cache/PDFCacheManager.h",
         "app/cache/UnifiedCacheSystem.h",
@@ -169,7 +158,6 @@ target("sast-readium")
         "app/ui/viewer/PDFPrerenderer.h",
         "app/ui/viewer/PDFAnimations.h",
         "app/ui/viewer/PDFViewerEnhancements.h",
-        "app/ui/viewer/QGraphicsPDFViewer.h",
         "app/ui/viewer/PDFViewer.h",
         "app/ui/viewer/PDFOutlineWidget.h",
         "app/ui/widgets/DocumentTabWidget.h",

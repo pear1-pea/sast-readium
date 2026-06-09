@@ -21,6 +21,7 @@
 #include <QtCore>
 #include <QtGlobal>
 #include <QtWidgets>
+#include <chrono>
 #include <memory>
 #include <stdexcept>
 #include "../page/PDFPageWidget.h"
@@ -31,6 +32,7 @@
 #include "controller/SearchController.h"
 #include "controller/ZoomController.h"
 #include "managers/StyleManager.h"
+#include "utils/LoggingMacros.h"
 
 struct PDFViewer::Private {
     // UI组件
@@ -46,6 +48,12 @@ struct PDFViewer::Private {
     QWidget* continuousWidget = nullptr;
     QVBoxLayout* continuousLayout = nullptr;
     bool isWidgetReady = false;
+
+    // Profiling state
+    bool continuousProfilingActive = false;
+    std::chrono::steady_clock::time_point continuousSwitchStart;
+    int profiledTargetPage = -1;
+    int renderSamplesRemaining = 0;
 
     // 搜索控件
     SearchWidget* searchWidget = nullptr;
@@ -261,6 +269,10 @@ void PDFViewer::setupConnections() {
             });
     connect(d->scrollTimer, &QTimer::timeout, this,
             &PDFViewer::onScrollChanged);
+
+    connect(d->continuousScrollArea->verticalScrollBar(),
+            &QScrollBar::valueChanged, this,
+            [this]() { d->scrollTimer->start(); });
 
     // 搜索结果更新 → 重新应用高亮
     connect(d->searchController, &SearchController::resultsChanged, this,
@@ -664,6 +676,10 @@ void PDFViewer::updatePageDisplay() {
                                          d->currentRotation);
         }
     } else if (d->currentViewMode == PDFViewMode::ContinuousScroll) {
+        if (!d->isWidgetReady) {
+            return;
+        }
+
         // 连续滚动模式下需要滚动到对应的页面位置
         scrollToPageInContinuousView(d->currentPageNumber);
     }
@@ -740,27 +756,74 @@ void PDFViewer::setViewMode(PDFViewMode mode) {
     d->currentViewMode = mode;
 
     try {
-        // 更新UI
-        // 切换视图
-        if (mode == PDFViewMode::SinglePage) {
-            switchToSinglePageMode();
+        if (mode == PDFViewMode::ContinuousScroll) {
+            d->continuousProfilingActive = true;
+            d->continuousSwitchStart = std::chrono::steady_clock::now();
+            d->profiledTargetPage = savedPageNumber;
+            d->renderSamplesRemaining = 3;
+            LOG_INFO(
+                "[continuous-prof] switch start mode=continuous page={} "
+                "pages={} zoom={:.3f} rotation={}",
+                savedPageNumber, d->document ? d->document->numPages() : 0,
+                d->zoomController->currentZoom(), savedRotation);
         } else {
-            switchToContinuousMode();
+            d->continuousProfilingActive = false;
+            d->profiledTargetPage = -1;
+            d->renderSamplesRemaining = 0;
         }
 
-        // 恢复状态
-        d->currentPageNumber = savedPageNumber;
-        d->currentRotation = savedRotation;
+        // 切换视图
+        if (mode == PDFViewMode::SinglePage) {
+            d->currentPageNumber = savedPageNumber;
+            d->currentRotation = savedRotation;
+            switchToSinglePageMode();
+            updatePageDisplay();
+        } else {
+            d->currentPageNumber = savedPageNumber;
+            d->currentRotation = savedRotation;
+            switchToContinuousMode();
 
-        // 更新显示
-        updatePageDisplay();
+            QTimer::singleShot(0, this, [this, savedPageNumber]() {
+                if (d->currentViewMode != PDFViewMode::ContinuousScroll ||
+                    !d->document) {
+                    return;
+                }
 
-        // 如果切换到连续滚动模式，需要设置isWidgetReady并渲染可见页面
-        if (mode == PDFViewMode::ContinuousScroll) {
-            // 延时0.05秒后设置isWidgetReady为true，确保布局完成
-            QTimer::singleShot(50, this, [this]() {
+                auto readyMs =
+                    std::chrono::duration_cast<std::chrono::milliseconds>(
+                        std::chrono::steady_clock::now() -
+                        d->continuousSwitchStart)
+                        .count();
+                LOG_INFO(
+                    "[continuous-prof] ready callback elapsed_ms={} "
+                    "layout_count={} scroll_max={}",
+                    readyMs, d->continuousLayout->count(),
+                    d->continuousScrollArea->verticalScrollBar()->maximum());
+
                 d->isWidgetReady = true;
-                updateVisiblePages();  // 初始渲染可见页面
+                d->currentPageNumber = savedPageNumber;
+
+                d->visiblePageStart =
+                    qMax(0, savedPageNumber - d->renderBuffer);
+                d->visiblePageEnd = qMin(d->document->numPages() - 1,
+                                         savedPageNumber + d->renderBuffer);
+                LOG_INFO(
+                    "[continuous-prof] initial render window start={} end={} "
+                    "target_page={}",
+                    d->visiblePageStart, d->visiblePageEnd, savedPageNumber);
+                renderVisiblePages();
+
+                finalizeContinuousModeInitialization(savedPageNumber);
+
+                auto totalMs =
+                    std::chrono::duration_cast<std::chrono::milliseconds>(
+                        std::chrono::steady_clock::now() -
+                        d->continuousSwitchStart)
+                        .count();
+                LOG_INFO(
+                    "[continuous-prof] switch scheduled target page={} "
+                    "elapsed_ms={}",
+                    savedPageNumber, totalMs);
             });
         }
 
@@ -779,11 +842,18 @@ void PDFViewer::setViewMode(PDFViewMode mode) {
 }
 
 void PDFViewer::switchToSinglePageMode() {
+    d->isWidgetReady = false;
+    d->scrollTimer->stop();
+    d->visiblePageStart = -1;
+    d->visiblePageEnd = -1;
     d->viewStack->setCurrentIndex(0);
-    updatePageDisplay();
 }
 
 void PDFViewer::switchToContinuousMode() {
+    d->isWidgetReady = false;
+    d->scrollTimer->stop();
+    d->visiblePageStart = -1;
+    d->visiblePageEnd = -1;
     d->viewStack->setCurrentIndex(1);
     if (d->document) {
         createContinuousPages();
@@ -794,17 +864,27 @@ void PDFViewer::createContinuousPages() {
     if (!d->document)
         return;
 
+    auto createStart = std::chrono::steady_clock::now();
+    int existingItems = d->continuousLayout->count();
+
     // 清空现有页面
+    auto clearStart = std::chrono::steady_clock::now();
     QLayoutItem* item;
     while ((item = d->continuousLayout->takeAt(0)) != nullptr) {
         delete item->widget();
         delete item;
     }
+    auto clearMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+                       std::chrono::steady_clock::now() - clearStart)
+                       .count();
+    LOG_INFO("[continuous-prof] clear layout items={} elapsed_ms={}",
+             existingItems, clearMs);
 
     // 清空渲染状态
     d->renderedPages.clear();
 
     // 获取第一页尺寸用于占位符
+    auto placeholderStart = std::chrono::steady_clock::now();
     QSizeF placeholderSize(100, 140);  // 默认A4比例
     std::unique_ptr<Poppler::Page> firstPage(d->document->page(0));
     if (firstPage) {
@@ -815,8 +895,17 @@ void PDFViewer::createContinuousPages() {
     double scale = d->zoomController->currentZoom();
     int placeholderWidth = static_cast<int>(placeholderSize.width() * scale);
     int placeholderHeight = static_cast<int>(placeholderSize.height() * scale);
+    auto placeholderMs =
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - placeholderStart)
+            .count();
+    LOG_INFO(
+        "[continuous-prof] placeholder width={} height={} zoom={:.3f} "
+        "elapsed_ms={}",
+        placeholderWidth, placeholderHeight, scale, placeholderMs);
 
     // 创建所有页面占位符（不立即渲染）
+    auto buildStart = std::chrono::steady_clock::now();
     for (int i = 0; i < d->document->numPages(); ++i) {
         PDFPageWidget* pageWidget = new PDFPageWidget(d->continuousWidget);
         pageWidget->setRenderCache(&d->m_renderCache);  // 设置缓存
@@ -830,29 +919,47 @@ void PDFViewer::createContinuousPages() {
         // 连接信号
         connect(pageWidget, &PDFPageWidget::scaleChanged, this,
                 &PDFViewer::onScaleChanged);
+
+        if ((i + 1) <= 5 || ((i + 1) % 50) == 0 ||
+            (i + 1) == d->document->numPages()) {
+            auto progressMs =
+                std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::steady_clock::now() - buildStart)
+                    .count();
+            LOG_INFO(
+                "[continuous-prof] build widgets progress count={} total={} "
+                "elapsed_ms={}",
+                i + 1, d->document->numPages(), progressMs);
+        }
     }
+    auto buildMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+                       std::chrono::steady_clock::now() - buildStart)
+                       .count();
+    LOG_INFO(
+        "[continuous-prof] build widgets complete total={} elapsed_ms={} "
+        "avg_ms_per_widget={:.3f}",
+        d->document->numPages(), buildMs,
+        d->document->numPages() > 0
+            ? static_cast<double>(buildMs) / d->document->numPages()
+            : 0.0);
 
     d->continuousLayout->addStretch();
 
-    // 连接滚动区域的滚动信号以实现虚拟化渲染
-    if (d->continuousScrollArea->verticalScrollBar()) {
-        connect(d->continuousScrollArea->verticalScrollBar(),
-                &QScrollBar::valueChanged, this, [this]() {
-                    d->scrollTimer->start();  // 使用防抖
-                });
-    }
-
-    // 确保滚动条正确初始化
-    d->continuousScrollArea->verticalScrollBar()->setValue(0);
-
-    // 立即渲染初始可见页面
-    QTimer::singleShot(0, this, [this]() { updateVisiblePages(); });
+    auto totalMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+                       std::chrono::steady_clock::now() - createStart)
+                       .count();
+    LOG_INFO(
+        "[continuous-prof] createContinuousPages complete total_pages={} "
+        "layout_count={} elapsed_ms={}",
+        d->document->numPages(), d->continuousLayout->count(), totalMs);
 }
 
 void PDFViewer::updateVisiblePages() {
     if (!d->document || d->currentViewMode != PDFViewMode::ContinuousScroll ||
         !d->isWidgetReady)
         return;
+
+    auto visibleStartTime = std::chrono::steady_clock::now();
 
     QScrollBar* scrollBar = d->continuousScrollArea->verticalScrollBar();
     int viewportTop = scrollBar->value();
@@ -910,6 +1017,19 @@ void PDFViewer::updateVisiblePages() {
 
     d->visiblePageStart = newVisibleStart;
     d->visiblePageEnd = newVisibleEnd;
+
+    auto visibleMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+                         std::chrono::steady_clock::now() - visibleStartTime)
+                         .count();
+    LOG_INFO(
+        "[continuous-prof] visible range start={} end={} count={} "
+        "viewport_top={} viewport_bottom={} elapsed_ms={}",
+        d->visiblePageStart, d->visiblePageEnd,
+        d->visiblePageEnd >= d->visiblePageStart
+            ? d->visiblePageEnd - d->visiblePageStart + 1
+            : 0,
+        viewportTop, viewportBottom, visibleMs);
+
     renderVisiblePages();
 }
 
@@ -917,14 +1037,20 @@ void PDFViewer::renderVisiblePages() {
     if (!d->document || !d->isWidgetReady)
         return;
 
+    auto renderStartTime = std::chrono::steady_clock::now();
+    int submittedCount = 0;
+    int skippedCount = 0;
+
     for (int i = d->visiblePageStart; i <= d->visiblePageEnd; ++i) {
         if (i < 0 || i >= d->continuousLayout->count())
             continue;
 
         // 如果已经渲染过且缩放没变，则跳过
         if (d->renderedPages.contains(
-                qMakePair(i, d->zoomController->currentZoom())))
+                qMakePair(i, d->zoomController->currentZoom()))) {
+            ++skippedCount;
             continue;
+        }
 
         QLayoutItem* item = d->continuousLayout->itemAt(i);
         PDFPageWidget* pageWidget =
@@ -938,6 +1064,7 @@ void PDFViewer::renderVisiblePages() {
 
             // 标记为已提交渲染，防止重复触发 QTimer
             d->renderedPages.insert(qMakePair(pageIndex, zoom));
+            ++submittedCount;
 
             QTimer::singleShot(
                 0, this, [this, pageWidget, pageIndex, zoom, rotation]() {
@@ -958,6 +1085,15 @@ void PDFViewer::renderVisiblePages() {
                 });
         }
     }
+
+    auto renderMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+                        std::chrono::steady_clock::now() - renderStartTime)
+                        .count();
+    LOG_INFO(
+        "[continuous-prof] render schedule submitted={} skipped={} "
+        "visible_start={} visible_end={} elapsed_ms={}",
+        submittedCount, skippedCount, d->visiblePageStart, d->visiblePageEnd,
+        renderMs);
 }
 
 void PDFViewer::onScrollChanged() {
@@ -966,11 +1102,40 @@ void PDFViewer::onScrollChanged() {
     }
 }
 
+void PDFViewer::finalizeContinuousModeInitialization(int pageNumber,
+                                                     int attemptsRemaining) {
+    if (d->currentViewMode != PDFViewMode::ContinuousScroll || !d->document) {
+        return;
+    }
+
+    QScrollBar* scrollBar = d->continuousScrollArea->verticalScrollBar();
+    if (scrollBar->maximum() == 0 && attemptsRemaining > 0) {
+        LOG_INFO(
+            "[continuous-prof] defer finalize page={} attempts_remaining={} "
+            "scroll_max=0",
+            pageNumber, attemptsRemaining);
+        QTimer::singleShot(16, this, [this, pageNumber, attemptsRemaining]() {
+            finalizeContinuousModeInitialization(pageNumber,
+                                                 attemptsRemaining - 1);
+        });
+        return;
+    }
+
+    LOG_INFO(
+        "[continuous-prof] finalize continuous page={} attempts_remaining={} "
+        "scroll_max={}",
+        pageNumber, attemptsRemaining, scrollBar->maximum());
+    scrollToPageInContinuousView(pageNumber);
+    updateVisiblePages();
+}
+
 void PDFViewer::scrollToPageInContinuousView(int pageNumber) {
     if (!d->document || d->currentViewMode != PDFViewMode::ContinuousScroll ||
         pageNumber < 0 || pageNumber >= d->document->numPages()) {
         return;
     }
+
+    auto scrollStartTime = std::chrono::steady_clock::now();
 
     // 确保连续视图布局已经创建
     if (d->continuousLayout->count() <= pageNumber) {
@@ -995,11 +1160,23 @@ void PDFViewer::scrollToPageInContinuousView(int pageNumber) {
     QScrollBar* scrollBar = d->continuousScrollArea->verticalScrollBar();
     targetY = qBound(scrollBar->minimum(), targetY, scrollBar->maximum());
 
+    LOG_INFO(
+        "[continuous-prof] scroll target page={} widget_y={} widget_h={} "
+        "target_y={} scroll_max={}",
+        pageNumber, pageWidget->y(), pageWidget->height(), targetY,
+        scrollBar->maximum());
+
     // 平滑滚动到目标位置
     scrollBar->setValue(targetY);
 
     // 确保目标页面被渲染
     updateVisiblePages();
+
+    auto scrollMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+                        std::chrono::steady_clock::now() - scrollStartTime)
+                        .count();
+    LOG_INFO("[continuous-prof] scroll complete page={} elapsed_ms={}",
+             pageNumber, scrollMs);
 }
 
 void PDFViewer::toggleTheme() {

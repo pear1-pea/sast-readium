@@ -86,7 +86,6 @@ Tests in `tests/`:
 - `integration/` — Integration tests
 - `performance/` — Performance benchmarks
 - `smoke_test.cpp` — Quick smoke test
-- `test_qgraphics_pdf.cpp` — QGraphics PDF renderer tests
 
 Run: `ctest --test-dir build` or `./build/tests/<test_name>`
 

@@ -97,11 +97,6 @@ if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/unit/test_search_controller.cpp)
         ../app/controller/SearchController.cpp)
 endif()
 
-if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/unit/test_qgraphics_components.cpp)
-    create_unit_test(test_qgraphics_components
-        unit/test_qgraphics_components.cpp)
-endif()
-
 # ===== Integration Tests =====
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/integration/test_pdf_viewer.cpp)
     create_integration_test(test_pdf_viewer

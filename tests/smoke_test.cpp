@@ -3,51 +3,33 @@
 #include <QtTest/QtTest>
 
 /**
- * Simple smoke test to verify basic compilation and QGraphics support detection
+ * Simple smoke test to verify basic compilation.
  */
 class SmokeTest : public QObject {
     Q_OBJECT
 
 private slots:
     void initTestCase();
-    void testQGraphicsSupport();
     void testBasicQtFunctionality();
     void cleanupTestCase();
 };
 
 void SmokeTest::initTestCase() {
-    qDebug() << "=== QGraphics PDF Support Smoke Test ===";
+    qDebug() << "=== SAST Readium Smoke Test ===";
     qDebug() << "Qt version:" << QT_VERSION_STR;
-
-#ifdef ENABLE_QGRAPHICS_PDF_SUPPORT
-    qDebug() << "QGraphics PDF support: ENABLED";
-#else
-    qDebug() << "QGraphics PDF support: DISABLED";
-#endif
-}
-
-void SmokeTest::testQGraphicsSupport() {
-    // Test that the macro is working correctly
-#ifdef ENABLE_QGRAPHICS_PDF_SUPPORT
-    QVERIFY(true);  // QGraphics support is enabled
-    qDebug() << "✓ QGraphics support macro is defined";
-#else
-    QVERIFY(true);  // QGraphics support is disabled, which is also valid
-    qDebug() << "✓ QGraphics support macro is not defined (traditional mode)";
-#endif
 }
 
 void SmokeTest::testBasicQtFunctionality() {
     // Test basic Qt functionality
-    QString testString = "QGraphics PDF Test";
-    QCOMPARE(testString.length(), 18);
+    QString testString = "SAST Readium Test";
+    QCOMPARE(testString.length(), 17);
 
     QStringList testList;
-    testList << "Traditional"
-             << "QGraphics";
+    testList << "PDF"
+             << "Readium";
     QCOMPARE(testList.size(), 2);
 
-    qDebug() << "✓ Basic Qt functionality works";
+    qDebug() << "Basic Qt functionality works";
 }
 
 void SmokeTest::cleanupTestCase() {

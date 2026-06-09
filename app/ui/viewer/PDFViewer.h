@@ -113,6 +113,8 @@ protected:
     void renderVisiblePages();
     void onScrollChanged();
     void scrollToPageInContinuousView(int pageNumber);
+    void finalizeContinuousModeInitialization(int pageNumber,
+                                              int attemptsRemaining = 8);
 
     // 缩放相关方法
     void saveZoomSettings();
