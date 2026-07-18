@@ -420,13 +420,11 @@ void PDFContinuousCanvas::resizeEvent(QResizeEvent* event) {
 }
 
 bool PDFContinuousCanvas::event(QEvent* event) {
-    if (event->type() == QEvent::DevicePixelRatioChange) {
-        const qreal currentDevicePixelRatio = devicePixelRatioF();
-        if (!qFuzzyCompare(m_lastDevicePixelRatio, currentDevicePixelRatio)) {
-            m_lastDevicePixelRatio = currentDevicePixelRatio;
-            requestVisiblePageRenders(currentDevicePixelRatio);
-            update();
-        }
+    const qreal currentDevicePixelRatio = devicePixelRatioF();
+    if (!qFuzzyCompare(m_lastDevicePixelRatio, currentDevicePixelRatio)) {
+        m_lastDevicePixelRatio = currentDevicePixelRatio;
+        requestVisiblePageRenders(currentDevicePixelRatio);
+        update();
     }
     return QWidget::event(event);
 }
