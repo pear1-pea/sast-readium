@@ -233,7 +233,10 @@ Temporary Items
 app/config.h
 
 # UI design mockups (generated, not part of source)
-ui/
+/ui/
+
+# Claude Code local session state
+.claude/
 
 # Log files
 *.log

@@ -5,6 +5,7 @@
 #include <QStandardPaths>
 #include <QTextStream>
 #include <QtTest/QtTest>
+#include "../../app/ui/continuous/PDFContinuousCanvas.h"
 #include "../../app/ui/viewer/PDFViewer.h"
 
 // ---------------------------------------------------------------------------
@@ -101,6 +102,7 @@ private slots:
     void testZoomSignals();
     void testRotation();
     void testViewModeSwitch();
+    void testContinuousModeRendersCanvas();
     void testBookmark();
 };
 
@@ -239,6 +241,27 @@ void TestPDFViewer::testViewModeSwitch() {
     // Same mode → no signal
     m_viewer->setViewMode(PDFViewMode::SinglePage);
     QCOMPARE(modeSpy.count(), 2);
+}
+
+void TestPDFViewer::testContinuousModeRendersCanvas() {
+    m_viewer->resize(800, 1000);
+    m_viewer->show();
+    QCoreApplication::processEvents();
+    m_viewer->setViewMode(PDFViewMode::SinglePage);
+    QCoreApplication::processEvents();
+
+    auto* canvas = m_viewer->findChild<PDFContinuousCanvas*>();
+    QVERIFY(canvas != nullptr);
+
+    QSignalSpy renderSpy(canvas, &PDFContinuousCanvas::renderApplied);
+    QVERIFY(renderSpy.isValid());
+
+    m_viewer->setViewMode(PDFViewMode::ContinuousScroll);
+
+    QVERIFY(renderSpy.count() > 0 || renderSpy.wait(3000));
+    QVERIFY(renderSpy.first().at(0).toInt() >= 0);
+
+    m_viewer->setViewMode(PDFViewMode::SinglePage);
 }
 
 void TestPDFViewer::testBookmark() {

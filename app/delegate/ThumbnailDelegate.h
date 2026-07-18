@@ -63,6 +63,8 @@ private:
                              const QStyleOptionViewItem& option) const;
 
     QRect getThumbnailRect(const QRect& itemRect) const;
+    QRect getThumbnailPixmapRect(const QRect& thumbnailRect,
+                                 const QPixmap& pixmap) const;
     QRect getPageNumberRect(const QRect& thumbnailRect) const;
 
     void setLightTheme();
@@ -117,10 +119,4 @@ private:
     // Chrome-style color constants
     static const QColor GOOGLE_BLUE;
     static const QColor GOOGLE_RED;
-    static const QColor LIGHT_BACKGROUND;
-    static const QColor LIGHT_BORDER;
-    static const QColor LIGHT_TEXT;
-    static const QColor DARK_BACKGROUND;
-    static const QColor DARK_BORDER;
-    static const QColor DARK_TEXT;
 };

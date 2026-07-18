@@ -2,7 +2,7 @@
 
 cmake_minimum_required(VERSION 3.16)
 
-find_package(Qt6 REQUIRED COMPONENTS Core Widgets Test Network)
+find_package(Qt6 REQUIRED COMPONENTS Core Widgets Test Network Concurrent)
 find_package(spdlog REQUIRED)
 find_package(PkgConfig REQUIRED)
 
@@ -49,7 +49,7 @@ function(create_integration_test TEST_NAME TEST_SOURCE)
     add_executable(${TEST_NAME} ${TEST_SOURCE})
     target_include_directories(${TEST_NAME} PRIVATE ${COMMON_INCLUDE_DIRS})
     target_link_libraries(${TEST_NAME} PRIVATE
-        Qt6::Core Qt6::Widgets Qt6::Test Qt6::Network
+        Qt6::Core Qt6::Widgets Qt6::Test Qt6::Network Qt6::Concurrent
         PkgConfig::POPPLER_QT6
         spdlog::spdlog)
     target_compile_definitions(${TEST_NAME} PRIVATE ${COMMON_DEFINITIONS})
@@ -59,6 +59,11 @@ function(create_integration_test TEST_NAME TEST_SOURCE)
         ../app/ui/viewer/PDFRenderCache.cpp
         ../app/ui/viewer/PDFAnimations.cpp
         ../app/ui/viewer/PDFPrerenderer.cpp
+        ../app/ui/continuous/PDFContinuousBlueprint.cpp
+        ../app/ui/continuous/PDFContinuousCanvas.cpp
+        ../app/ui/continuous/PDFContinuousImageCache.cpp
+        ../app/ui/continuous/PDFContinuousRenderScheduler.cpp
+        ../app/model/AnnotationModel.cpp
         ../app/controller/SearchController.cpp
         ../app/controller/ZoomController.cpp
         ../app/ui/page/PDFPageWidget.cpp
@@ -95,6 +100,24 @@ if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/unit/test_search_controller.cpp)
         unit/test_search_controller.cpp)
     target_sources(test_search_controller PRIVATE
         ../app/controller/SearchController.cpp)
+endif()
+
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/unit/test_pdf_continuous_blueprint.cpp)
+    create_unit_test(test_pdf_continuous_blueprint
+        unit/test_pdf_continuous_blueprint.cpp)
+    target_sources(test_pdf_continuous_blueprint PRIVATE
+        ../app/ui/continuous/PDFContinuousBlueprint.cpp)
+endif()
+
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/unit/test_pdf_continuous_render_scheduler.cpp)
+    create_unit_test(test_pdf_continuous_render_scheduler
+        unit/test_pdf_continuous_render_scheduler.cpp)
+    target_sources(test_pdf_continuous_render_scheduler PRIVATE
+        ../app/ui/continuous/PDFContinuousRenderScheduler.cpp
+        ../app/ui/continuous/PDFContinuousImageCache.cpp
+        ../app/utils/Logger.cpp)
+    target_link_libraries(test_pdf_continuous_render_scheduler PRIVATE
+        Qt6::Concurrent spdlog::spdlog)
 endif()
 
 # ===== Integration Tests =====
