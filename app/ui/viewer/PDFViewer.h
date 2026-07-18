@@ -1,6 +1,7 @@
 #pragma once
 
 #include <poppler/qt6/poppler-qt6.h>
+#include <QAbstractScrollArea>
 #include <QEvent>
 #include <QList>
 #include <QWidget>
@@ -107,6 +108,8 @@ protected:
     void updateContinuousView();
     void updateContinuousViewRotation();
     void createContinuousPages();
+    void rebuildContinuousCanvasBlueprint();
+    void updateContinuousCanvasGeometry();
 
     // 虚拟化渲染方法
     void updateVisiblePages();

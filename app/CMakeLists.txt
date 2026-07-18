@@ -45,7 +45,7 @@ qt_add_translations(
 target_sources(
     app
     PRIVATE
-    ${APP_CPP_SOURCES}
+    ${APP_SOURCES}
     # Tests (optional, can be excluded in release builds)
     # tests/test_logging.cpp  # Commented out - file doesn't exist yet
 )
@@ -60,7 +60,7 @@ target_include_directories(
 target_link_libraries(
     app
     PRIVATE
-    Qt::Core Qt::Gui Qt::Widgets Qt::Svg
+    Qt::Core Qt::Gui Qt::Widgets Qt::Svg Qt::Concurrent
     PkgConfig::POPPLER_QT6
     spdlog::spdlog
 )

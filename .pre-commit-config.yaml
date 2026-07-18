@@ -21,6 +21,7 @@ repos:
       # Check YAML syntax
       - id: check-yaml
         files: \.(yml|yaml)$
+        exclude: ^mkdocs\.yml$
       # Check JSON syntax
       - id: check-json
         files: \.json$

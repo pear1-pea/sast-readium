@@ -3,18 +3,13 @@
 #include <QApplication>
 #include <QDebug>
 #include <QPainter>
+#include "managers/StyleManager.h"
 #include "model/ThumbnailModel.h"
 #include "ui/thumbnail/ThumbnailListView.h"
 
 // Chrome-style color constants
 const QColor ThumbnailDelegate::GOOGLE_BLUE = QColor(66, 133, 244);
 const QColor ThumbnailDelegate::GOOGLE_RED = QColor(234, 67, 53);
-const QColor ThumbnailDelegate::LIGHT_BACKGROUND = QColor(255, 255, 255);
-const QColor ThumbnailDelegate::LIGHT_BORDER = QColor(200, 200, 200);
-const QColor ThumbnailDelegate::LIGHT_TEXT = QColor(60, 60, 60);
-const QColor ThumbnailDelegate::DARK_BACKGROUND = QColor(0, 0, 0);
-const QColor ThumbnailDelegate::DARK_BORDER = QColor(95, 99, 104);
-const QColor ThumbnailDelegate::DARK_TEXT = QColor(232, 234, 237);
 
 ThumbnailDelegate::ThumbnailDelegate(QObject* parent)
     : QStyledItemDelegate(parent),
@@ -22,14 +17,13 @@ ThumbnailDelegate::ThumbnailDelegate(QObject* parent)
       m_margin(DEFAULT_MARGIN),
       m_borderRadius(0),
       m_pageNumberHeight(DEFAULT_PAGE_NUMBER_HEIGHT),
-      m_shadowEnabled(true),
+      m_shadowEnabled(false),
       m_animationEnabled(true),
       m_shadowOffset(DEFAULT_SHADOW_OFFSET),
       m_borderWidth(DEFAULT_BORDER_WIDTH) {
     setLightTheme();
     m_pageNumberFont = QFont("Arial", 9);
     m_errorFont = QFont("Arial", 8);
-    regenerateShadowPixmap();
 }
 
 ThumbnailDelegate::~ThumbnailDelegate() = default;
@@ -60,13 +54,16 @@ void ThumbnailDelegate::paint(QPainter* painter,
 
     QRect thumbnailRect = getThumbnailRect(option.rect);
     QRect pageNumberRect = getPageNumberRect(thumbnailRect);
+    QRect pageRect = (!thumbnail.isNull() && !isLoading && !hasError)
+                         ? getThumbnailPixmapRect(thumbnailRect, thumbnail)
+                         : thumbnailRect;
 
     paintBackground(painter, option.rect, option);
 
     if (m_shadowEnabled)
-        paintShadow(painter, thumbnailRect, option);
+        paintShadow(painter, pageRect, option);
 
-    paintBorder(painter, thumbnailRect, pageNumber, option);
+    paintBorder(painter, pageRect, pageNumber, option);
 
     if (hasError) {
         paintErrorIndicator(painter, thumbnailRect, errorMessage, option);
@@ -114,27 +111,29 @@ void ThumbnailDelegate::setTheme(Theme theme) {
 }
 
 void ThumbnailDelegate::setLightTheme() {
-    m_backgroundColor = LIGHT_BACKGROUND;
-    m_borderColorNormal = LIGHT_BORDER;
+    m_backgroundColor = STYLE.surfaceColor();
+    m_borderColorNormal = STYLE.borderColor();
     m_borderColorHovered = GOOGLE_BLUE.lighter(150);
-    m_borderColorSelected = GOOGLE_BLUE;
+    m_borderColorSelected = STYLE.accentColor();
     m_pageNumberBgColor = QColor(0, 0, 0, 0);
-    m_pageNumberTextColor = QColor(60, 60, 60);
-    m_loadingColor = GOOGLE_BLUE;
+    m_pageNumberTextColor = STYLE.textSecondaryColor();
+    m_loadingColor = STYLE.accentColor();
     m_errorColor = GOOGLE_RED;
     m_overlayColor = QColor(255, 255, 255, 200);
+    regenerateShadowPixmap();
 }
 
 void ThumbnailDelegate::setDarkTheme() {
-    m_backgroundColor = QColor(0, 0, 0, 0);
-    m_borderColorNormal = DARK_BORDER;
+    m_backgroundColor = STYLE.surfaceColor();
+    m_borderColorNormal = STYLE.borderColor();
     m_borderColorHovered = GOOGLE_BLUE.lighter(150);
-    m_borderColorSelected = GOOGLE_BLUE;
+    m_borderColorSelected = STYLE.accentColor();
     m_pageNumberBgColor = QColor(0, 0, 0, 0);
-    m_pageNumberTextColor = DARK_TEXT;
-    m_loadingColor = GOOGLE_BLUE;
+    m_pageNumberTextColor = STYLE.textSecondaryColor();
+    m_loadingColor = STYLE.accentColor();
     m_errorColor = GOOGLE_RED;
     m_overlayColor = QColor(0, 0, 0, 200);
+    regenerateShadowPixmap();
 }
 
 void ThumbnailDelegate::setCustomColors(const QColor& background,
@@ -153,6 +152,17 @@ QRect ThumbnailDelegate::getThumbnailRect(const QRect& itemRect) const {
     int x = itemRect.x() + m_margin;
     int y = itemRect.y() + m_margin;
     return QRect(x, y, m_thumbnailSize.width(), m_thumbnailSize.height());
+}
+
+QRect ThumbnailDelegate::getThumbnailPixmapRect(const QRect& thumbnailRect,
+                                                const QPixmap& pixmap) const {
+    if (pixmap.isNull()) {
+        return thumbnailRect;
+    }
+
+    int x = thumbnailRect.x() + (thumbnailRect.width() - pixmap.width()) / 2;
+    int y = thumbnailRect.y() + (thumbnailRect.height() - pixmap.height()) / 2;
+    return QRect(x, y, pixmap.width(), pixmap.height());
 }
 
 QRect ThumbnailDelegate::getPageNumberRect(const QRect& thumbnailRect) const {
@@ -248,7 +258,8 @@ void ThumbnailDelegate::regenerateShadowPixmap() {
         // Multi-pass alpha stack to approximate a soft shadow
         for (int i = r; i > 0; --i) {
             qreal alpha = SHADOW_OPACITY * (1.0 - qreal(i) / (r + 1));
-            QColor c(0, 0, 0, static_cast<int>(alpha * 255));
+            QColor c = STYLE.borderColor();
+            c.setAlpha(static_cast<int>(alpha * 255));
             p.setPen(Qt::NoPen);
             p.setBrush(c);
             QRect layer = inner.adjusted(-i, -i, i, i);
