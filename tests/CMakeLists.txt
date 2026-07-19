@@ -2,7 +2,7 @@
 
 cmake_minimum_required(VERSION 3.16)
 
-find_package(Qt6 REQUIRED COMPONENTS Core Widgets Test Network Concurrent)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Test Network Concurrent)
 find_package(spdlog REQUIRED)
 find_package(PkgConfig REQUIRED)
 
@@ -109,6 +109,63 @@ if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/unit/test_shortcut_manager.cpp)
         unit/test_shortcut_manager.cpp)
     target_sources(test_shortcut_manager PRIVATE
         ../app/managers/ShortcutManager.cpp)
+endif()
+
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/unit/test_style_manager.cpp)
+    add_executable(test_style_manager
+        unit/test_style_manager.cpp)
+    target_include_directories(test_style_manager PRIVATE ${COMMON_INCLUDE_DIRS})
+    target_link_libraries(test_style_manager PRIVATE
+        Qt6::Core Qt6::Widgets Qt6::Test spdlog::spdlog)
+    target_compile_definitions(test_style_manager PRIVATE ${COMMON_DEFINITIONS})
+    target_sources(test_style_manager PRIVATE
+        ../app/managers/StyleManager.cpp
+        ../app/utils/Logger.cpp)
+    set_target_properties(test_style_manager PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests/unit)
+    add_test(NAME test_style_manager COMMAND test_style_manager)
+    set_tests_properties(test_style_manager PROPERTIES
+        TIMEOUT 30
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+endif()
+
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/unit/test_logger.cpp)
+    add_executable(test_logger
+        unit/test_logger.cpp)
+    target_include_directories(test_logger PRIVATE ${COMMON_INCLUDE_DIRS})
+    target_link_libraries(test_logger PRIVATE
+        Qt6::Core Qt6::Widgets Qt6::Test spdlog::spdlog)
+    target_compile_definitions(test_logger PRIVATE ${COMMON_DEFINITIONS})
+    target_sources(test_logger PRIVATE
+        ../app/utils/Logger.cpp)
+    set_target_properties(test_logger PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests/unit)
+    add_test(NAME test_logger COMMAND test_logger)
+    set_tests_properties(test_logger PROPERTIES
+        TIMEOUT 30
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+endif()
+
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/unit/test_recent_pdf_thumbnail_provider.cpp)
+    add_executable(test_recent_pdf_thumbnail_provider
+        unit/test_recent_pdf_thumbnail_provider.cpp)
+    target_include_directories(test_recent_pdf_thumbnail_provider PRIVATE
+        ${COMMON_INCLUDE_DIRS})
+    target_link_libraries(test_recent_pdf_thumbnail_provider PRIVATE
+        Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Test Qt6::Concurrent
+        PkgConfig::POPPLER_QT6 spdlog::spdlog)
+    target_compile_definitions(test_recent_pdf_thumbnail_provider PRIVATE
+        ${COMMON_DEFINITIONS})
+    target_sources(test_recent_pdf_thumbnail_provider PRIVATE
+        ../app/ui/thumbnail/RecentPdfThumbnailProvider.cpp
+        ../app/utils/Logger.cpp)
+    set_target_properties(test_recent_pdf_thumbnail_provider PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests/unit)
+    add_test(NAME test_recent_pdf_thumbnail_provider
+        COMMAND test_recent_pdf_thumbnail_provider)
+    set_tests_properties(test_recent_pdf_thumbnail_provider PROPERTIES
+        TIMEOUT 30
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 endif()
 
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/unit/test_pdf_continuous_blueprint.cpp)
