@@ -39,6 +39,7 @@ public:
     int getCurrentPage() const;
     int getCurrentPageCount() const;
     double getCurrentZoom() const;
+    PDFViewMode getCurrentViewMode() const;
 
 protected:
     void setupUI();
@@ -64,10 +65,12 @@ private slots:
     // PDF查看器信号处理
     void onPDFPageChanged(int pageNumber);
     void onPDFZoomChanged(double zoomFactor);
+    void onPDFViewModeChanged(PDFViewMode mode);
 
 signals:
     void currentViewerPageChanged(int pageNumber, int totalPages);
     void currentViewerZoomChanged(double zoomFactor);
+    void currentViewerViewModeChanged(PDFViewMode mode);
     void currentOutlineModelChanged(PDFOutlineModel* model);
 
     /** Emitted when the user requests to close a tab (via tab bar). */
@@ -75,6 +78,9 @@ signals:
 
     /** Emitted when the user switches to a different tab. */
     void tabSwitched(int index);
+
+    /** Emitted when the user requests a new tab from the tab bar. */
+    void newTabRequested();
 
 private:
     // UI组件

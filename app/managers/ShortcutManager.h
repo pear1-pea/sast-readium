@@ -38,6 +38,8 @@ public:
     QList<QKeySequence> shortcutsFor(ActionMap action) const;
     bool hasConflict(const QKeySequence& shortcut,
                      Scope scope = Scope::Global) const;
+    void setActionEnabled(ActionMap action, bool enabled);
+    void setActionChecked(ActionMap action, bool checked);
 
     QAction* registerAction(const ShortcutDefinition& definition);
     void registerDefaults();

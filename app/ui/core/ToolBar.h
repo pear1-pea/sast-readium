@@ -18,6 +18,8 @@ public:
     ToolBar(QWidget* parent = nullptr);
 
     void setActionsEnabled(bool enabled);
+    void setSidebarChecked(bool checked);
+    void setViewModeIndex(int mode);
 
 signals:
     void actionTriggered(ActionMap action);

@@ -62,6 +62,9 @@ private:
 
     // Route an ActionMap from MenuBar / ToolBar to the right component.
     void routeAction(ActionMap action);
+    void updateShortcutActionStates();
+    void updatePageShortcutActions(int pageNumber, int totalPages);
+    void updateViewModeShortcutActions(PDFViewMode mode);
     // Dialog-based file operations (L5 — needs QWidget* parent).
     void openFileDialog();
     void openFolderDialog();

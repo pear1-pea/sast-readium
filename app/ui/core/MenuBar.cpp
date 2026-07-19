@@ -38,8 +38,7 @@ void MenuBar::createFileMenu() {
     QAction* documentPropertiesAction =
         shortcutAction(ActionMap::showDocumentMetadata);
 
-    QAction* exitAction = new QAction(tr("退出"), this);
-    exitAction->setShortcut(QKeySequence("Ctrl+Q"));
+    QAction* exitAction = shortcutAction(ActionMap::exitApp);
 
     fileMenu->addAction(openAction);
     fileMenu->addAction(openFolderAction);

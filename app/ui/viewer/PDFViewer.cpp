@@ -364,9 +364,6 @@ void PDFViewer::setupShortcuts() {
     QShortcut* jump10Forward = new QShortcut(QKeySequence("Alt+Right"), this);
     QShortcut* jump10Backward = new QShortcut(QKeySequence("Alt+Left"), this);
 
-    // 书签快捷键
-    QShortcut* addBookmark = new QShortcut(QKeySequence("Ctrl+D"), this);
-
     // 连接预设缩放级别
     connect(zoomActualSize, &QShortcut::activated, this,
             [this]() { setZoom(1.0); });
@@ -393,13 +390,6 @@ void PDFViewer::setupShortcuts() {
             [this]() { goToPage(d->currentPageNumber + 10); });
     connect(jump10Backward, &QShortcut::activated, this,
             [this]() { goToPage(d->currentPageNumber - 10); });
-
-    // 连接书签快捷键
-    connect(addBookmark, &QShortcut::activated, this, [this]() {
-        if (d->document && d->currentPageNumber >= 0) {
-            emit bookmarkRequested(d->currentPageNumber);
-        }
-    });
 }
 
 void PDFViewer::setDocument(std::shared_ptr<Poppler::Document> doc) {

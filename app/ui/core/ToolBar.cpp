@@ -159,6 +159,18 @@ void ToolBar::setActionsEnabled(bool enabled) {
     themeToggleAction->setEnabled(true);
 }
 
+void ToolBar::setSidebarChecked(bool checked) {
+    toggleSidebarAction->setChecked(checked);
+}
+
+void ToolBar::setViewModeIndex(int mode) {
+    if (mode < 0 || mode >= viewModeCombo->count()) {
+        return;
+    }
+    const QSignalBlocker blocker(viewModeCombo);
+    viewModeCombo->setCurrentIndex(mode);
+}
+
 void ToolBar::onViewModeChanged() {
     int mode = viewModeCombo->currentIndex();
     if (mode == 0) {

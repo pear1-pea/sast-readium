@@ -1,4 +1,5 @@
 #include "MainWindow.h"
+#include <QAction>
 #include <QApplication>
 #include <QFileDialog>
 #include <QFileInfo>
@@ -15,6 +16,18 @@
 #include "utils/DocumentCopy.h"
 #include "utils/FileUtils.h"
 #include "utils/LoggingMacros.h"
+
+namespace {
+void setActionsEnabled(ShortcutManager* shortcutManager,
+                       std::initializer_list<ActionMap> actions, bool enabled) {
+    if (!shortcutManager) {
+        return;
+    }
+    for (ActionMap action : actions) {
+        shortcutManager->setActionEnabled(action, enabled);
+    }
+}
+}  // namespace
 
 MainWindow::MainWindow(const AppComponents& deps, QWidget* parent)
     : QMainWindow(parent),
@@ -164,6 +177,7 @@ void MainWindow::initConnection() {
     }
     connect(shortcutManager, &ShortcutManager::actionTriggered, this,
             [this](ActionMap action) { routeAction(action); });
+    updateShortcutActionStates();
 
     // 监听 StyleManager 的主题变更信号
     connect(&StyleManager::instance(), &StyleManager::themeChanged, this,
@@ -203,6 +217,8 @@ void MainWindow::initConnection() {
     connect(viewWidget, &ViewWidget::tabSwitched, this, [this](int index) {
         m_documentOrchestrator->switchToDocument(index);
     });
+    connect(viewWidget, &ViewWidget::newTabRequested, this,
+            [this]() { routeAction(ActionMap::newTab); });
 
     // 文档模型信号以同步目录
     connect(documentModel, &DocumentModel::currentDocumentChanged, this,
@@ -220,9 +236,12 @@ void MainWindow::initConnection() {
             });
     connect(documentModel, &DocumentModel::currentDocumentChanged, this,
             &MainWindow::updateStatusBarInfo);
+    connect(documentModel, &DocumentModel::currentDocumentChanged, this,
+            [this](int) { updateShortcutActionStates(); });
     connect(documentModel, &DocumentModel::allDocumentsClosed, this, [this]() {
         statusBar->clearDocumentInfo();
         toolBar->setActionsEnabled(false);
+        updateShortcutActionStates();
     });
 
     // 异步加载进度信号
@@ -246,6 +265,7 @@ void MainWindow::initConnection() {
     connect(documentModel, &DocumentModel::documentOpened, this,
             [this](int, const QString&) {
                 toolBar->setActionsEnabled(true);
+                updateShortcutActionStates();
                 if (m_welcomeScreenManager)
                     m_welcomeScreenManager->onDocumentOpened();
             });
@@ -258,17 +278,21 @@ void MainWindow::initConnection() {
             if (m_welcomeScreenManager)
                 m_welcomeScreenManager->onDocumentClosed();
         }
+        updateShortcutActionStates();
     });
 
     // ViewWidget 状态信号 → 状态栏
     connect(viewWidget, &ViewWidget::currentViewerPageChanged, this,
             [this](int pageNumber, int totalPages) {
                 statusBar->setPageInfo(pageNumber, totalPages);
+                updatePageShortcutActions(pageNumber, totalPages);
             });
     connect(viewWidget, &ViewWidget::currentViewerPageChanged, this,
             &MainWindow::onPageChangedForThumbnailSync);
     connect(viewWidget, &ViewWidget::currentViewerZoomChanged, this,
             [this](double zoomFactor) { statusBar->setZoomLevel(zoomFactor); });
+    connect(viewWidget, &ViewWidget::currentViewerViewModeChanged, this,
+            &MainWindow::updateViewModeShortcutActions);
 
     // PDF 操作信号 → ViewWidget
     connect(this, &MainWindow::pdfViewerActionRequested, viewWidget,
@@ -295,6 +319,8 @@ void MainWindow::onSideBarVisibilityChanged(bool visible) {
     // 可以在这里添加状态栏消息或其他UI反馈
     QString message = visible ? "侧边栏已显示" : "侧边栏已隐藏";
     statusBar->setMessage(message);
+    shortcutManager->setActionChecked(ActionMap::toggleSideBar, visible);
+    toolBar->setSidebarChecked(visible);
 }
 
 void MainWindow::onCurrentDocumentChangedForOutline(int index) {
@@ -558,18 +584,26 @@ void MainWindow::routeAction(ActionMap action) {
         case ActionMap::showSearch:
         case ActionMap::findNext:
         case ActionMap::findPrevious:
+        case ActionMap::addBookmark:
             emit pdfViewerActionRequested(action);
             break;
 
         // --- Sidebar actions → LayoutManager ---
         case ActionMap::toggleSideBar:
             m_layoutManager->toggleSideBar();
+            shortcutManager->setActionChecked(ActionMap::toggleSideBar,
+                                              sideBar->isVisible());
+            toolBar->setSidebarChecked(sideBar->isVisible());
             break;
         case ActionMap::showSideBar:
             m_layoutManager->showSideBar();
+            shortcutManager->setActionChecked(ActionMap::toggleSideBar, true);
+            toolBar->setSidebarChecked(true);
             break;
         case ActionMap::hideSideBar:
             m_layoutManager->hideSideBar();
+            shortcutManager->setActionChecked(ActionMap::toggleSideBar, false);
+            toolBar->setSidebarChecked(false);
             break;
 
         // --- View mode → ViewWidget ---
@@ -590,6 +624,8 @@ void MainWindow::routeAction(ActionMap action) {
                 showNormal();
             else
                 showFullScreen();
+            shortcutManager->setActionChecked(ActionMap::fullScreen,
+                                              isFullScreen());
             break;
 
         // --- File / tab operations (dialog + orchestrate) ---
@@ -598,6 +634,12 @@ void MainWindow::routeAction(ActionMap action) {
             break;
         case ActionMap::openFolder:
             openFolderDialog();
+            break;
+        case ActionMap::exitApp:
+            close();
+            break;
+        case ActionMap::save:
+            saveDocumentAs();
             break;
         case ActionMap::newTab:
             openFileDialog();
@@ -648,6 +690,67 @@ void MainWindow::routeAction(ActionMap action) {
             LOG_WARNING("Unhandled action in MainWindow routing: {}",
                         static_cast<int>(action));
             break;
+    }
+}
+
+void MainWindow::updateShortcutActionStates() {
+    const bool hasDocuments = viewWidget && viewWidget->hasDocuments();
+    const int documentCount =
+        documentModel ? documentModel->getDocumentCount() : 0;
+
+    setActionsEnabled(
+        shortcutManager,
+        {ActionMap::save, ActionMap::saveAs, ActionMap::showDocumentMetadata,
+         ActionMap::setSinglePageMode, ActionMap::setContinuousScrollMode,
+         ActionMap::zoomIn, ActionMap::zoomOut, ActionMap::fitToWidth,
+         ActionMap::fitToPage, ActionMap::fitToHeight, ActionMap::rotateLeft,
+         ActionMap::rotateRight, ActionMap::showSearch, ActionMap::findNext,
+         ActionMap::findPrevious, ActionMap::addBookmark},
+        hasDocuments);
+
+    setActionsEnabled(shortcutManager,
+                      {ActionMap::closeCurrentTab, ActionMap::closeAllTabs},
+                      hasDocuments);
+    setActionsEnabled(shortcutManager, {ActionMap::nextTab, ActionMap::prevTab},
+                      documentCount > 1);
+
+    if (hasDocuments) {
+        updatePageShortcutActions(viewWidget->getCurrentPage(),
+                                  viewWidget->getCurrentPageCount());
+        updateViewModeShortcutActions(viewWidget->getCurrentViewMode());
+    } else {
+        updatePageShortcutActions(-1, 0);
+        updateViewModeShortcutActions(PDFViewMode::SinglePage);
+    }
+
+    shortcutManager->setActionChecked(ActionMap::toggleSideBar,
+                                      sideBar && sideBar->isVisible());
+    shortcutManager->setActionChecked(ActionMap::fullScreen, isFullScreen());
+    if (toolBar && sideBar) {
+        toolBar->setSidebarChecked(sideBar->isVisible());
+    }
+}
+
+void MainWindow::updatePageShortcutActions(int pageNumber, int totalPages) {
+    const bool hasPages = totalPages > 0 && pageNumber >= 0;
+    shortcutManager->setActionEnabled(ActionMap::firstPage,
+                                      hasPages && pageNumber > 0);
+    shortcutManager->setActionEnabled(ActionMap::previousPage,
+                                      hasPages && pageNumber > 0);
+    shortcutManager->setActionEnabled(ActionMap::nextPage,
+                                      hasPages && pageNumber < totalPages - 1);
+    shortcutManager->setActionEnabled(ActionMap::lastPage,
+                                      hasPages && pageNumber < totalPages - 1);
+}
+
+void MainWindow::updateViewModeShortcutActions(PDFViewMode mode) {
+    const bool continuous = mode == PDFViewMode::ContinuousScroll;
+    shortcutManager->setActionChecked(ActionMap::setSinglePageMode,
+                                      !continuous);
+    shortcutManager->setActionChecked(ActionMap::setContinuousScrollMode,
+                                      continuous);
+    if (toolBar) {
+        toolBar->setViewModeIndex(continuous ? 1 : 0);
     }
 }
 

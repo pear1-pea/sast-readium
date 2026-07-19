@@ -39,6 +39,20 @@ bool ShortcutManager::hasConflict(const QKeySequence& shortcut,
         shortcut.toString(QKeySequence::PortableText));
 }
 
+void ShortcutManager::setActionEnabled(ActionMap action, bool enabled) {
+    if (QAction* registered = actionFor(action)) {
+        registered->setEnabled(enabled);
+    }
+}
+
+void ShortcutManager::setActionChecked(ActionMap action, bool checked) {
+    if (QAction* registered = actionFor(action)) {
+        if (registered->isCheckable()) {
+            registered->setChecked(checked);
+        }
+    }
+}
+
 QAction* ShortcutManager::registerAction(const ShortcutDefinition& definition) {
     const auto existingIt =
         m_actions.constFind(static_cast<int>(definition.action));
@@ -118,6 +132,8 @@ void ShortcutManager::registerDefaults() {
         {ActionMap::save, tr("保存"), tr("保存文件"), QKeySequence("Ctrl+S")});
     registerAction({ActionMap::saveAs, tr("另存副本"), tr("另存副本"),
                     QKeySequence("Ctrl+Shift+S")});
+    registerAction(
+        {ActionMap::exitApp, tr("退出"), tr("退出"), QKeySequence("Ctrl+Q")});
     registerAction({ActionMap::showDocumentMetadata,
                     tr("文档属性"),
                     tr("显示文档属性"),
@@ -140,10 +156,20 @@ void ShortcutManager::registerDefaults() {
                     {},
                     Scope::Global,
                     true});
-    registerAction({ActionMap::setSinglePageMode, tr("单页视图"),
-                    tr("切换到单页视图"), QKeySequence("Ctrl+1")});
-    registerAction({ActionMap::setContinuousScrollMode, tr("连续滚动"),
-                    tr("切换到连续滚动视图"), QKeySequence("Ctrl+2")});
+    registerAction({ActionMap::setSinglePageMode,
+                    tr("单页视图"),
+                    tr("切换到单页视图"),
+                    QKeySequence("Ctrl+1"),
+                    {},
+                    Scope::Global,
+                    true});
+    registerAction({ActionMap::setContinuousScrollMode,
+                    tr("连续滚动"),
+                    tr("切换到连续滚动视图"),
+                    QKeySequence("Ctrl+2"),
+                    {},
+                    Scope::Global,
+                    true});
     registerAction({ActionMap::firstPage, tr("第一页"), tr("跳到第一页"),
                     QKeySequence("Ctrl+Home")});
     registerAction({ActionMap::previousPage, tr("上一页"), tr("上一页"),
@@ -177,8 +203,15 @@ void ShortcutManager::registerDefaults() {
                     QKeySequence("F3")});
     registerAction({ActionMap::findPrevious, tr("查找上一个"), tr("查找上一个"),
                     QKeySequence("Shift+F3")});
-    registerAction(
-        {ActionMap::fullScreen, tr("全屏"), tr("全屏"), QKeySequence("F11")});
+    registerAction({ActionMap::addBookmark, tr("添加书签"), tr("添加书签"),
+                    QKeySequence("Ctrl+D")});
+    registerAction({ActionMap::fullScreen,
+                    tr("全屏"),
+                    tr("全屏"),
+                    QKeySequence("F11"),
+                    {},
+                    Scope::Global,
+                    true});
 
     m_defaultsRegistered = true;
 }

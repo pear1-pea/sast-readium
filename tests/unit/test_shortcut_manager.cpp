@@ -10,6 +10,7 @@ private slots:
     void testDefaultActionsExist();
     void testConflictDetection();
     void testRegisterActionWithMultipleShortcuts();
+    void testActionStateUpdates();
 };
 
 void TestShortcutManager::initTestCase() {
@@ -20,9 +21,15 @@ void TestShortcutManager::initTestCase() {
 void TestShortcutManager::testDefaultActionsExist() {
     ShortcutManager& manager = ShortcutManager::instance();
     QVERIFY(manager.actionFor(ActionMap::openFile) != nullptr);
+    QVERIFY(manager.actionFor(ActionMap::exitApp) != nullptr);
     QVERIFY(manager.actionFor(ActionMap::setSinglePageMode) != nullptr);
     QVERIFY(manager.actionFor(ActionMap::showSearch) != nullptr);
+    QVERIFY(manager.actionFor(ActionMap::addBookmark) != nullptr);
     QVERIFY(!manager.shortcutsFor(ActionMap::openFile).isEmpty());
+    QVERIFY(manager.shortcutsFor(ActionMap::exitApp)
+                .contains(QKeySequence("Ctrl+Q")));
+    QVERIFY(manager.shortcutsFor(ActionMap::addBookmark)
+                .contains(QKeySequence("Ctrl+D")));
 }
 
 void TestShortcutManager::testConflictDetection() {
@@ -47,6 +54,30 @@ void TestShortcutManager::testRegisterActionWithMultipleShortcuts() {
     QCOMPARE(shortcuts.size(), 2);
     QVERIFY(shortcuts.contains(QKeySequence("Ctrl+G")));
     QVERIFY(shortcuts.contains(QKeySequence("F4")));
+}
+
+void TestShortcutManager::testActionStateUpdates() {
+    ShortcutManager& manager = ShortcutManager::instance();
+
+    QAction* singlePage = manager.actionFor(ActionMap::setSinglePageMode);
+    QAction* continuous = manager.actionFor(ActionMap::setContinuousScrollMode);
+    QAction* zoomIn = manager.actionFor(ActionMap::zoomIn);
+
+    QVERIFY(singlePage != nullptr);
+    QVERIFY(continuous != nullptr);
+    QVERIFY(zoomIn != nullptr);
+    QVERIFY(singlePage->isCheckable());
+    QVERIFY(continuous->isCheckable());
+
+    manager.setActionChecked(ActionMap::setSinglePageMode, true);
+    manager.setActionChecked(ActionMap::setContinuousScrollMode, false);
+    QVERIFY(singlePage->isChecked());
+    QVERIFY(!continuous->isChecked());
+
+    manager.setActionEnabled(ActionMap::zoomIn, false);
+    QVERIFY(!zoomIn->isEnabled());
+    manager.setActionEnabled(ActionMap::zoomIn, true);
+    QVERIFY(zoomIn->isEnabled());
 }
 
 QTEST_MAIN(TestShortcutManager)
