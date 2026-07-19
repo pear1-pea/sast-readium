@@ -115,8 +115,5 @@ private:
     bool m_optionsVisible;
 
     // Shortcuts
-    QShortcut* m_findShortcut;
-    QShortcut* m_findNextShortcut;
-    QShortcut* m_findPreviousShortcut;
     QShortcut* m_escapeShortcut;
 };

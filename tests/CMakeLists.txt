@@ -59,6 +59,8 @@ function(create_integration_test TEST_NAME TEST_SOURCE)
         ../app/ui/viewer/PDFRenderCache.cpp
         ../app/ui/viewer/PDFAnimations.cpp
         ../app/ui/viewer/PDFPrerenderer.cpp
+        ../app/managers/ShortcutManager.cpp
+        ../app/ui/continuous/PDFContinuousLayout.cpp
         ../app/ui/continuous/PDFContinuousBlueprint.cpp
         ../app/ui/continuous/PDFContinuousCanvas.cpp
         ../app/ui/continuous/PDFContinuousImageCache.cpp
@@ -102,10 +104,18 @@ if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/unit/test_search_controller.cpp)
         ../app/controller/SearchController.cpp)
 endif()
 
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/unit/test_shortcut_manager.cpp)
+    create_unit_test(test_shortcut_manager
+        unit/test_shortcut_manager.cpp)
+    target_sources(test_shortcut_manager PRIVATE
+        ../app/managers/ShortcutManager.cpp)
+endif()
+
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/unit/test_pdf_continuous_blueprint.cpp)
     create_unit_test(test_pdf_continuous_blueprint
         unit/test_pdf_continuous_blueprint.cpp)
     target_sources(test_pdf_continuous_blueprint PRIVATE
+        ../app/ui/continuous/PDFContinuousLayout.cpp
         ../app/ui/continuous/PDFContinuousBlueprint.cpp)
 endif()
 

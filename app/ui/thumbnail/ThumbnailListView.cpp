@@ -27,6 +27,36 @@
 #include "ui/thumbnail/ThumbnailGenerator.h"
 #include "utils/LoggingMacros.h"
 
+namespace {
+struct PreloadSpan {
+    int before = 0;
+    int after = 0;
+};
+
+PreloadSpan weightedPreloadSpan(int baseCount, double velocity,
+                                double slowThreshold, double mediumThreshold,
+                                int biasDirection) {
+    const int total = baseCount * 2;
+    if (total <= 0) {
+        return {};
+    }
+
+    double beforeRatio = 0.5;
+    if (biasDirection > 0) {
+        beforeRatio = velocity < slowThreshold     ? 0.4
+                      : velocity < mediumThreshold ? 0.25
+                                                   : 0.1;
+    } else if (biasDirection < 0) {
+        beforeRatio = velocity < slowThreshold     ? 0.6
+                      : velocity < mediumThreshold ? 0.65
+                                                   : 0.75;
+    }
+
+    const int before = qBound(0, qRound(total * beforeRatio), total);
+    return {before, total - before};
+}
+}  // namespace
+
 ThumbnailListView::ThumbnailListView(QWidget* parent)
     : QListView(parent),
       m_thumbnailModel(nullptr),
@@ -41,6 +71,8 @@ ThumbnailListView::ThumbnailListView(QWidget* parent)
       m_preloadMargin(DEFAULT_PRELOAD_MARGIN),
       m_autoPreload(true),
       m_preloadTimer(nullptr),
+      m_idleStartTimer(nullptr),
+      m_idlePreloadTimer(nullptr),
       m_contextMenuEnabled(true),
       m_contextMenu(nullptr),
       m_contextMenuPage(-1),
@@ -50,10 +82,16 @@ ThumbnailListView::ThumbnailListView(QWidget* parent)
       m_viewportUpdatePending(false),
       m_lastVisibleStart(-1),
       m_lastVisibleEnd(-1),
+      m_lastPreloadStart(-1),
+      m_lastPreloadEnd(-1),
       m_scrollVelocity(0.0),
       m_lastScrollTime(0),
       m_lastScrollPosition(0),
-      m_scrollDirection(0) {
+      m_scrollDirection(0),
+      m_candidatePreloadDirection(0),
+      m_candidatePreloadDirectionSince(0),
+      m_preloadBiasDirection(0),
+      m_idlePreloadDirection(0) {
     setupUI();
     setupScrollBars();
     setupAnimations();
@@ -69,6 +107,14 @@ ThumbnailListView::~ThumbnailListView() {
 
     if (m_preloadTimer) {
         m_preloadTimer->stop();
+    }
+
+    if (m_idleStartTimer) {
+        m_idleStartTimer->stop();
+    }
+
+    if (m_idlePreloadTimer) {
+        m_idlePreloadTimer->stop();
     }
 
     if (m_delegateAnimationTimer) {
@@ -132,6 +178,16 @@ void ThumbnailListView::setupAnimations() {
     m_preloadTimer->setSingleShot(true);
     connect(m_preloadTimer, &QTimer::timeout, this,
             &ThumbnailListView::onPreloadTimer);
+
+    m_idleStartTimer = new QTimer(this);
+    m_idleStartTimer->setSingleShot(true);
+    connect(m_idleStartTimer, &QTimer::timeout, this,
+            &ThumbnailListView::onIdleStartTimer);
+
+    m_idlePreloadTimer = new QTimer(this);
+    m_idlePreloadTimer->setSingleShot(true);
+    connect(m_idlePreloadTimer, &QTimer::timeout, this,
+            &ThumbnailListView::onIdlePreloadTimer);
 
     // 视口更新定时器 - 性能优化
     m_viewportUpdateTimer = new QTimer(this);
@@ -564,6 +620,7 @@ void ThumbnailListView::contextMenuEvent(QContextMenuEvent* event) {
 
 void ThumbnailListView::onScrollBarValueChanged(int value) {
     Q_UNUSED(value)
+    stopIdlePreloadTimers();
     scheduleViewportUpdate();
     if (m_autoPreload) {
         m_preloadTimer->start();
@@ -573,7 +630,27 @@ void ThumbnailListView::onScrollBarValueChanged(int value) {
 void ThumbnailListView::onScrollBarRangeChanged(int min, int max) {
     Q_UNUSED(min);
     Q_UNUSED(max);
+    stopIdlePreloadTimers();
     scheduleViewportUpdate();
+}
+
+void ThumbnailListView::stopIdlePreloadTimers() {
+    if (m_idleStartTimer) {
+        m_idleStartTimer->stop();
+    }
+    if (m_idlePreloadTimer) {
+        m_idlePreloadTimer->stop();
+    }
+    m_idlePreloadDirection = 0;
+}
+
+void ThumbnailListView::scheduleIdlePreload() {
+    if (!m_autoPreload || !m_idleStartTimer || m_preloadBiasDirection == 0 ||
+        m_visibleRange.first < 0) {
+        return;
+    }
+
+    m_idleStartTimer->start(IDLE_START_DELAY_MS);
 }
 
 void ThumbnailListView::onModelDataChanged(const QModelIndex& topLeft,
@@ -607,6 +684,40 @@ void ThumbnailListView::onScrollAnimationFinished() {
 }
 
 void ThumbnailListView::onPreloadTimer() { updatePreloadRange(); }
+
+void ThumbnailListView::onIdleStartTimer() {
+    if (!m_autoPreload || m_preloadBiasDirection == 0) {
+        return;
+    }
+
+    m_idlePreloadDirection = m_preloadBiasDirection;
+    const int delay = m_idlePreloadDirection > 0 ? IDLE_PRELOAD_DOWN_DELAY_MS
+                                                 : IDLE_PRELOAD_UP_DELAY_MS;
+    m_idlePreloadTimer->start(delay);
+}
+
+void ThumbnailListView::onIdlePreloadTimer() {
+    ThumbnailModel* thumbnailModel = qobject_cast<ThumbnailModel*>(model());
+    if (!thumbnailModel || m_visibleRange.first < 0 ||
+        m_idlePreloadDirection == 0) {
+        return;
+    }
+
+    const int numPages = thumbnailModel->rowCount();
+    if (m_lastPreloadStart < 0 || m_lastPreloadEnd < 0) {
+        return;
+    }
+
+    if (m_idlePreloadDirection > 0) {
+        requestThumbnailRange(
+            m_lastPreloadEnd + 1,
+            qMin(numPages - 1, m_lastPreloadEnd + IDLE_PRELOAD_EXTRA_COUNT));
+    } else {
+        requestThumbnailRange(
+            qMax(0, m_lastPreloadStart - IDLE_PRELOAD_EXTRA_COUNT),
+            m_lastPreloadStart - 1);
+    }
+}
 
 void ThumbnailListView::onDelegateAnimationTick() {
     advanceAnimationStates();
@@ -730,13 +841,15 @@ void ThumbnailListView::paintEvent(QPaintEvent* event) {
 
 void ThumbnailListView::resizeEvent(QResizeEvent* event) {
     QListView::resizeEvent(event);
+    stopIdlePreloadTimers();
     updateItemSizes();
     scheduleViewportUpdate();
 }
 
 void ThumbnailListView::showEvent(QShowEvent* event) {
     QListView::showEvent(event);
-    scheduleViewportUpdate();
+    optimizedUpdateVisibleRange();
+    scheduleIdlePreload();
 }
 
 void ThumbnailListView::scrollContentsBy(int dx, int dy) {
@@ -744,6 +857,7 @@ void ThumbnailListView::scrollContentsBy(int dx, int dy) {
     QListView::scrollContentsBy(0, dy);
 
     m_isScrolling = true;
+    stopIdlePreloadTimers();
 
     // Update scroll velocity tracking
     qint64 now = QDateTime::currentMSecsSinceEpoch();
@@ -821,8 +935,32 @@ void ThumbnailListView::updateScrollVelocity(int delta, qint64 timestamp) {
     }
 
     m_scrollDirection = (delta > 0) ? 1 : (delta < 0) ? -1 : 0;
+    updatePreloadBiasDirection(m_scrollDirection, timestamp);
     m_lastScrollTime = timestamp;
     m_lastScrollPosition = verticalScrollBar()->value();
+}
+
+void ThumbnailListView::updatePreloadBiasDirection(int direction,
+                                                   qint64 timestamp) {
+    if (direction == 0) {
+        m_candidatePreloadDirection = 0;
+        m_candidatePreloadDirectionSince = 0;
+        m_preloadBiasDirection = 0;
+        return;
+    }
+
+    if (direction != m_candidatePreloadDirection) {
+        m_candidatePreloadDirection = direction;
+        m_candidatePreloadDirectionSince = timestamp;
+        m_preloadBiasDirection = 0;
+        return;
+    }
+
+    const qint64 lockDelay =
+        direction > 0 ? PRELOAD_BIAS_DOWN_LOCK_MS : PRELOAD_BIAS_UP_LOCK_MS;
+    if (timestamp - m_candidatePreloadDirectionSince >= lockDelay) {
+        m_preloadBiasDirection = direction;
+    }
 }
 
 int ThumbnailListView::predictLandingPage() const {
@@ -899,17 +1037,12 @@ void ThumbnailListView::updatePreloadRange() {
 
     int numPages = thumbnailModel->rowCount();
     int startPage = 0, endPage = 0;
+    int preloadCount = PRELOAD_COUNT_SLOW;
 
     if (m_scrollVelocity < VELOCITY_SLOW_THRESHOLD) {
-        // Slow / stationary: linear preload around visible range
-        startPage = qMax(0, m_visibleRange.first - PRELOAD_COUNT_SLOW);
-        endPage =
-            qMin(numPages - 1, m_visibleRange.second + PRELOAD_COUNT_SLOW);
+        preloadCount = PRELOAD_COUNT_SLOW;
     } else if (m_scrollVelocity < VELOCITY_MEDIUM_THRESHOLD) {
-        // Medium scroll: wider linear preload in scroll direction
-        startPage = qMax(0, m_visibleRange.first - PRELOAD_COUNT_MEDIUM);
-        endPage =
-            qMin(numPages - 1, m_visibleRange.second + PRELOAD_COUNT_MEDIUM);
+        preloadCount = PRELOAD_COUNT_MEDIUM;
     } else {
         // Fast scroll: cancel pending non-visible requests, jump to predicted
         // target
@@ -917,14 +1050,36 @@ void ThumbnailListView::updatePreloadRange() {
                                                  m_visibleRange.second);
         int predictedPage = predictLandingPage();
         if (predictedPage >= 0) {
-            startPage = qMax(0, predictedPage - PRELOAD_COUNT_FAST);
-            endPage = qMin(numPages - 1, predictedPage + PRELOAD_COUNT_FAST);
+            const PreloadSpan span = weightedPreloadSpan(
+                PRELOAD_COUNT_FAST, m_scrollVelocity, VELOCITY_SLOW_THRESHOLD,
+                VELOCITY_MEDIUM_THRESHOLD, m_preloadBiasDirection);
+            startPage = qMax(0, predictedPage - span.before);
+            endPage = qMin(numPages - 1, predictedPage + span.after);
+            m_lastPreloadStart = startPage;
+            m_lastPreloadEnd = endPage;
+            requestThumbnailRange(startPage, endPage);
+            scheduleIdlePreload();
+            return;
         } else {
-            startPage = qMax(0, m_visibleRange.first - PRELOAD_COUNT_FAST);
-            endPage =
-                qMin(numPages - 1, m_visibleRange.second + PRELOAD_COUNT_FAST);
+            preloadCount = PRELOAD_COUNT_FAST;
         }
     }
+
+    const PreloadSpan span = weightedPreloadSpan(
+        preloadCount, m_scrollVelocity, VELOCITY_SLOW_THRESHOLD,
+        VELOCITY_MEDIUM_THRESHOLD, m_preloadBiasDirection);
+    startPage = qMax(0, m_visibleRange.first - span.before);
+    endPage = qMin(numPages - 1, m_visibleRange.second + span.after);
+    m_lastPreloadStart = startPage;
+    m_lastPreloadEnd = endPage;
+    requestThumbnailRange(startPage, endPage);
+    scheduleIdlePreload();
+}
+
+void ThumbnailListView::requestThumbnailRange(int startPage, int endPage) {
+    ThumbnailModel* thumbnailModel = qobject_cast<ThumbnailModel*>(model());
+    if (!thumbnailModel || startPage > endPage)
+        return;
 
     // Request pages not already cached or loading.
     // Visible range is included so updateVisibleRange does not need its own
@@ -1116,6 +1271,8 @@ void ThumbnailListView::optimizedUpdateVisibleRange() {
         if (m_autoPreload) {
             updatePreloadRange();
         }
+    } else if (!m_isScrolling) {
+        scheduleIdlePreload();
     }
 
     m_isScrolling = false;

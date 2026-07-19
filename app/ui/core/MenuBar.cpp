@@ -4,11 +4,14 @@
 #include <QDebug>
 #include <QFileInfo>
 #include <QMenu>
+#include "managers/ShortcutManager.h"
 #include "managers/StyleManager.h"
 
-MenuBar::MenuBar(RecentFilesManager* recentFilesManager, QWidget* parent)
+MenuBar::MenuBar(RecentFilesManager* recentFilesManager,
+                 ShortcutManager* shortcutManager, QWidget* parent)
     : QMenuBar(parent),
       m_recentFilesManager(recentFilesManager),
+      m_shortcutManager(shortcutManager),
       m_recentFilesMenu(nullptr),
       m_clearRecentFilesAction(nullptr) {
     createFileMenu();
@@ -28,20 +31,12 @@ void MenuBar::createFileMenu() {
     QMenu* fileMenu = new QMenu(tr("文件(F)"), this);
     addMenu(fileMenu);
 
-    QAction* openAction = new QAction(tr("打开"), this);
-    openAction->setShortcut(QKeySequence("Ctrl+O"));
-
-    QAction* openFolderAction = new QAction(tr("打开文件夹"), this);
-    openFolderAction->setShortcut(QKeySequence("Ctrl+Shift+O"));
-
-    QAction* saveAction = new QAction(tr("保存"), this);
-    saveAction->setShortcut(QKeySequence("Ctrl+S"));
-
-    QAction* saveAsAction = new QAction(tr("另存副本"), this);
-    saveAsAction->setShortcut(QKeySequence("Ctrl+Shift+S"));
-
-    QAction* documentPropertiesAction = new QAction(tr("文档属性"), this);
-    documentPropertiesAction->setShortcut(QKeySequence("Ctrl+I"));
+    QAction* openAction = shortcutAction(ActionMap::openFile);
+    QAction* openFolderAction = shortcutAction(ActionMap::openFolder);
+    QAction* saveAction = shortcutAction(ActionMap::save);
+    QAction* saveAsAction = shortcutAction(ActionMap::saveAs);
+    QAction* documentPropertiesAction =
+        shortcutAction(ActionMap::showDocumentMetadata);
 
     QAction* exitAction = new QAction(tr("退出"), this);
     exitAction->setShortcut(QKeySequence("Ctrl+Q"));
@@ -60,37 +55,17 @@ void MenuBar::createFileMenu() {
     fileMenu->addAction(documentPropertiesAction);
     fileMenu->addSeparator();
     fileMenu->addAction(exitAction);
-
-    connect(openAction, &QAction::triggered, this,
-            [this]() { emit onExecuted(ActionMap::openFile); });
-    connect(openFolderAction, &QAction::triggered, this,
-            [this]() { emit onExecuted(ActionMap::openFolder); });
-    connect(saveAction, &QAction::triggered, this,
-            [this]() { emit onExecuted(ActionMap::save); });
-    connect(saveAsAction, &QAction::triggered, this,
-            [this]() { emit onExecuted(ActionMap::saveAs); });
-    connect(documentPropertiesAction, &QAction::triggered, this,
-            [this]() { emit onExecuted(ActionMap::showDocumentMetadata); });
 }
 
 void MenuBar::createTabMenu() {
     QMenu* tabMenu = new QMenu(tr("标签页(T)"), this);
     addMenu(tabMenu);
 
-    QAction* newTabAction = new QAction(tr("新建标签页"), this);
-    newTabAction->setShortcut(QKeySequence("Ctrl+T"));
-
-    QAction* closeTabAction = new QAction(tr("关闭标签页"), this);
-    closeTabAction->setShortcut(QKeySequence("Ctrl+W"));
-
-    QAction* closeAllTabsAction = new QAction(tr("关闭所有标签页"), this);
-    closeAllTabsAction->setShortcut(QKeySequence("Ctrl+Shift+W"));
-
-    QAction* nextTabAction = new QAction(tr("下一个标签页"), this);
-    nextTabAction->setShortcut(QKeySequence("Ctrl+Tab"));
-
-    QAction* prevTabAction = new QAction(tr("上一个标签页"), this);
-    prevTabAction->setShortcut(QKeySequence("Ctrl+Shift+Tab"));
+    QAction* newTabAction = shortcutAction(ActionMap::newTab);
+    QAction* closeTabAction = shortcutAction(ActionMap::closeCurrentTab);
+    QAction* closeAllTabsAction = shortcutAction(ActionMap::closeAllTabs);
+    QAction* nextTabAction = shortcutAction(ActionMap::nextTab);
+    QAction* prevTabAction = shortcutAction(ActionMap::prevTab);
 
     tabMenu->addAction(newTabAction);
     tabMenu->addSeparator();
@@ -99,18 +74,6 @@ void MenuBar::createTabMenu() {
     tabMenu->addSeparator();
     tabMenu->addAction(nextTabAction);
     tabMenu->addAction(prevTabAction);
-
-    // 连接信号
-    connect(newTabAction, &QAction::triggered, this,
-            [this]() { emit onExecuted(ActionMap::newTab); });
-    connect(closeTabAction, &QAction::triggered, this,
-            [this]() { emit onExecuted(ActionMap::closeCurrentTab); });
-    connect(closeAllTabsAction, &QAction::triggered, this,
-            [this]() { emit onExecuted(ActionMap::closeAllTabs); });
-    connect(nextTabAction, &QAction::triggered, this,
-            [this]() { emit onExecuted(ActionMap::nextTab); });
-    connect(prevTabAction, &QAction::triggered, this,
-            [this]() { emit onExecuted(ActionMap::prevTab); });
 }
 
 void MenuBar::createViewMenu() {
@@ -124,8 +87,7 @@ void MenuBar::createViewMenu() {
     m_welcomeScreenToggleAction->setToolTip(tr("切换欢迎界面的显示"));
 
     // 侧边栏控制
-    QAction* toggleSideBarAction = new QAction(tr("切换侧边栏"), this);
-    toggleSideBarAction->setShortcut(QKeySequence("F9"));
+    QAction* toggleSideBarAction = shortcutAction(ActionMap::toggleSideBar);
     toggleSideBarAction->setCheckable(true);
     toggleSideBarAction->setChecked(true);  // 默认显示
 
@@ -133,13 +95,12 @@ void MenuBar::createViewMenu() {
     QAction* hideSideBarAction = new QAction(tr("隐藏侧边栏"), this);
 
     // 查看模式控制
-    QAction* singlePageAction = new QAction(tr("单页视图"), this);
-    singlePageAction->setShortcut(QKeySequence("Ctrl+1"));
+    QAction* singlePageAction = shortcutAction(ActionMap::setSinglePageMode);
     singlePageAction->setCheckable(true);
     singlePageAction->setChecked(true);  // 默认单页视图
 
-    QAction* continuousScrollAction = new QAction(tr("连续滚动"), this);
-    continuousScrollAction->setShortcut(QKeySequence("Ctrl+2"));
+    QAction* continuousScrollAction =
+        shortcutAction(ActionMap::setContinuousScrollMode);
     continuousScrollAction->setCheckable(true);
 
     // 创建查看模式动作组
@@ -148,14 +109,10 @@ void MenuBar::createViewMenu() {
     viewModeGroup->addAction(continuousScrollAction);
 
     // 视图控制
-    QAction* fullScreenAction = new QAction(tr("全屏"), this);
-    fullScreenAction->setShortcut(QKeySequence("Ctrl+Shift+F"));
+    QAction* fullScreenAction = shortcutAction(ActionMap::fullScreen);
 
-    QAction* zoomInAction = new QAction(tr("放大"), this);
-    zoomInAction->setShortcut(QKeySequence("Ctrl++"));
-
-    QAction* zoomOutAction = new QAction(tr("缩小"), this);
-    zoomOutAction->setShortcut(QKeySequence("Ctrl+-"));
+    QAction* zoomInAction = shortcutAction(ActionMap::zoomIn);
+    QAction* zoomOutAction = shortcutAction(ActionMap::zoomOut);
 
     // 调试面板控制
     m_debugPanelToggleAction = new QAction(tr("显示调试面板"), this);
@@ -195,18 +152,10 @@ void MenuBar::createViewMenu() {
     connect(m_welcomeScreenToggleAction, &QAction::triggered, this,
             [this]() { emit welcomeScreenToggleRequested(); });
 
-    connect(toggleSideBarAction, &QAction::triggered, this,
-            [this]() { emit onExecuted(ActionMap::toggleSideBar); });
     connect(showSideBarAction, &QAction::triggered, this,
             [this]() { emit onExecuted(ActionMap::showSideBar); });
     connect(hideSideBarAction, &QAction::triggered, this,
             [this]() { emit onExecuted(ActionMap::hideSideBar); });
-
-    // 连接查看模式信号
-    connect(singlePageAction, &QAction::triggered, this,
-            [this]() { emit onExecuted(ActionMap::setSinglePageMode); });
-    connect(continuousScrollAction, &QAction::triggered, this,
-            [this]() { emit onExecuted(ActionMap::setContinuousScrollMode); });
 
     // 连接调试面板信号
     connect(m_debugPanelToggleAction, &QAction::triggered, this,
@@ -331,4 +280,13 @@ void MenuBar::onClearRecentFilesTriggered() {
     if (m_recentFilesManager) {
         m_recentFilesManager->clearRecentFiles();
     }
+}
+
+QAction* MenuBar::shortcutAction(ActionMap action) {
+    QAction* registered =
+        m_shortcutManager ? m_shortcutManager->actionFor(action) : nullptr;
+    if (registered) {
+        return registered;
+    }
+    return new QAction(this);
 }

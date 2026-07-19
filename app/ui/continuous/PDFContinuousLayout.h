@@ -1,16 +1,16 @@
 #pragma once
 
-#include <cstdint>
+#include <QVector>
+
 #include <optional>
 
-#include "PDFContinuousLayout.h"
+#include "PDFContinuousTypes.h"
 
-class PDFContinuousBlueprint {
+class PDFContinuousLayout {
 public:
     void clear();
     bool isEmpty() const;
     int pageCount() const;
-    std::uint64_t revision() const;
 
     void rebuild(const QVector<QSizeF>& originalPageSizes,
                  const PDFContinuousLayoutOptions& options);
@@ -47,6 +47,11 @@ public:
                               qreal viewportHeight) const;
 
 private:
-    PDFContinuousLayout m_layout;
-    std::uint64_t m_revision = 0;
+    static int normalizeRotation(int rotation);
+    static QSizeF rotatedSize(const QSizeF& size, int rotation);
+    int nearestPageByY(qreal documentY) const;
+
+    QVector<PDFPageGeometry> m_pages;
+    PDFContinuousLayoutOptions m_options;
+    QSizeF m_documentSize;
 };

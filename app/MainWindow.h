@@ -8,6 +8,7 @@
 #include "core/AppComponents.h"
 #include "managers/LayoutManager.h"
 #include "managers/RecentFilesManager.h"
+#include "managers/ShortcutManager.h"
 #include "managers/StyleManager.h"
 #include "managers/ThemeManager.h"
 #include "model/DocumentModel.h"
@@ -92,6 +93,8 @@ private:
     RenderModel* renderModel;
 
     RecentFilesManager* recentFilesManager;
+
+    ShortcutManager* shortcutManager;
 
     ThemeManager* m_themeManager;
 

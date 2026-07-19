@@ -141,6 +141,15 @@ void ViewWidget::executePDFAction(ActionMap action) {
         case ActionMap::rotateRight:
             currentViewer->rotateRight();
             break;
+        case ActionMap::showSearch:
+            currentViewer->showSearch();
+            break;
+        case ActionMap::findNext:
+            currentViewer->findNext();
+            break;
+        case ActionMap::findPrevious:
+            currentViewer->findPrevious();
+            break;
         case ActionMap::setSinglePageMode:
             currentViewer->setViewMode(PDFViewMode::SinglePage);
             break;

@@ -86,19 +86,6 @@ struct PDFViewer::Private {
     QPropertyAnimation* fadeAnimation = nullptr;
     QGraphicsOpacityEffect* opacityEffect = nullptr;
 
-    // 键盘快捷键
-    QShortcut* zoomInShortcut = nullptr;
-    QShortcut* zoomOutShortcut = nullptr;
-    QShortcut* fitPageShortcut = nullptr;
-    QShortcut* fitWidthShortcut = nullptr;
-    QShortcut* fitHeightShortcut = nullptr;
-    QShortcut* rotateLeftShortcut = nullptr;
-    QShortcut* rotateRightShortcut = nullptr;
-    QShortcut* firstPageShortcut = nullptr;
-    QShortcut* lastPageShortcut = nullptr;
-    QShortcut* nextPageShortcut = nullptr;
-    QShortcut* prevPageShortcut = nullptr;
-
     // 渲染缓存
     PDFRenderCache m_renderCache{100};
     PDFContinuousImageCache continuousImageCache;
@@ -357,15 +344,6 @@ void PDFViewer::setupConnections() {
 }
 
 void PDFViewer::setupShortcuts() {
-    // 缩放快捷键
-    d->zoomInShortcut = new QShortcut(QKeySequence("Ctrl++"), this);
-    d->zoomOutShortcut = new QShortcut(QKeySequence("Ctrl+-"), this);
-    d->fitPageShortcut = new QShortcut(QKeySequence("Ctrl+0"), this);
-    d->fitWidthShortcut = new QShortcut(QKeySequence("Ctrl+1"), this);
-    d->fitHeightShortcut = new QShortcut(QKeySequence("Ctrl+2"), this);
-
-    // 额外缩放快捷键
-    QShortcut* zoomIn2 = new QShortcut(QKeySequence("Ctrl+="), this);
     QShortcut* zoomActualSize = new QShortcut(QKeySequence("Ctrl+Alt+0"), this);
     QShortcut* zoom25 = new QShortcut(QKeySequence("Ctrl+Alt+1"), this);
     QShortcut* zoom50 = new QShortcut(QKeySequence("Ctrl+Alt+2"), this);
@@ -374,20 +352,7 @@ void PDFViewer::setupShortcuts() {
     QShortcut* zoom150 = new QShortcut(QKeySequence("Ctrl+Alt+5"), this);
     QShortcut* zoom200 = new QShortcut(QKeySequence("Ctrl+Alt+6"), this);
 
-    // 旋转快捷键
-    d->rotateLeftShortcut = new QShortcut(QKeySequence("Ctrl+L"), this);
-    d->rotateRightShortcut = new QShortcut(QKeySequence("Ctrl+R"), this);
     QShortcut* rotate180 = new QShortcut(QKeySequence("Ctrl+Shift+R"), this);
-
-    // 主题切换快捷键
-    QShortcut* themeToggleShortcut =
-        new QShortcut(QKeySequence("Ctrl+Shift+T"), this);
-
-    // 导航快捷键 - 基本
-    d->firstPageShortcut = new QShortcut(QKeySequence("Ctrl+Home"), this);
-    d->lastPageShortcut = new QShortcut(QKeySequence("Ctrl+End"), this);
-    d->nextPageShortcut = new QShortcut(QKeySequence("Page Down"), this);
-    d->prevPageShortcut = new QShortcut(QKeySequence("Page Up"), this);
 
     // 导航快捷键 - 高级
     QShortcut* nextPage2 = new QShortcut(QKeySequence("Space"), this);
@@ -396,42 +361,11 @@ void PDFViewer::setupShortcuts() {
     QShortcut* prevPage3 = new QShortcut(QKeySequence("Left"), this);
     QShortcut* nextPage4 = new QShortcut(QKeySequence("Down"), this);
     QShortcut* prevPage4 = new QShortcut(QKeySequence("Up"), this);
-    QShortcut* jump10Forward = new QShortcut(QKeySequence("Ctrl+Right"), this);
-    QShortcut* jump10Backward = new QShortcut(QKeySequence("Ctrl+Left"), this);
-    QShortcut* gotoPage = new QShortcut(QKeySequence("Ctrl+G"), this);
-
-    // 视图模式快捷键
-    QShortcut* toggleFullscreen = new QShortcut(QKeySequence("F11"), this);
-    QShortcut* toggleSidebar = new QShortcut(QKeySequence("F9"), this);
-    QShortcut* presentationMode = new QShortcut(QKeySequence("F5"), this);
-    QShortcut* readingMode = new QShortcut(QKeySequence("F6"), this);
-
-    // 搜索快捷键
-    QShortcut* findShortcut = new QShortcut(QKeySequence("Ctrl+F"), this);
-    QShortcut* findNext = new QShortcut(QKeySequence("F3"), this);
-    QShortcut* findPrev = new QShortcut(QKeySequence("Shift+F3"), this);
+    QShortcut* jump10Forward = new QShortcut(QKeySequence("Alt+Right"), this);
+    QShortcut* jump10Backward = new QShortcut(QKeySequence("Alt+Left"), this);
 
     // 书签快捷键
     QShortcut* addBookmark = new QShortcut(QKeySequence("Ctrl+D"), this);
-    QShortcut* showBookmarks = new QShortcut(QKeySequence("Ctrl+B"), this);
-
-    // 文档操作快捷键
-    QShortcut* refresh = new QShortcut(QKeySequence("F5"), this);
-    QShortcut* properties = new QShortcut(QKeySequence("Alt+Enter"), this);
-    QShortcut* selectAll = new QShortcut(QKeySequence("Ctrl+A"), this);
-    QShortcut* copyText = new QShortcut(QKeySequence("Ctrl+C"), this);
-
-    // 连接快捷键信号 - 基本缩放
-    connect(d->zoomInShortcut, &QShortcut::activated, this, &PDFViewer::zoomIn);
-    connect(d->zoomOutShortcut, &QShortcut::activated, this,
-            &PDFViewer::zoomOut);
-    connect(zoomIn2, &QShortcut::activated, this, &PDFViewer::zoomIn);
-    connect(d->fitPageShortcut, &QShortcut::activated, this,
-            &PDFViewer::zoomToFit);
-    connect(d->fitWidthShortcut, &QShortcut::activated, this,
-            &PDFViewer::zoomToWidth);
-    connect(d->fitHeightShortcut, &QShortcut::activated, this,
-            &PDFViewer::zoomToHeight);
 
     // 连接预设缩放级别
     connect(zoomActualSize, &QShortcut::activated, this,
@@ -443,27 +377,8 @@ void PDFViewer::setupShortcuts() {
     connect(zoom150, &QShortcut::activated, this, [this]() { setZoom(1.5); });
     connect(zoom200, &QShortcut::activated, this, [this]() { setZoom(2.0); });
 
-    // 连接旋转快捷键
-    connect(d->rotateLeftShortcut, &QShortcut::activated, this,
-            &PDFViewer::rotateLeft);
-    connect(d->rotateRightShortcut, &QShortcut::activated, this,
-            &PDFViewer::rotateRight);
     connect(rotate180, &QShortcut::activated, this,
             [this]() { setRotation(d->currentRotation + 180); });
-
-    // 连接主题快捷键
-    connect(themeToggleShortcut, &QShortcut::activated, this,
-            &PDFViewer::toggleTheme);
-
-    // 连接基本导航快捷键
-    connect(d->firstPageShortcut, &QShortcut::activated, this,
-            &PDFViewer::firstPage);
-    connect(d->lastPageShortcut, &QShortcut::activated, this,
-            &PDFViewer::lastPage);
-    connect(d->nextPageShortcut, &QShortcut::activated, this,
-            &PDFViewer::nextPage);
-    connect(d->prevPageShortcut, &QShortcut::activated, this,
-            &PDFViewer::previousPage);
 
     // 连接高级导航快捷键
     connect(nextPage2, &QShortcut::activated, this, &PDFViewer::nextPage);
@@ -478,40 +393,11 @@ void PDFViewer::setupShortcuts() {
             [this]() { goToPage(d->currentPageNumber + 10); });
     connect(jump10Backward, &QShortcut::activated, this,
             [this]() { goToPage(d->currentPageNumber - 10); });
-    connect(gotoPage, &QShortcut::activated, this, [this]() {
-        // goto-page shortcut - main toolbar handles this
-    });
-
-    // 连接视图模式快捷键
-    connect(toggleFullscreen, &QShortcut::activated, this, [this]() {
-        // Toggle fullscreen mode
-        if (window()->isFullScreen()) {
-            window()->showNormal();
-        } else {
-            window()->showFullScreen();
-        }
-    });
-
-    connect(toggleSidebar, &QShortcut::activated, this, [this]() {
-        // Emit signal to toggle sidebar
-        emit sidebarToggleRequested();
-    });
-
-    // 连接搜索快捷键
-    connect(findShortcut, &QShortcut::activated, this, &PDFViewer::showSearch);
 
     // 连接书签快捷键
     connect(addBookmark, &QShortcut::activated, this, [this]() {
         if (d->document && d->currentPageNumber >= 0) {
             emit bookmarkRequested(d->currentPageNumber);
-        }
-    });
-
-    // 连接文档操作快捷键
-    connect(refresh, &QShortcut::activated, this, [this]() {
-        // Refresh current page
-        if (d->singlePageWidget) {
-            d->singlePageWidget->renderPage();
         }
     });
 }

@@ -23,7 +23,8 @@ MainWindow::MainWindow(const AppComponents& deps, QWidget* parent)
       documentModel(deps.documentModel),
       pageModel(deps.pageModel),
       renderModel(deps.renderModel),
-      recentFilesManager(deps.recentFilesManager) {
+      recentFilesManager(deps.recentFilesManager),
+      shortcutManager(&ShortcutManager::instance()) {
     LOG_DEBUG("MainWindow: Starting initialization...");
 
     initWindow();
@@ -100,7 +101,9 @@ MainWindow::~MainWindow() noexcept {}
 void MainWindow::initWindow() { resize(1280, 800); }
 
 void MainWindow::initContent() {
-    menuBar = new MenuBar(recentFilesManager, this);
+    shortcutManager->registerDefaults();
+
+    menuBar = new MenuBar(recentFilesManager, shortcutManager, this);
     toolBar = new ToolBar(this);
     sideBar = new SideBar(this);
     rightSideBar = new RightSideBar(this);
@@ -156,6 +159,12 @@ void MainWindow::initWelcomeScreen() {
 }
 
 void MainWindow::initConnection() {
+    for (QAction* action : shortcutManager->actions()) {
+        addAction(action);
+    }
+    connect(shortcutManager, &ShortcutManager::actionTriggered, this,
+            [this](ActionMap action) { routeAction(action); });
+
     // 监听 StyleManager 的主题变更信号
     connect(&StyleManager::instance(), &StyleManager::themeChanged, this,
             [this](Theme theme) {
@@ -164,16 +173,8 @@ void MainWindow::initConnection() {
             });
 
     // MenuBar 动作路由
-    connect(menuBar, &MenuBar::onExecuted, this, [this](ActionMap action) {
-        if (action == ActionMap::fullScreen) {
-            if (isFullScreen())
-                showNormal();
-            else
-                showFullScreen();
-        } else {
-            routeAction(action);
-        }
-    });
+    connect(menuBar, &MenuBar::onExecuted, this,
+            [this](ActionMap action) { routeAction(action); });
 
     // 连接最近文件信号
     connect(menuBar, &MenuBar::openRecentFileRequested, this,
@@ -554,6 +555,9 @@ void MainWindow::routeAction(ActionMap action) {
         case ActionMap::fitToHeight:
         case ActionMap::rotateLeft:
         case ActionMap::rotateRight:
+        case ActionMap::showSearch:
+        case ActionMap::findNext:
+        case ActionMap::findPrevious:
             emit pdfViewerActionRequested(action);
             break;
 
@@ -579,6 +583,13 @@ void MainWindow::routeAction(ActionMap action) {
         // --- Theme → StyleManager ---
         case ActionMap::toggleTheme:
             STYLE.toggleTheme();
+            break;
+
+        case ActionMap::fullScreen:
+            if (isFullScreen())
+                showNormal();
+            else
+                showFullScreen();
             break;
 
         // --- File / tab operations (dialog + orchestrate) ---
