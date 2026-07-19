@@ -5,6 +5,7 @@
 #include <spdlog/spdlog.h>
 #include <QApplication>
 #include <QDir>
+#include <QFileInfo>
 #include <QMutexLocker>
 #include <QStandardPaths>
 
@@ -31,12 +32,7 @@ void Logger::initialize(const LoggerConfig& config) {
 
         // Add rotating file sink if enabled
         if (m_config.enableRotatingFile) {
-            // Create logs directory if it doesn't exist
-            QString logDir = QStandardPaths::writableLocation(
-                                 QStandardPaths::AppDataLocation) +
-                             "/logs";
-            QDir().mkpath(logDir);
-            QString logPath = logDir + "/" + m_config.logFileName;
+            const QString logPath = resolveLogFilePath(m_config.logFileName);
             addRotatingFileSink(logPath, m_config.maxFileSize,
                                 m_config.maxFiles);
         }
@@ -66,6 +62,21 @@ void Logger::initialize(const LoggerConfig& config) {
             e.what());
         m_initialized = true;
     }
+}
+
+QString Logger::resolveLogFilePath(const QString& logFileName) const {
+    const QFileInfo logFileInfo(logFileName);
+
+    if (logFileInfo.isAbsolute() || !logFileInfo.path().isEmpty()) {
+        QDir().mkpath(logFileInfo.absolutePath());
+        return logFileName;
+    }
+
+    const QString logDir =
+        QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) +
+        "/logs";
+    QDir().mkpath(logDir);
+    return logDir + "/" + logFileName;
 }
 
 void Logger::createLogger() {

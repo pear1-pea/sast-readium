@@ -236,6 +236,7 @@ private:
     Logger& operator=(const Logger&) = delete;
 
     void createLogger();
+    QString resolveLogFilePath(const QString& logFileName) const;
     void setLogLevelInternal(LogLevel level);  // Internal version without mutex
     void setPatternInternal(
         const QString& pattern);  // Internal version without mutex
