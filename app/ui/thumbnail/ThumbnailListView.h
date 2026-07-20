@@ -14,7 +14,6 @@
 
 class ThumbnailModel;
 class ThumbnailDelegate;
-class ProgressiveThumbnailLoader;
 
 /**
  * @brief Chrome风格的PDF缩略图列表视图
@@ -226,9 +225,6 @@ private:
     QTimer* m_delegateAnimationTimer;
     QHash<int, AnimationState> m_animationStates;
     QElapsedTimer m_animationClock;
-
-    // Progressive loading (two-stage rendering coordinator)
-    ProgressiveThumbnailLoader* m_progressiveLoader;
 
     // 右键菜单
     bool m_contextMenuEnabled;

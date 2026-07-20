@@ -23,8 +23,6 @@
 #include "delegate/ThumbnailDelegate.h"
 #include "managers/StyleManager.h"
 #include "model/ThumbnailModel.h"
-#include "ui/thumbnail/ProgressiveThumbnailLoader.h"
-#include "ui/thumbnail/ThumbnailGenerator.h"
 #include "utils/LoggingMacros.h"
 
 namespace {
@@ -77,7 +75,6 @@ ThumbnailListView::ThumbnailListView(QWidget* parent)
       m_contextMenu(nullptr),
       m_contextMenuPage(-1),
       m_currentPage(-1),
-      m_progressiveLoader(nullptr),
       m_delegateAnimationTimer(nullptr),
       m_viewportUpdatePending(false),
       m_lastVisibleStart(-1),
@@ -259,19 +256,6 @@ void ThumbnailListView::setThumbnailModel(ThumbnailModel* model) {
                 &ThumbnailListView::onModelRowsInserted);
         connect(m_thumbnailModel, &QAbstractItemModel::rowsRemoved, this,
                 &ThumbnailListView::onModelRowsRemoved);
-    }
-
-    // Recreate progressive loader tied to the new model's generator
-    delete m_progressiveLoader;
-    m_progressiveLoader = nullptr;
-    ThumbnailGenerator* gen =
-        m_thumbnailModel ? m_thumbnailModel->findChild<ThumbnailGenerator*>()
-                         : nullptr;
-    if (gen) {
-        m_progressiveLoader = new ProgressiveThumbnailLoader(gen, this);
-        connect(m_progressiveLoader,
-                &ProgressiveThumbnailLoader::requestHighRes, m_thumbnailModel,
-                &ThumbnailModel::requestThumbnail);
     }
 
     updateItemSizes();
@@ -863,12 +847,6 @@ void ThumbnailListView::scrollContentsBy(int dx, int dy) {
     qint64 now = QDateTime::currentMSecsSinceEpoch();
     updateScrollVelocity(dy, now);
 
-    // Notify progressive loader of scroll state
-    if (m_progressiveLoader) {
-        m_progressiveLoader->onScrollStateChanged(m_scrollVelocity,
-                                                  m_scrollDirection);
-    }
-
     // Use dynamic debounce based on velocity
     scheduleViewportUpdate();
 }
@@ -1081,14 +1059,10 @@ void ThumbnailListView::requestThumbnailRange(int startPage, int endPage) {
     if (!thumbnailModel || startPage > endPage)
         return;
 
-    // Request pages not already cached or loading.
     // Visible range is included so updateVisibleRange does not need its own
-    // request loop — all thumbnail dispatch converges here.
+    // request loop. The model owns cached/loading de-duplication and stats.
     for (int i = startPage; i <= endPage; ++i) {
-        if (!thumbnailModel->hasCachedThumbnail(i) &&
-            !thumbnailModel->isThumbnailLoading(i)) {
-            thumbnailModel->requestThumbnail(i);
-        }
+        thumbnailModel->requestThumbnail(i);
     }
 }
 
@@ -1242,34 +1216,18 @@ void ThumbnailListView::optimizedUpdateVisibleRange() {
         thumbnailModel->setViewportRange(newRange.first, newRange.second,
                                          m_preloadMargin);
 
-        // Notify progressive loader for two-stage rendering.
-        // Loader handles low-res instantly via synchronous call, then
-        // dwell timer triggers high-res via model->requestThumbnail.
-        if (m_progressiveLoader) {
-            m_progressiveLoader->onVisibleRangeChanged(newRange.first,
-                                                       newRange.second);
-        } else {
-            // Fallback: direct thumbnail request (no progressive loader)
-            for (int i = newRange.first; i <= newRange.second; ++i) {
-                QModelIndex index = thumbnailModel->index(i, 0);
-                if (index.isValid()) {
-                    if (!thumbnailModel->hasCachedThumbnail(i) &&
-                        !thumbnailModel->isThumbnailLoading(i)) {
-                        thumbnailModel->requestThumbnail(i);
-                    }
-                }
-            }
-        }
-
         // Emit signal if range actually changed
         if (oldRange != m_visibleRange) {
             emit visibleRangeChanged(m_visibleRange.first,
                                      m_visibleRange.second);
         }
 
-        // Trigger preload after visible range update
+        // Trigger thumbnail requests after visible range update. With preload
+        // enabled, updatePreloadRange includes the visible range.
         if (m_autoPreload) {
             updatePreloadRange();
+        } else {
+            requestThumbnailRange(newRange.first, newRange.second);
         }
     } else if (!m_isScrolling) {
         scheduleIdlePreload();
