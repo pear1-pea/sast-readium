@@ -16,10 +16,43 @@
             "name": "Release-Unix",
             "displayName": "Release build for Unix (system packages)",
             "description": "Release build using system packages instead of vcpkg",
-            "generator": "Ninja",
+            "generator": "Unix Makefiles",
             "binaryDir": "${sourceDir}/build/Release",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Release",
+                "USE_VCPKG": "OFF"
+            }
+        },
+        {
+            "name": "macOS-Release",
+            "displayName": "Release build for macOS (generic system Clang)",
+            "description": "Release build for macOS with Ninja and external package configuration",
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/build",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release",
+                "USE_VCPKG": "OFF"
+            }
+        },
+        {
+            "name": "macOS-RelWithDebInfo",
+            "displayName": "RelWithDebInfo build for macOS (generic system Clang)",
+            "description": "Optimized macOS build with debug symbols and external package configuration",
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/build/macOS-RelWithDebInfo",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+                "USE_VCPKG": "OFF"
+            }
+        },
+        {
+            "name": "macOS-Debug",
+            "displayName": "Debug build for macOS (generic system Clang)",
+            "description": "Debug build with external package configuration",
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/build/macOS-Debug",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
                 "USE_VCPKG": "OFF"
             }
         },
@@ -178,6 +211,24 @@
             "name": "Release-Unix",
             "displayName": "Release build for Unix (system packages)",
             "configurePreset": "Release-Unix",
+            "jobs": 8
+        },
+        {
+            "name": "macOS-Release",
+            "displayName": "Release build for macOS (Homebrew packages)",
+            "configurePreset": "macOS-Release",
+            "jobs": 8
+        },
+        {
+            "name": "macOS-RelWithDebInfo",
+            "displayName": "RelWithDebInfo build for macOS (Homebrew packages)",
+            "configurePreset": "macOS-RelWithDebInfo",
+            "jobs": 8
+        },
+        {
+            "name": "macOS-Debug",
+            "displayName": "Debug build for macOS (Homebrew packages)",
+            "configurePreset": "macOS-Debug",
             "jobs": 8
         },
         {
