@@ -8,6 +8,7 @@
 #include <QLabel>
 #include <QMimeData>
 #include <QMouseEvent>
+#include <QPainterPath>
 #include <QPushButton>
 #include <QStyle>
 #include <QTabBar>
@@ -21,18 +22,33 @@ public:
     DocumentTabBar(QWidget* parent = nullptr);
 
 protected:
+    QSize sizeHint() const override;
+    QSize tabSizeHint(int index) const override;
+    void paintEvent(QPaintEvent* event) override;
     void mousePressEvent(QMouseEvent* event) override;
+    void mouseReleaseEvent(QMouseEvent* event) override;
     void mouseMoveEvent(QMouseEvent* event) override;
+    void leaveEvent(QEvent* event) override;
     void dragEnterEvent(QDragEnterEvent* event) override;
     void dragMoveEvent(QDragMoveEvent* event) override;
     void dropEvent(QDropEvent* event) override;
 
 private:
+    QRect addButtonRect() const;
+    QRect closeButtonRect(int index) const;
+    int closeButtonAt(const QPoint& pos) const;
+    void updateHoverState(const QPoint& pos);
+
     QPoint dragStartPosition;
+    int pressedCloseIndex;
+    int hoveredCloseIndex;
+    bool addButtonPressed;
+    bool addButtonHovered;
     bool dragInProgress;
 
 signals:
     void tabMoveRequested(int from, int to);
+    void newTabRequested();
 };
 
 class DocumentTabWidget : public QTabWidget {
@@ -62,6 +78,7 @@ protected:
 private slots:
     void onTabCloseRequested(int index);
     void onTabMoveRequested(int from, int to);
+    void onNewTabRequested();
 
 private:
     DocumentTabBar* customTabBar;
@@ -71,5 +88,6 @@ signals:
     void tabCloseRequested(int index);
     void tabSwitched(int index);
     void tabMoved(int from, int to);
+    void newTabRequested();
     void allTabsClosed();
 };

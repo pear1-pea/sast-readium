@@ -146,18 +146,6 @@ void SearchWidget::setupConnections() {
 }
 
 void SearchWidget::setupShortcuts() {
-    m_findShortcut = new QShortcut(QKeySequence::Find, this);
-    connect(m_findShortcut, &QShortcut::activated, this,
-            &SearchWidget::focusSearchInput);
-
-    m_findNextShortcut = new QShortcut(QKeySequence::FindNext, this);
-    connect(m_findNextShortcut, &QShortcut::activated, this,
-            &SearchWidget::nextResult);
-
-    m_findPreviousShortcut = new QShortcut(QKeySequence::FindPrevious, this);
-    connect(m_findPreviousShortcut, &QShortcut::activated, this,
-            &SearchWidget::previousResult);
-
     m_escapeShortcut = new QShortcut(QKeySequence(Qt::Key_Escape), this);
     connect(m_escapeShortcut, &QShortcut::activated, this,
             &SearchWidget::searchClosed);

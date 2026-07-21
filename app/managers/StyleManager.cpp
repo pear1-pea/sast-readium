@@ -123,43 +123,57 @@ QString StyleManager::getButtonStyleSheet() const {
     return createButtonStyle();
 }
 
+QString StyleManager::applyStyleTokens(
+    QString style, const QVector<QPair<QString, QString>>& tokens) const {
+    for (const auto& token : tokens) {
+        style.replace(token.first, token.second);
+    }
+
+    for (const auto& token : tokens) {
+        Q_ASSERT_X(!style.contains(token.first),
+                   "StyleManager::applyStyleTokens",
+                   "QSS template still contains an unreplaced style token");
+    }
+
+    return style;
+}
+
 QString StyleManager::createButtonStyle() const {
-    return QString(R"(
+    return applyStyleTokens(
+        QString(R"(
         QPushButton {
-            background-color: %1;
-            border: 1px solid %2;
-            border-radius: %3px;
-            color: %4;
+            background-color: @surface@;
+            border: 1px solid @border@;
+            border-radius: @radius@px;
+            color: @text@;
             font-weight: 500;
             padding: 6px 12px;
         }
         QPushButton:hover {
-            background-color: %7;
-            border-color: %8;
+            background-color: @hover@;
+            border-color: @accent@;
         }
         QPushButton:pressed {
-            background-color: %9;
-            border-color: %8;
+            background-color: @pressed@;
+            border-color: @accent@;
         }
         QPushButton:disabled {
-            background-color: %1;
-            border-color: %2;
-            color: %10;
+            background-color: @surface@;
+            border-color: @border@;
+            color: @textSecondary@;
         }
         QPushButton:focus {
-            border: 2px solid %8;
+            border: 2px solid @accent@;
         }
-    )")
-        .arg(surfaceColor().name())
-        .arg(borderColor().name())
-        .arg(borderRadius())
-        .arg(textColor().name())
-        .arg(buttonMinWidth())
-        .arg(buttonHeight())
-        .arg(hoverColor().name())
-        .arg(accentColor().name())
-        .arg(pressedColor().name())
-        .arg(textSecondaryColor().name());
+    )"),
+        {{QStringLiteral("@surface@"), surfaceColor().name()},
+         {QStringLiteral("@border@"), borderColor().name()},
+         {QStringLiteral("@radius@"), QString::number(borderRadius())},
+         {QStringLiteral("@text@"), textColor().name()},
+         {QStringLiteral("@hover@"), hoverColor().name()},
+         {QStringLiteral("@accent@"), accentColor().name()},
+         {QStringLiteral("@pressed@"), pressedColor().name()},
+         {QStringLiteral("@textSecondary@"), textSecondaryColor().name()}});
 }
 
 QColor StyleManager::primaryColor() const { return m_primaryColor; }

@@ -8,6 +8,7 @@
 #include "core/AppComponents.h"
 #include "managers/LayoutManager.h"
 #include "managers/RecentFilesManager.h"
+#include "managers/ShortcutManager.h"
 #include "managers/StyleManager.h"
 #include "managers/ThemeManager.h"
 #include "model/DocumentModel.h"
@@ -61,6 +62,9 @@ private:
 
     // Route an ActionMap from MenuBar / ToolBar to the right component.
     void routeAction(ActionMap action);
+    void updateShortcutActionStates();
+    void updatePageShortcutActions(int pageNumber, int totalPages);
+    void updateViewModeShortcutActions(PDFViewMode mode);
     // Dialog-based file operations (L5 — needs QWidget* parent).
     void openFileDialog();
     void openFolderDialog();
@@ -92,6 +96,8 @@ private:
     RenderModel* renderModel;
 
     RecentFilesManager* recentFilesManager;
+
+    ShortcutManager* shortcutManager;
 
     ThemeManager* m_themeManager;
 

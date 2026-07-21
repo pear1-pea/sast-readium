@@ -105,10 +105,11 @@ protected:
     void setupViewModes();
     void switchToSinglePageMode();
     void switchToContinuousMode();
-    void updateContinuousView();
+    void updateContinuousView(const char* reason);
     void updateContinuousViewRotation();
-    void createContinuousPages();
-    void rebuildContinuousCanvasBlueprint();
+    void createContinuousPages(const char* reason);
+    void rebuildContinuousCanvasBlueprint(const char* reason);
+    void handleContinuousResize();
     void updateContinuousCanvasGeometry();
 
     // 虚拟化渲染方法

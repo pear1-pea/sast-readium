@@ -6,10 +6,12 @@
 #include <QFont>
 #include <QList>
 #include <QObject>
+#include <QPair>
 #include <QPointer>
 #include <QSlider>
 #include <QSpinBox>
 #include <QString>
+#include <QVector>
 #include <QWidget>
 
 #include <functional>
@@ -89,6 +91,8 @@ private:
     StyleManager& operator=(const StyleManager&) = delete;
 
     void updateColors();
+    QString applyStyleTokens(
+        QString style, const QVector<QPair<QString, QString>>& tokens) const;
     QString createButtonStyle() const;
     QString createScrollBarStyle() const;
 

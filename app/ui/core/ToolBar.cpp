@@ -2,9 +2,11 @@
 #include <QAction>
 #include <QHBoxLayout>
 #include <QWidget>
+#include "../../managers/ShortcutManager.h"
 #include "../../managers/StyleManager.h"
 
-ToolBar::ToolBar(QWidget* parent) : QToolBar(parent) {
+ToolBar::ToolBar(QWidget* parent)
+    : QToolBar(parent), m_shortcutManager(&ShortcutManager::instance()) {
     setMovable(true);
     setObjectName("MainToolBar");
     setToolButtonStyle(Qt::ToolButtonIconOnly);
@@ -32,20 +34,17 @@ ToolBar::ToolBar(QWidget* parent) : QToolBar(parent) {
 void ToolBar::setupFileActions() {
     // Open file
     openAction = new QAction("📁", this);
-    openAction->setToolTip("打开PDF文件 (Ctrl+O)");
-    openAction->setShortcut(QKeySequence("Ctrl+O"));
+    applyShortcut(openAction, ActionMap::openFile, "打开PDF文件");
     addAction(openAction);
 
     // Open folder
     openFolderAction = new QAction("📂", this);
-    openFolderAction->setToolTip("打开文件夹 (Ctrl+Shift+O)");
-    openFolderAction->setShortcut(QKeySequence("Ctrl+Shift+O"));
+    applyShortcut(openFolderAction, ActionMap::openFolder, "打开文件夹");
     addAction(openFolderAction);
 
     // Save file
     saveAction = new QAction("💾", this);
-    saveAction->setToolTip("保存文件 (Ctrl+S)");
-    saveAction->setShortcut(QKeySequence("Ctrl+S"));
+    applyShortcut(saveAction, ActionMap::save, "保存文件");
     addAction(saveAction);
 
     connect(openAction, &QAction::triggered, this,
@@ -59,7 +58,7 @@ void ToolBar::setupFileActions() {
 void ToolBar::setupViewActions() {
     // Sidebar toggle
     toggleSidebarAction = new QAction("📋", this);
-    toggleSidebarAction->setToolTip("切换侧边栏 (F9)");
+    applyShortcut(toggleSidebarAction, ActionMap::toggleSideBar, "切换侧边栏");
     toggleSidebarAction->setCheckable(true);
     toggleSidebarAction->setChecked(true);
     addAction(toggleSidebarAction);
@@ -85,12 +84,12 @@ void ToolBar::setupViewActions() {
 void ToolBar::setupRotationActions() {
     // Rotate left
     rotateLeftAction = new QAction("↺", this);
-    rotateLeftAction->setToolTip("向左旋转90度 (Ctrl+L)");
+    applyShortcut(rotateLeftAction, ActionMap::rotateLeft, "向左旋转90度");
     addAction(rotateLeftAction);
 
     // Rotate right
     rotateRightAction = new QAction("↻", this);
-    rotateRightAction->setToolTip("向右旋转90度 (Ctrl+R)");
+    applyShortcut(rotateRightAction, ActionMap::rotateRight, "向右旋转90度");
     addAction(rotateRightAction);
 
     connect(rotateLeftAction, &QAction::triggered, this,
@@ -102,7 +101,7 @@ void ToolBar::setupRotationActions() {
 void ToolBar::setupThemeActions() {
     // Theme toggle
     themeToggleAction = new QAction("🌙", this);
-    themeToggleAction->setToolTip("切换主题 (Ctrl+Shift+T)");
+    applyShortcut(themeToggleAction, ActionMap::toggleTheme, "切换主题");
     addAction(themeToggleAction);
 
     connect(themeToggleAction, &QAction::triggered, this,
@@ -110,6 +109,19 @@ void ToolBar::setupThemeActions() {
 }
 
 void ToolBar::createSeparator() { addSeparator(); }
+
+void ToolBar::applyShortcut(QAction* action, ActionMap actionId,
+                            const QString& tooltipPrefix) {
+    const QList<QKeySequence> shortcuts =
+        m_shortcutManager ? m_shortcutManager->shortcutsFor(actionId)
+                          : QList<QKeySequence>{};
+    if (!shortcuts.isEmpty()) {
+        action->setToolTip(QString("%1 (%2)").arg(
+            tooltipPrefix, shortcuts.first().toString()));
+        return;
+    }
+    action->setToolTip(tooltipPrefix);
+}
 
 void ToolBar::applyToolBarStyle() {
     // Apply toolbar style
@@ -145,6 +157,18 @@ void ToolBar::setActionsEnabled(bool enabled) {
     // Sidebar and theme toggle always available
     toggleSidebarAction->setEnabled(true);
     themeToggleAction->setEnabled(true);
+}
+
+void ToolBar::setSidebarChecked(bool checked) {
+    toggleSidebarAction->setChecked(checked);
+}
+
+void ToolBar::setViewModeIndex(int mode) {
+    if (mode < 0 || mode >= viewModeCombo->count()) {
+        return;
+    }
+    const QSignalBlocker blocker(viewModeCombo);
+    viewModeCombo->setCurrentIndex(mode);
 }
 
 void ToolBar::onViewModeChanged() {

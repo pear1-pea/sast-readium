@@ -69,6 +69,8 @@ void ViewWidget::setupConnections() {
             &ViewWidget::onTabMoved);
     connect(tabWidget, &DocumentTabWidget::allTabsClosed, this,
             &ViewWidget::onAllDocumentsClosed);
+    connect(tabWidget, &DocumentTabWidget::newTabRequested, this,
+            &ViewWidget::newTabRequested);
 }
 
 void ViewWidget::setOutlineModel(PDFOutlineModel* model) {
@@ -141,6 +143,18 @@ void ViewWidget::executePDFAction(ActionMap action) {
         case ActionMap::rotateRight:
             currentViewer->rotateRight();
             break;
+        case ActionMap::showSearch:
+            currentViewer->showSearch();
+            break;
+        case ActionMap::findNext:
+            currentViewer->findNext();
+            break;
+        case ActionMap::findPrevious:
+            currentViewer->findPrevious();
+            break;
+        case ActionMap::addBookmark:
+            currentViewer->addBookmark();
+            break;
         case ActionMap::setSinglePageMode:
             currentViewer->setViewMode(PDFViewMode::SinglePage);
             break;
@@ -195,6 +209,15 @@ double ViewWidget::getCurrentZoom() const {
         return viewer ? viewer->getCurrentZoom() : 1.0;
     }
     return 1.0;
+}
+
+PDFViewMode ViewWidget::getCurrentViewMode() const {
+    int currentIndex = getCurrentDocumentIndex();
+    if (currentIndex >= 0 && currentIndex < pdfViewers.size()) {
+        PDFViewer* viewer = pdfViewers[currentIndex];
+        return viewer ? viewer->getViewMode() : PDFViewMode::SinglePage;
+    }
+    return PDFViewMode::SinglePage;
 }
 
 void ViewWidget::setCurrentZoom(int percentage) {
@@ -315,6 +338,7 @@ void ViewWidget::onCurrentDocumentChanged(int index) {
         emit currentViewerPageChanged(viewer->getCurrentPage(),
                                       viewer->getPageCount());
         emit currentViewerZoomChanged(viewer->getCurrentZoom());
+        emit currentViewerViewModeChanged(viewer->getViewMode());
     }
 
     qDebug() << "Current document changed to index" << index;
@@ -417,6 +441,8 @@ PDFViewer* ViewWidget::createPDFViewer() {
             &ViewWidget::onPDFPageChanged);
     connect(viewer, &PDFViewer::zoomChanged, this,
             &ViewWidget::onPDFZoomChanged);
+    connect(viewer, &PDFViewer::viewModeChanged, this,
+            &ViewWidget::onPDFViewModeChanged);
 
     return viewer;
 }
@@ -501,5 +527,15 @@ void ViewWidget::onPDFZoomChanged(double zoomFactor) {
     if (currentIndex >= 0 && currentIndex < pdfViewers.size() &&
         pdfViewers[currentIndex] == sender) {
         emit currentViewerZoomChanged(zoomFactor);
+    }
+}
+
+void ViewWidget::onPDFViewModeChanged(PDFViewMode mode) {
+    PDFViewer* sender = qobject_cast<PDFViewer*>(QObject::sender());
+    int currentIndex = getCurrentDocumentIndex();
+
+    if (currentIndex >= 0 && currentIndex < pdfViewers.size() &&
+        pdfViewers[currentIndex] == sender) {
+        emit currentViewerViewModeChanged(mode);
     }
 }

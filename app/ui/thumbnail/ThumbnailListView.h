@@ -14,7 +14,6 @@
 
 class ThumbnailModel;
 class ThumbnailDelegate;
-class ProgressiveThumbnailLoader;
 
 /**
  * @brief Chrome风格的PDF缩略图列表视图
@@ -122,6 +121,8 @@ private slots:
     void onModelRowsRemoved(const QModelIndex& parent, int first, int last);
     void onScrollAnimationFinished();
     void onPreloadTimer();
+    void onIdleStartTimer();
+    void onIdlePreloadTimer();
     void onDelegateAnimationTick();
     void updateVisibleRange();
     void scheduleViewportUpdate();
@@ -136,6 +137,10 @@ private:
 
     void updateItemSizes();
     void updatePreloadRange();
+    void requestThumbnailRange(int startPage, int endPage);
+    void updatePreloadBiasDirection(int direction, qint64 timestamp);
+    void stopIdlePreloadTimers();
+    void scheduleIdlePreload();
 
     QPair<int, int> calculateVisibleRange() const;
 
@@ -191,16 +196,24 @@ private:
     int m_preloadMargin;
     bool m_autoPreload;
     QTimer* m_preloadTimer;
+    QTimer* m_idleStartTimer;
+    QTimer* m_idlePreloadTimer;
 
     // 可见范围跟踪
     QPair<int, int> m_visibleRange;
     bool m_isScrolling;
+    int m_lastPreloadStart;
+    int m_lastPreloadEnd;
 
     // Heuristic scroll velocity tracking
     double m_scrollVelocity;  // pixels/ms
     qint64 m_lastScrollTime;
     int m_lastScrollPosition;
     int m_scrollDirection;  // +1 down, -1 up, 0 stationary
+    int m_candidatePreloadDirection;
+    qint64 m_candidatePreloadDirectionSince;
+    int m_preloadBiasDirection;
+    int m_idlePreloadDirection;
 
     // Performance optimization
     QTimer* m_viewportUpdateTimer;
@@ -212,9 +225,6 @@ private:
     QTimer* m_delegateAnimationTimer;
     QHash<int, AnimationState> m_animationStates;
     QElapsedTimer m_animationClock;
-
-    // Progressive loading (two-stage rendering coordinator)
-    ProgressiveThumbnailLoader* m_progressiveLoader;
 
     // 右键菜单
     bool m_contextMenuEnabled;
@@ -240,6 +250,12 @@ private:
     static constexpr int PRELOAD_COUNT_SLOW = 3;
     static constexpr int PRELOAD_COUNT_MEDIUM = 10;
     static constexpr int PRELOAD_COUNT_FAST = 20;
+    static constexpr int PRELOAD_BIAS_DOWN_LOCK_MS = 200;
+    static constexpr int PRELOAD_BIAS_UP_LOCK_MS = 300;
+    static constexpr int IDLE_START_DELAY_MS = 10000;
+    static constexpr int IDLE_PRELOAD_DOWN_DELAY_MS = 20000;
+    static constexpr int IDLE_PRELOAD_UP_DELAY_MS = 30000;
+    static constexpr int IDLE_PRELOAD_EXTRA_COUNT = 2;
     static constexpr int DELEGATE_ANIMATION_INTERVAL = 33;  // ms (~30fps)
     static constexpr qreal HOVER_LERP_FACTOR = 0.18;
     static constexpr qreal SELECTION_LERP_FACTOR = 0.12;

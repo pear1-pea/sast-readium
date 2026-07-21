@@ -90,20 +90,9 @@ QVariant ThumbnailModel::data(const QModelIndex& index, int role) const {
 
         case PixmapRole: {
             auto it = m_thumbnails.find(pageNumber);
-            if (it != m_thumbnails.end()) {
-                // 更新访问时间和频率
-                it->lastAccessed = QDateTime::currentMSecsSinceEpoch();
-                const_cast<ThumbnailModel*>(this)->updateAccessFrequency(
-                    pageNumber);
-                if (!it->pixmap.isNull()) {
-                    const_cast<ThumbnailModel*>(this)->m_cacheHits++;
-                    return it->pixmap;
-                }
+            if (it != m_thumbnails.end() && !it->pixmap.isNull()) {
+                return it->pixmap;
             }
-
-            // 缓存未命中，请求生成缩略图
-            const_cast<ThumbnailModel*>(this)->m_cacheMisses++;
-            const_cast<ThumbnailModel*>(this)->requestThumbnail(pageNumber);
             return QVariant();
         }
 
@@ -310,6 +299,7 @@ void ThumbnailModel::requestThumbnail(int pageNumber) {
     if (it != m_thumbnails.end()) {
         // 如果已经有有效的pixmap，更新访问时间后直接返回
         if (!it->pixmap.isNull()) {
+            m_cacheHits++;
             it->lastAccessed = QDateTime::currentMSecsSinceEpoch();
             updateAccessFrequency(pageNumber);
             LOG_DEBUG("ThumbnailModel: Page {} already cached, skip request",
@@ -335,6 +325,7 @@ void ThumbnailModel::requestThumbnail(int pageNumber) {
     }
 
     // 标记为加载中（如果缓存项不存在会创建新的）
+    m_cacheMisses++;
     ThumbnailItem& item = m_thumbnails[pageNumber];
     item.isLoading = true;
     item.hasError = false;
@@ -368,27 +359,12 @@ void ThumbnailModel::requestThumbnailRange(int startPage, int endPage) {
     startPage = qMax(0, startPage);
     endPage = qMin(numPages - 1, endPage);
 
-    // 统计实际需要加载的页面数
-    int requestCount = 0;
     for (int i = startPage; i <= endPage; ++i) {
-        QMutexLocker locker(&m_thumbnailsMutex);
-        auto it = m_thumbnails.find(i);
-        bool needRequest = (it == m_thumbnails.end() ||
-                            (it->pixmap.isNull() && !it->isLoading));
-        locker.unlock();
-
-        if (needRequest) {
-            requestThumbnail(i);
-            requestCount++;
-        }
+        requestThumbnail(i);
     }
 
-    if (requestCount > 0) {
-        LOG_DEBUG(
-            "ThumbnailModel: Requested {} thumbnails in range {}~{} (total "
-            "range size: {})",
-            requestCount, startPage, endPage, endPage - startPage + 1);
-    }
+    LOG_DEBUG("ThumbnailModel: Dispatched thumbnail range {}~{} ({} pages)",
+              startPage, endPage, endPage - startPage + 1);
 }
 
 bool ThumbnailModel::isLoading(int pageNumber) const {

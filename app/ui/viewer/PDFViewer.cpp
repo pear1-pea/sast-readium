@@ -16,6 +16,7 @@
 #include <QSizeF>
 #include <QSplitter>
 #include <QStackedWidget>
+#include <QStyle>
 #include <QWheelEvent>
 #include <QtCore>
 #include <QtGlobal>
@@ -37,7 +38,48 @@
 #include "ui/continuous/PDFContinuousRenderScheduler.h"
 #include "utils/LoggingMacros.h"
 
+namespace {
+int normalizeRotation(int rotation) {
+    int normalized = rotation % 360;
+    if (normalized < 0) {
+        normalized += 360;
+    }
+    return normalized;
+}
+
+int quantizeLayoutValue(qreal value) { return qRound(value * 1000.0); }
+
+int quantizeZoom(double zoom) { return qRound(zoom * 10000.0); }
+}  // namespace
+
 struct PDFViewer::Private {
+    struct ContinuousLayoutFingerprint {
+        quintptr documentId = 0;
+        int pageCount = 0;
+        int zoomKey = 0;
+        int rotation = 0;
+        int viewportWidth = 0;
+        int pageSpacingKey = 0;
+        int marginLeftKey = 0;
+        int marginTopKey = 0;
+        int marginRightKey = 0;
+        int marginBottomKey = 0;
+        int horizontalAlignment = 0;
+
+        bool operator==(const ContinuousLayoutFingerprint& other) const {
+            return documentId == other.documentId &&
+                   pageCount == other.pageCount && zoomKey == other.zoomKey &&
+                   rotation == other.rotation &&
+                   viewportWidth == other.viewportWidth &&
+                   pageSpacingKey == other.pageSpacingKey &&
+                   marginLeftKey == other.marginLeftKey &&
+                   marginTopKey == other.marginTopKey &&
+                   marginRightKey == other.marginRightKey &&
+                   marginBottomKey == other.marginBottomKey &&
+                   horizontalAlignment == other.horizontalAlignment;
+        }
+    };
+
     // UI组件
     QVBoxLayout* mainLayout = nullptr;
     QStackedWidget* viewStack = nullptr;
@@ -50,6 +92,9 @@ struct PDFViewer::Private {
     QAbstractScrollArea* continuousScrollArea = nullptr;
     PDFContinuousCanvas* continuousCanvas = nullptr;
     bool isWidgetReady = false;
+    QTimer* continuousResizeTimer = nullptr;
+    bool continuousLayoutFingerprintValid = false;
+    ContinuousLayoutFingerprint continuousLayoutFingerprint;
 
     // Profiling state
     bool continuousProfilingActive = false;
@@ -86,19 +131,6 @@ struct PDFViewer::Private {
     QPropertyAnimation* fadeAnimation = nullptr;
     QGraphicsOpacityEffect* opacityEffect = nullptr;
 
-    // 键盘快捷键
-    QShortcut* zoomInShortcut = nullptr;
-    QShortcut* zoomOutShortcut = nullptr;
-    QShortcut* fitPageShortcut = nullptr;
-    QShortcut* fitWidthShortcut = nullptr;
-    QShortcut* fitHeightShortcut = nullptr;
-    QShortcut* rotateLeftShortcut = nullptr;
-    QShortcut* rotateRightShortcut = nullptr;
-    QShortcut* firstPageShortcut = nullptr;
-    QShortcut* lastPageShortcut = nullptr;
-    QShortcut* nextPageShortcut = nullptr;
-    QShortcut* prevPageShortcut = nullptr;
-
     // 渲染缓存
     PDFRenderCache m_renderCache{100};
     PDFContinuousImageCache continuousImageCache;
@@ -109,6 +141,40 @@ struct PDFViewer::Private {
 
     // 预渲染器
     PDFPrerenderer* prerenderer = nullptr;
+
+    PDFContinuousLayoutOptions continuousLayoutOptions() const {
+        PDFContinuousLayoutOptions options;
+        options.zoom = zoomController->currentZoom();
+        options.rotation = currentRotation;
+        options.viewportWidth = continuousScrollArea->viewport()->width();
+        if (m_enableStyling) {
+            options.documentMargins = QMarginsF(STYLE.margin(), STYLE.margin(),
+                                                STYLE.margin(), STYLE.margin());
+            options.pageSpacing = STYLE.spacing() * 2;
+        }
+        return options;
+    }
+
+    ContinuousLayoutFingerprint continuousLayoutFingerprintFor(
+        const PDFContinuousLayoutOptions& options) const {
+        ContinuousLayoutFingerprint fingerprint;
+        fingerprint.documentId = reinterpret_cast<quintptr>(document.get());
+        fingerprint.pageCount = document ? document->numPages() : 0;
+        fingerprint.zoomKey = quantizeZoom(options.zoom);
+        fingerprint.rotation = normalizeRotation(options.rotation);
+        fingerprint.viewportWidth = qRound(options.viewportWidth);
+        fingerprint.pageSpacingKey = quantizeLayoutValue(options.pageSpacing);
+        fingerprint.marginLeftKey =
+            quantizeLayoutValue(options.documentMargins.left());
+        fingerprint.marginTopKey =
+            quantizeLayoutValue(options.documentMargins.top());
+        fingerprint.marginRightKey =
+            quantizeLayoutValue(options.documentMargins.right());
+        fingerprint.marginBottomKey =
+            quantizeLayoutValue(options.documentMargins.bottom());
+        fingerprint.horizontalAlignment = int(options.horizontalAlignment);
+        return fingerprint;
+    }
 };
 
 // PDFViewer Implementation
@@ -145,6 +211,10 @@ PDFViewer::PDFViewer(QWidget* parent, bool enableStyling)
     d->scrollTimer = new QTimer(this);
     d->scrollTimer->setSingleShot(true);
     d->scrollTimer->setInterval(100);
+
+    d->continuousResizeTimer = new QTimer(this);
+    d->continuousResizeTimer->setSingleShot(true);
+    d->continuousResizeTimer->setInterval(0);
 
     // 初始化动画效果
     d->opacityEffect = new QGraphicsOpacityEffect(this);
@@ -259,13 +329,15 @@ void PDFViewer::setupConnections() {
                     d->singlePageWidget->setScaleFactor(factor);
                     d->singlePageWidget->blockSignals(false);
                 } else {
-                    updateContinuousView();
+                    updateContinuousView("zoom");
                 }
                 d->zoomController->saveSettings();
                 emit zoomChanged(factor);
             });
     connect(d->scrollTimer, &QTimer::timeout, this,
             &PDFViewer::onScrollChanged);
+    connect(d->continuousResizeTimer, &QTimer::timeout, this,
+            &PDFViewer::handleContinuousResize);
 
     connect(d->continuousScrollArea->verticalScrollBar(),
             &QScrollBar::valueChanged, this, [this](int value) {
@@ -357,15 +429,6 @@ void PDFViewer::setupConnections() {
 }
 
 void PDFViewer::setupShortcuts() {
-    // 缩放快捷键
-    d->zoomInShortcut = new QShortcut(QKeySequence("Ctrl++"), this);
-    d->zoomOutShortcut = new QShortcut(QKeySequence("Ctrl+-"), this);
-    d->fitPageShortcut = new QShortcut(QKeySequence("Ctrl+0"), this);
-    d->fitWidthShortcut = new QShortcut(QKeySequence("Ctrl+1"), this);
-    d->fitHeightShortcut = new QShortcut(QKeySequence("Ctrl+2"), this);
-
-    // 额外缩放快捷键
-    QShortcut* zoomIn2 = new QShortcut(QKeySequence("Ctrl+="), this);
     QShortcut* zoomActualSize = new QShortcut(QKeySequence("Ctrl+Alt+0"), this);
     QShortcut* zoom25 = new QShortcut(QKeySequence("Ctrl+Alt+1"), this);
     QShortcut* zoom50 = new QShortcut(QKeySequence("Ctrl+Alt+2"), this);
@@ -374,20 +437,7 @@ void PDFViewer::setupShortcuts() {
     QShortcut* zoom150 = new QShortcut(QKeySequence("Ctrl+Alt+5"), this);
     QShortcut* zoom200 = new QShortcut(QKeySequence("Ctrl+Alt+6"), this);
 
-    // 旋转快捷键
-    d->rotateLeftShortcut = new QShortcut(QKeySequence("Ctrl+L"), this);
-    d->rotateRightShortcut = new QShortcut(QKeySequence("Ctrl+R"), this);
     QShortcut* rotate180 = new QShortcut(QKeySequence("Ctrl+Shift+R"), this);
-
-    // 主题切换快捷键
-    QShortcut* themeToggleShortcut =
-        new QShortcut(QKeySequence("Ctrl+Shift+T"), this);
-
-    // 导航快捷键 - 基本
-    d->firstPageShortcut = new QShortcut(QKeySequence("Ctrl+Home"), this);
-    d->lastPageShortcut = new QShortcut(QKeySequence("Ctrl+End"), this);
-    d->nextPageShortcut = new QShortcut(QKeySequence("Page Down"), this);
-    d->prevPageShortcut = new QShortcut(QKeySequence("Page Up"), this);
 
     // 导航快捷键 - 高级
     QShortcut* nextPage2 = new QShortcut(QKeySequence("Space"), this);
@@ -396,42 +446,8 @@ void PDFViewer::setupShortcuts() {
     QShortcut* prevPage3 = new QShortcut(QKeySequence("Left"), this);
     QShortcut* nextPage4 = new QShortcut(QKeySequence("Down"), this);
     QShortcut* prevPage4 = new QShortcut(QKeySequence("Up"), this);
-    QShortcut* jump10Forward = new QShortcut(QKeySequence("Ctrl+Right"), this);
-    QShortcut* jump10Backward = new QShortcut(QKeySequence("Ctrl+Left"), this);
-    QShortcut* gotoPage = new QShortcut(QKeySequence("Ctrl+G"), this);
-
-    // 视图模式快捷键
-    QShortcut* toggleFullscreen = new QShortcut(QKeySequence("F11"), this);
-    QShortcut* toggleSidebar = new QShortcut(QKeySequence("F9"), this);
-    QShortcut* presentationMode = new QShortcut(QKeySequence("F5"), this);
-    QShortcut* readingMode = new QShortcut(QKeySequence("F6"), this);
-
-    // 搜索快捷键
-    QShortcut* findShortcut = new QShortcut(QKeySequence("Ctrl+F"), this);
-    QShortcut* findNext = new QShortcut(QKeySequence("F3"), this);
-    QShortcut* findPrev = new QShortcut(QKeySequence("Shift+F3"), this);
-
-    // 书签快捷键
-    QShortcut* addBookmark = new QShortcut(QKeySequence("Ctrl+D"), this);
-    QShortcut* showBookmarks = new QShortcut(QKeySequence("Ctrl+B"), this);
-
-    // 文档操作快捷键
-    QShortcut* refresh = new QShortcut(QKeySequence("F5"), this);
-    QShortcut* properties = new QShortcut(QKeySequence("Alt+Enter"), this);
-    QShortcut* selectAll = new QShortcut(QKeySequence("Ctrl+A"), this);
-    QShortcut* copyText = new QShortcut(QKeySequence("Ctrl+C"), this);
-
-    // 连接快捷键信号 - 基本缩放
-    connect(d->zoomInShortcut, &QShortcut::activated, this, &PDFViewer::zoomIn);
-    connect(d->zoomOutShortcut, &QShortcut::activated, this,
-            &PDFViewer::zoomOut);
-    connect(zoomIn2, &QShortcut::activated, this, &PDFViewer::zoomIn);
-    connect(d->fitPageShortcut, &QShortcut::activated, this,
-            &PDFViewer::zoomToFit);
-    connect(d->fitWidthShortcut, &QShortcut::activated, this,
-            &PDFViewer::zoomToWidth);
-    connect(d->fitHeightShortcut, &QShortcut::activated, this,
-            &PDFViewer::zoomToHeight);
+    QShortcut* jump10Forward = new QShortcut(QKeySequence("Alt+Right"), this);
+    QShortcut* jump10Backward = new QShortcut(QKeySequence("Alt+Left"), this);
 
     // 连接预设缩放级别
     connect(zoomActualSize, &QShortcut::activated, this,
@@ -443,27 +459,8 @@ void PDFViewer::setupShortcuts() {
     connect(zoom150, &QShortcut::activated, this, [this]() { setZoom(1.5); });
     connect(zoom200, &QShortcut::activated, this, [this]() { setZoom(2.0); });
 
-    // 连接旋转快捷键
-    connect(d->rotateLeftShortcut, &QShortcut::activated, this,
-            &PDFViewer::rotateLeft);
-    connect(d->rotateRightShortcut, &QShortcut::activated, this,
-            &PDFViewer::rotateRight);
     connect(rotate180, &QShortcut::activated, this,
             [this]() { setRotation(d->currentRotation + 180); });
-
-    // 连接主题快捷键
-    connect(themeToggleShortcut, &QShortcut::activated, this,
-            &PDFViewer::toggleTheme);
-
-    // 连接基本导航快捷键
-    connect(d->firstPageShortcut, &QShortcut::activated, this,
-            &PDFViewer::firstPage);
-    connect(d->lastPageShortcut, &QShortcut::activated, this,
-            &PDFViewer::lastPage);
-    connect(d->nextPageShortcut, &QShortcut::activated, this,
-            &PDFViewer::nextPage);
-    connect(d->prevPageShortcut, &QShortcut::activated, this,
-            &PDFViewer::previousPage);
 
     // 连接高级导航快捷键
     connect(nextPage2, &QShortcut::activated, this, &PDFViewer::nextPage);
@@ -478,42 +475,6 @@ void PDFViewer::setupShortcuts() {
             [this]() { goToPage(d->currentPageNumber + 10); });
     connect(jump10Backward, &QShortcut::activated, this,
             [this]() { goToPage(d->currentPageNumber - 10); });
-    connect(gotoPage, &QShortcut::activated, this, [this]() {
-        // goto-page shortcut - main toolbar handles this
-    });
-
-    // 连接视图模式快捷键
-    connect(toggleFullscreen, &QShortcut::activated, this, [this]() {
-        // Toggle fullscreen mode
-        if (window()->isFullScreen()) {
-            window()->showNormal();
-        } else {
-            window()->showFullScreen();
-        }
-    });
-
-    connect(toggleSidebar, &QShortcut::activated, this, [this]() {
-        // Emit signal to toggle sidebar
-        emit sidebarToggleRequested();
-    });
-
-    // 连接搜索快捷键
-    connect(findShortcut, &QShortcut::activated, this, &PDFViewer::showSearch);
-
-    // 连接书签快捷键
-    connect(addBookmark, &QShortcut::activated, this, [this]() {
-        if (d->document && d->currentPageNumber >= 0) {
-            emit bookmarkRequested(d->currentPageNumber);
-        }
-    });
-
-    // 连接文档操作快捷键
-    connect(refresh, &QShortcut::activated, this, [this]() {
-        // Refresh current page
-        if (d->singlePageWidget) {
-            d->singlePageWidget->renderPage();
-        }
-    });
 }
 
 void PDFViewer::setDocument(std::shared_ptr<Poppler::Document> doc) {
@@ -526,6 +487,7 @@ void PDFViewer::setDocument(std::shared_ptr<Poppler::Document> doc) {
         d->document = doc;
         d->currentPageNumber = 0;
         d->currentRotation = 0;  // 重置旋转
+        d->continuousLayoutFingerprintValid = false;
 
         if (d->document) {
             // Configure d->document for high-quality rendering
@@ -569,7 +531,8 @@ void PDFViewer::setDocument(std::shared_ptr<Poppler::Document> doc) {
 
             // 如果是连续模式，创建所有页面
             if (d->currentViewMode == PDFViewMode::ContinuousScroll) {
-                createContinuousPages();
+                d->continuousLayoutFingerprintValid = false;
+                createContinuousPages("document");
             }
 
             setMessage(QString("文档加载成功，共 %1 页").arg(numPages));
@@ -584,6 +547,7 @@ void PDFViewer::setDocument(std::shared_ptr<Poppler::Document> doc) {
                 d->continuousCanvas->setDocument(nullptr);
                 d->continuousCanvas->setBlueprint(nullptr);
             }
+            d->continuousLayoutFingerprintValid = false;
             if (d->annotationModel) {
                 d->annotationModel->setDocument(nullptr);
             }
@@ -769,7 +733,7 @@ void PDFViewer::updatePageDisplay() {
     }
 }
 
-void PDFViewer::updateContinuousView() {
+void PDFViewer::updateContinuousView(const char* reason) {
     if (!d->document || d->currentViewMode != PDFViewMode::ContinuousScroll) {
         return;
     }
@@ -780,7 +744,7 @@ void PDFViewer::updateContinuousView() {
                            d->continuousCanvas->viewportRectInDocument(),
                            d->currentPageNumber)
                      : PDFViewportAnchor{};
-    rebuildContinuousCanvasBlueprint();
+    rebuildContinuousCanvasBlueprint(reason);
     const auto newBlueprint = d->continuousCanvas->blueprint();
     if (newBlueprint && anchor.pageIndex >= 0) {
         d->continuousScrollArea->verticalScrollBar()->setValue(
@@ -907,18 +871,34 @@ void PDFViewer::switchToContinuousMode() {
     d->visiblePageEnd = -1;
     d->viewStack->setCurrentIndex(1);
     if (d->document) {
-        createContinuousPages();
+        createContinuousPages("switch");
     }
 }
 
-void PDFViewer::createContinuousPages() { rebuildContinuousCanvasBlueprint(); }
+void PDFViewer::createContinuousPages(const char* reason) {
+    rebuildContinuousCanvasBlueprint(reason);
+}
 
-void PDFViewer::rebuildContinuousCanvasBlueprint() {
+void PDFViewer::rebuildContinuousCanvasBlueprint(const char* reason) {
     if (!d->document || !d->continuousCanvas) {
         return;
     }
 
     auto rebuildStart = std::chrono::steady_clock::now();
+    PDFContinuousLayoutOptions options = d->continuousLayoutOptions();
+    const auto fingerprint = d->continuousLayoutFingerprintFor(options);
+    if (d->continuousLayoutFingerprintValid &&
+        d->continuousLayoutFingerprint == fingerprint) {
+        LOG_DEBUG(
+            "[continuous-prof] skip canvas blueprint rebuild reason={} "
+            "page_count={} viewport_w={} zoom_key={} rotation={}",
+            reason, fingerprint.pageCount, fingerprint.viewportWidth,
+            fingerprint.zoomKey, fingerprint.rotation);
+        updateContinuousCanvasGeometry();
+        updateVisiblePages();
+        return;
+    }
+
     QVector<QSizeF> pageSizes;
     pageSizes.reserve(d->document->numPages());
     for (int i = 0; i < d->document->numPages(); ++i) {
@@ -926,19 +906,11 @@ void PDFViewer::rebuildContinuousCanvasBlueprint() {
         pageSizes.push_back(page ? page->pageSizeF() : QSizeF(100, 140));
     }
 
-    PDFContinuousLayoutOptions options;
-    options.zoom = d->zoomController->currentZoom();
-    options.rotation = d->currentRotation;
-    options.viewportWidth = d->continuousScrollArea->viewport()->width();
-    if (d->m_enableStyling) {
-        options.documentMargins = QMarginsF(STYLE.margin(), STYLE.margin(),
-                                            STYLE.margin(), STYLE.margin());
-        options.pageSpacing = STYLE.spacing() * 2;
-    }
-
     auto blueprint = std::make_shared<PDFContinuousBlueprint>();
     blueprint->rebuild(pageSizes, options);
     d->continuousCanvas->setBlueprint(blueprint);
+    d->continuousLayoutFingerprint = fingerprint;
+    d->continuousLayoutFingerprintValid = true;
     updateContinuousCanvasGeometry();
     updateAllPagesSearchHighlights();
     if (d->annotationModel) {
@@ -955,8 +927,18 @@ void PDFViewer::rebuildContinuousCanvasBlueprint() {
                          .count();
     LOG_INFO(
         "[continuous-prof] rebuild canvas blueprint pages={} document_h={:.1f} "
-        "elapsed_ms={}",
-        d->document->numPages(), blueprint->documentHeight(), rebuildMs);
+        "elapsed_ms={} reason={} viewport_w={} zoom_key={} rotation={}",
+        d->document->numPages(), blueprint->documentHeight(), rebuildMs, reason,
+        fingerprint.viewportWidth, fingerprint.zoomKey, fingerprint.rotation);
+}
+
+void PDFViewer::handleContinuousResize() {
+    if (!d->document || d->currentViewMode != PDFViewMode::ContinuousScroll ||
+        !d->continuousCanvas) {
+        return;
+    }
+
+    rebuildContinuousCanvasBlueprint("resize");
 }
 
 void PDFViewer::updateContinuousCanvasGeometry() {
@@ -1131,7 +1113,37 @@ bool PDFViewer::eventFilter(QObject* object, QEvent* event) {
          object == d->continuousScrollArea->viewport()) &&
         event->type() == QEvent::Resize &&
         d->currentViewMode == PDFViewMode::ContinuousScroll && d->document) {
-        rebuildContinuousCanvasBlueprint();
+        QResizeEvent* resizeEvent = static_cast<QResizeEvent*>(event);
+        const char* resizeObject =
+            object == d->continuousScrollArea ? "scrollArea" : "viewport";
+        QScrollBar* verticalBar = d->continuousScrollArea->verticalScrollBar();
+        const int scrollBarExtent =
+            d->continuousScrollArea->style()->pixelMetric(
+                QStyle::PM_ScrollBarExtent, nullptr, d->continuousScrollArea);
+        const auto resizeFingerprint =
+            d->continuousLayoutFingerprintFor(d->continuousLayoutOptions());
+        LOG_DEBUG(
+            "[continuous-prof] resize event object={} old={}x{} new={}x{} "
+            "viewport={}x{} viewport_contents_w={} scroll_area_contents_w={} "
+            "vbar_visible={} vbar_max={} vbar_value={} vbar_page_step={} "
+            "scrollbar_extent={} zoom={:.4f} rotation={} "
+            "fingerprint_valid={} current_viewport_w={} last_viewport_w={} "
+            "current_zoom_key={} last_zoom_key={}",
+            resizeObject, resizeEvent->oldSize().width(),
+            resizeEvent->oldSize().height(), resizeEvent->size().width(),
+            resizeEvent->size().height(),
+            d->continuousScrollArea->viewport()->width(),
+            d->continuousScrollArea->viewport()->height(),
+            d->continuousScrollArea->viewport()->contentsRect().width(),
+            d->continuousScrollArea->contentsRect().width(),
+            verticalBar->isVisible(), verticalBar->maximum(),
+            verticalBar->value(), verticalBar->pageStep(), scrollBarExtent,
+            d->zoomController->currentZoom(), d->currentRotation,
+            d->continuousLayoutFingerprintValid,
+            resizeFingerprint.viewportWidth,
+            d->continuousLayoutFingerprint.viewportWidth,
+            resizeFingerprint.zoomKey, d->continuousLayoutFingerprint.zoomKey);
+        d->continuousResizeTimer->start();
     }
 
     return QWidget::eventFilter(object, event);
@@ -1221,7 +1233,7 @@ void PDFViewer::updateContinuousViewRotation() {
     if (!d->document || d->currentViewMode != PDFViewMode::ContinuousScroll) {
         return;
     }
-    updateContinuousView();
+    updateContinuousView("rotation");
 }
 
 // 搜索功能实现
