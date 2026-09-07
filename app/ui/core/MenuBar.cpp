@@ -102,10 +102,18 @@ void MenuBar::createViewMenu() {
         shortcutAction(ActionMap::setContinuousScrollMode);
     continuousScrollAction->setCheckable(true);
 
+    QAction* doublePageAction = shortcutAction(ActionMap::setDoublePageMode);
+    doublePageAction->setCheckable(true);
+
+    QAction* gridViewAction = shortcutAction(ActionMap::setGridViewMode);
+    gridViewAction->setCheckable(true);
+
     // 创建查看模式动作组
     QActionGroup* viewModeGroup = new QActionGroup(this);
     viewModeGroup->addAction(singlePageAction);
     viewModeGroup->addAction(continuousScrollAction);
+    viewModeGroup->addAction(doublePageAction);
+    viewModeGroup->addAction(gridViewAction);
 
     // 视图控制
     QAction* fullScreenAction = shortcutAction(ActionMap::fullScreen);
@@ -141,6 +149,8 @@ void MenuBar::createViewMenu() {
     viewMenu->addSeparator();
     viewMenu->addAction(singlePageAction);
     viewMenu->addAction(continuousScrollAction);
+    viewMenu->addAction(doublePageAction);
+    viewMenu->addAction(gridViewAction);
     viewMenu->addSeparator();
     viewMenu->addAction(fullScreenAction);
     viewMenu->addSeparator();

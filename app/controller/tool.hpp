@@ -21,6 +21,8 @@ enum ActionMap {
     // 查看模式相关操作
     setSinglePageMode,
     setContinuousScrollMode,
+    setDoublePageMode,
+    setGridViewMode,
     // 页面导航操作
     firstPage,
     previousPage,

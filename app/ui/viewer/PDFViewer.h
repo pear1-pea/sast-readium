@@ -11,9 +11,13 @@
 #include "model/SearchModel.h"
 
 // 页面查看模式枚举
+// 顺序必须与 ToolBar 的 viewModeCombo 索引一致 (0/1/2/3)，
+// ViewWidget::setCurrentViewMode 依赖 static_cast<PDFViewMode>(index)。
 enum class PDFViewMode {
-    SinglePage,       // 单页视图
-    ContinuousScroll  // 连续滚动视图
+    SinglePage,        // 单页视图 (index 0)
+    ContinuousScroll,  // 连续滚动视图 (index 1)
+    DoublePage,        // 双页对开视图 (index 2)
+    GridView           // 多页网格视图 (index 3)
 };
 
 class PDFViewer : public QWidget {

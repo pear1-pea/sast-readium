@@ -108,6 +108,7 @@ private slots:
     void testCurrentGenerationRequestRenders();
     void testStaleGenerationRequestIsDropped();
     void testDocumentChangeAllowsSameRenderKeyAgain();
+    void testDocumentTokenChangesAcrossDocuments();
 };
 
 void TestPDFContinuousRenderScheduler::initTestCase() {
@@ -189,6 +190,32 @@ void TestPDFContinuousRenderScheduler::
     QCOMPARE(results.first().request.generation, secondGeneration);
     QVERIFY2(results.first().success,
              results.first().error.toUtf8().constData());
+}
+
+void TestPDFContinuousRenderScheduler::
+    testDocumentTokenChangesAcrossDocuments() {
+    PDFContinuousRenderScheduler scheduler;
+    const auto firstDocument =
+        loadTestDocument("continuous_scheduler_token_first.pdf");
+    const auto secondDocument =
+        loadTestDocument("continuous_scheduler_token_second.pdf");
+    QVERIFY(firstDocument != nullptr);
+    QVERIFY(secondDocument != nullptr);
+
+    scheduler.setDocument(firstDocument);
+    const std::uint64_t firstToken = scheduler.documentToken();
+    QVERIFY(firstToken > 0);
+
+    scheduler.setDocument(secondDocument);
+    const std::uint64_t secondToken = scheduler.documentToken();
+    QVERIFY(secondToken > firstToken);
+
+    PDFContinuousRenderKey firstKey;
+    firstKey.documentToken = firstToken;
+    firstKey.pageIndex = 0;
+    PDFContinuousRenderKey secondKey = firstKey;
+    secondKey.documentToken = secondToken;
+    QVERIFY(!(firstKey == secondKey));
 }
 
 QTEST_MAIN(TestPDFContinuousRenderScheduler)

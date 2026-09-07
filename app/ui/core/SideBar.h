@@ -43,7 +43,8 @@ public:
     PDFOutlineWidget* getOutlineWidget() const { return outlineWidget; }
 
     // 缩略图相关
-    void setDocument(std::shared_ptr<Poppler::Document> document);
+    void setDocument(std::shared_ptr<Poppler::Document> document,
+                     const QVector<QSize>& pageSizes);
     void setThumbnailSize(const QSize& size);
     void refreshThumbnails();
     ThumbnailListView* getThumbnailView() const { return thumbnailView; }

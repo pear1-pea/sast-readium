@@ -53,14 +53,14 @@ std::optional<PDFPageHit> PDFContinuousBlueprint::hitTest(
     return m_layout.hitTest(documentPoint);
 }
 
-QPointF PDFContinuousBlueprint::viewportToDocument(const QPointF& viewportPoint,
-                                                   qreal contentOffsetY) const {
-    return m_layout.viewportToDocument(viewportPoint, contentOffsetY);
+QPointF PDFContinuousBlueprint::viewportToDocument(
+    const QPointF& viewportPoint, const QPointF& contentOffset) const {
+    return m_layout.viewportToDocument(viewportPoint, contentOffset);
 }
 
-QPointF PDFContinuousBlueprint::documentToViewport(const QPointF& documentPoint,
-                                                   qreal contentOffsetY) const {
-    return m_layout.documentToViewport(documentPoint, contentOffsetY);
+QPointF PDFContinuousBlueprint::documentToViewport(
+    const QPointF& documentPoint, const QPointF& contentOffset) const {
+    return m_layout.documentToViewport(documentPoint, contentOffset);
 }
 
 QPointF PDFContinuousBlueprint::documentToPage(

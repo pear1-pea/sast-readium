@@ -388,6 +388,7 @@ void ThumbnailListView::setCurrentPage(int pageNumber, bool animated) {
         if (index.isValid()) {
             setCurrentIndex(index);
             scrollToPage(pageNumber, animated);
+            scheduleViewportUpdate();
         }
     }
 
@@ -492,21 +493,32 @@ void ThumbnailListView::clearContextMenuActions() {
 
 void ThumbnailListView::wheelEvent(QWheelEvent* event) {
     if (m_smoothScrolling && m_animationEnabled) {
-        // 平滑滚动
-        int delta = event->angleDelta().y();
-        int steps = delta / 120;  // 标准滚轮步数
-        int scrollAmount = steps * SMOOTH_SCROLL_STEP;
-
-        int currentValue = verticalScrollBar()->value();
-        int targetValue =
-            qBound(verticalScrollBar()->minimum(), currentValue - scrollAmount,
-                   verticalScrollBar()->maximum());
-
-        if (targetValue != currentValue) {
-            animateScrollTo(targetValue);
+        // Trackpads report pixelDelta while traditional wheels report
+        // angleDelta. Apply pixel scrolling directly because a new trackpad
+        // event can arrive before a property animation reaches its target.
+        const int pixelDelta = event->pixelDelta().y();
+        const int angleDelta = event->angleDelta().y();
+        if (pixelDelta != 0) {
+            const int currentValue = verticalScrollBar()->value();
+            const int targetValue = qBound(verticalScrollBar()->minimum(),
+                                           currentValue - pixelDelta,
+                                           verticalScrollBar()->maximum());
+            verticalScrollBar()->setValue(targetValue);
+            event->accept();
+        } else if (angleDelta != 0) {
+            const int scrollAmount = qRound(static_cast<qreal>(angleDelta) *
+                                            SMOOTH_SCROLL_STEP / 120.0);
+            const int currentValue = verticalScrollBar()->value();
+            const int targetValue = qBound(verticalScrollBar()->minimum(),
+                                           currentValue - scrollAmount,
+                                           verticalScrollBar()->maximum());
+            if (targetValue != currentValue) {
+                animateScrollTo(targetValue);
+            }
+            event->accept();
+        } else {
+            QListView::wheelEvent(event);
         }
-
-        event->accept();
     } else {
         QListView::wheelEvent(event);
     }
@@ -804,6 +816,12 @@ void ThumbnailListView::updateVisibleRange() {
         return;
 
     m_visibleRange = newRange;
+    LOG_DEBUG(
+        "ThumbnailListView: Visible range changed to {}~{} (velocity={:.3f}, "
+        "direction={})",
+        newRange.first, newRange.second, m_scrollVelocity,
+        m_preloadBiasDirection != 0 ? m_preloadBiasDirection
+                                    : m_scrollDirection);
     emit visibleRangeChanged(newRange.first, newRange.second);
 
     // Dispatch thumbnail requests for the full target range (visible + preload)
@@ -879,17 +897,53 @@ void ThumbnailListView::updateItemSizes() {
 
 QPair<int, int> ThumbnailListView::calculateVisibleRange() const {
     ThumbnailModel* thumbnailModel = qobject_cast<ThumbnailModel*>(model());
-    if (!thumbnailModel) {
+    if (!thumbnailModel || thumbnailModel->rowCount() <= 0) {
         return qMakePair(-1, -1);
     }
 
-    QRect viewportRect = viewport()->rect();
-    int firstVisible = indexAt(viewportRect.topLeft()).row();
-    int lastVisible = indexAt(viewportRect.bottomRight()).row();
-
-    // Layout not ready yet — caller handles (-1, -1) with early return
-    if (firstVisible < 0 || lastVisible < 0)
+    const QRect viewportRect = viewport()->rect();
+    if (viewportRect.isEmpty()) {
         return qMakePair(-1, -1);
+    }
+
+    // The viewport corners can fall into item spacing or outside the item
+    // geometry. Probe the vertical center line and use inset coordinates.
+    const int centerX = viewportRect.center().x();
+    const int topY = viewportRect.top() + 1;
+    const int bottomY = viewportRect.bottom() - 1;
+    const int xCandidates[] = {centerX, viewportRect.left() + 1,
+                               viewportRect.right() - 1};
+
+    auto rowAt = [this, &xCandidates](int y) {
+        for (int x : xCandidates) {
+            const QModelIndex index = indexAt(QPoint(x, y));
+            if (index.isValid()) {
+                return index.row();
+            }
+        }
+        return -1;
+    };
+
+    int firstVisible = rowAt(topY);
+    int lastVisible = rowAt(bottomY);
+
+    // If one edge is in spacing, the viewport center still gives us a valid
+    // anchor for a partially visible item.
+    const int centerRow = rowAt(viewportRect.center().y());
+    if (firstVisible < 0) {
+        firstVisible = centerRow;
+    }
+    if (lastVisible < 0) {
+        lastVisible = centerRow;
+    }
+
+    if (firstVisible < 0 || lastVisible < 0) {
+        return qMakePair(-1, -1);
+    }
+
+    if (firstVisible > lastVisible) {
+        std::swap(firstVisible, lastVisible);
+    }
 
     return qMakePair(firstVisible, lastVisible);
 }
@@ -898,9 +952,17 @@ void ThumbnailListView::updateScrollVelocity(int delta, qint64 timestamp) {
     constexpr qint64 VELOCITY_WINDOW_MS = 100;
     qint64 elapsed = timestamp - m_lastScrollTime;
 
+    // scrollContentsBy() reports content movement, whose sign is opposite to
+    // the logical scrollbar direction on a vertically scrolling view. Use the
+    // scrollbar value delta so preload direction follows page order.
+    const int currentPosition = verticalScrollBar()->value();
+    const int positionDelta = currentPosition - m_lastScrollPosition;
+    const int effectiveDelta = positionDelta != 0 ? positionDelta : delta;
+
     if (elapsed > 0 && elapsed < VELOCITY_WINDOW_MS) {
         // Exponential moving average for smooth velocity
-        double instantVelocity = qAbs(static_cast<double>(delta)) / elapsed;
+        double instantVelocity =
+            qAbs(static_cast<double>(effectiveDelta)) / elapsed;
         if (m_scrollVelocity == 0.0) {
             m_scrollVelocity = instantVelocity;
         } else {
@@ -909,13 +971,15 @@ void ThumbnailListView::updateScrollVelocity(int delta, qint64 timestamp) {
     } else if (elapsed >= VELOCITY_WINDOW_MS) {
         // Reset if too much time passed (free-fall detection)
         m_scrollVelocity =
-            qAbs(static_cast<double>(delta)) / qMax(elapsed, 1LL);
+            qAbs(static_cast<double>(effectiveDelta)) / qMax(elapsed, 1LL);
     }
 
-    m_scrollDirection = (delta > 0) ? 1 : (delta < 0) ? -1 : 0;
+    m_scrollDirection = (effectiveDelta > 0)   ? 1
+                        : (effectiveDelta < 0) ? -1
+                                               : 0;
     updatePreloadBiasDirection(m_scrollDirection, timestamp);
     m_lastScrollTime = timestamp;
-    m_lastScrollPosition = verticalScrollBar()->value();
+    m_lastScrollPosition = currentPosition;
 }
 
 void ThumbnailListView::updatePreloadBiasDirection(int direction,
@@ -1059,11 +1123,65 @@ void ThumbnailListView::requestThumbnailRange(int startPage, int endPage) {
     if (!thumbnailModel || startPage > endPage)
         return;
 
-    // Visible range is included so updateVisibleRange does not need its own
-    // request loop. The model owns cached/loading de-duplication and stats.
-    for (int i = startPage; i <= endPage; ++i) {
-        thumbnailModel->requestThumbnail(i);
+    const int pageCount = thumbnailModel->rowCount();
+    startPage = qMax(0, startPage);
+    endPage = qMin(pageCount - 1, endPage);
+    if (startPage > endPage) {
+        return;
     }
+
+    const int visibleStart = qMax(startPage, m_visibleRange.first);
+    const int visibleEnd = qMin(endPage, m_visibleRange.second);
+    const int direction = m_preloadBiasDirection != 0 ? m_preloadBiasDirection
+                                                      : m_scrollDirection;
+
+    QVector<int> requestOrder;
+    requestOrder.reserve(endPage - startPage + 1);
+    QSet<int> requestedPages;
+
+    const auto appendPage = [&requestOrder, &requestedPages](int page) {
+        if (page < 0 || requestedPages.contains(page)) {
+            return;
+        }
+        requestedPages.insert(page);
+        requestOrder.append(page);
+    };
+
+    const auto appendRange = [&appendPage](int first, int last, int step) {
+        if (step > 0) {
+            for (int page = first; page <= last; ++page) {
+                appendPage(page);
+            }
+        } else {
+            for (int page = last; page >= first; --page) {
+                appendPage(page);
+            }
+        }
+    };
+
+    // Submit pages in the current viewport first. This prevents a large
+    // preload span from making visible thumbnails wait behind page-order work.
+    if (visibleStart <= visibleEnd) {
+        appendRange(visibleStart, visibleEnd, direction < 0 ? -1 : 1);
+    }
+
+    if (direction < 0) {
+        appendRange(startPage, visibleStart - 1, -1);
+        appendRange(visibleEnd + 1, endPage, 1);
+    } else {
+        appendRange(visibleEnd + 1, endPage, 1);
+        appendRange(startPage, visibleStart - 1, -1);
+    }
+
+    for (int page : requestOrder) {
+        thumbnailModel->requestThumbnail(page);
+    }
+
+    LOG_DEBUG(
+        "ThumbnailListView: Dispatch range {}~{} with visible {}~{}, "
+        "direction {}, ordered pages {}",
+        startPage, endPage, visibleStart, visibleEnd, direction,
+        requestOrder.size());
 }
 
 void ThumbnailListView::handlePageClick(int pageNumber) {
@@ -1210,6 +1328,13 @@ void ThumbnailListView::optimizedUpdateVisibleRange() {
         m_visibleRange = newRange;
         m_lastVisibleStart = newRange.first;
         m_lastVisibleEnd = newRange.second;
+        LOG_DEBUG(
+            "ThumbnailListView: Optimized visible range {}~{} -> {}~{} "
+            "(velocity={:.3f}, direction={})",
+            oldRange.first, oldRange.second, newRange.first, newRange.second,
+            m_scrollVelocity,
+            m_preloadBiasDirection != 0 ? m_preloadBiasDirection
+                                        : m_scrollDirection);
 
         // Restore viewport range in model so lazy loading and priority
         // scheduling work correctly.

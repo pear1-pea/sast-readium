@@ -324,15 +324,55 @@ void MainWindow::onSideBarVisibilityChanged(bool visible) {
 }
 
 void MainWindow::onCurrentDocumentChangedForOutline(int index) {
-    // 设置缩略图文档
+    std::shared_ptr<Poppler::Document> viewerDocument;
+    std::shared_ptr<Poppler::Document> thumbnailDocument;
+    QVector<QSize> thumbnailPageSizes;
+
     if (documentModel && index >= 0) {
-        std::shared_ptr<Poppler::Document> sharedDoc =
-            documentModel->getDocument(index);
-        if (sharedDoc) {
-            sideBar->setDocument(sharedDoc);
-            renderModel->setDocument(sharedDoc);
+        viewerDocument = documentModel->getDocument(index);
+        const QString filePath = documentModel->getDocumentFilePath(index);
+        const bool documentLocked =
+            viewerDocument && viewerDocument->isLocked();
+        if (documentLocked) {
+            const QString message =
+                QStringLiteral("文档已加密或受保护，当前版本无法显示页面内容");
+            LOG_WARNING(
+                "MainWindow: Locked PDF is not available without a "
+                "password: {}",
+                filePath.toStdString());
+            statusBar->setMessage(message);
+        }
+
+        if (!filePath.isEmpty()) {
+            std::unique_ptr<Poppler::Document> loadedDocument =
+                Poppler::Document::load(filePath);
+            if (loadedDocument && !loadedDocument->isLocked()) {
+                thumbnailDocument = std::shared_ptr<Poppler::Document>(
+                    loadedDocument.release());
+                thumbnailPageSizes.reserve(thumbnailDocument->numPages());
+                for (int pageNumber = 0;
+                     pageNumber < thumbnailDocument->numPages(); ++pageNumber) {
+                    std::unique_ptr<Poppler::Page> page(
+                        thumbnailDocument->page(pageNumber));
+                    thumbnailPageSizes.push_back(
+                        page ? page->pageSizeF().toSize() : QSize());
+                }
+            } else if (!loadedDocument) {
+                LOG_WARNING("MainWindow: Failed to open thumbnail document: {}",
+                            filePath.toStdString());
+            } else {
+                LOG_WARNING(
+                    "MainWindow: Thumbnail document is locked, skipping "
+                    "thumbnail setup: {}",
+                    filePath.toStdString());
+            }
         }
     }
+
+    // Keep the thumbnail document independent from the viewer document. The
+    // thumbnail model and generator may access Poppler on different threads.
+    sideBar->setDocument(std::move(thumbnailDocument), thumbnailPageSizes);
+    renderModel->setDocument(std::move(viewerDocument));
 }
 
 void MainWindow::onThumbnailPageClicked(int pageNumber) {
@@ -606,12 +646,18 @@ void MainWindow::routeAction(ActionMap action) {
             toolBar->setSidebarChecked(false);
             break;
 
-        // --- View mode → ViewWidget ---
+        // --- View mode → ViewWidget (index matches PDFViewMode enum) ---
         case ActionMap::setSinglePageMode:
             viewWidget->setCurrentViewMode(0);
             break;
         case ActionMap::setContinuousScrollMode:
             viewWidget->setCurrentViewMode(1);
+            break;
+        case ActionMap::setDoublePageMode:
+            viewWidget->setCurrentViewMode(2);
+            break;
+        case ActionMap::setGridViewMode:
+            viewWidget->setCurrentViewMode(3);
             break;
 
         // --- Theme → StyleManager ---
@@ -702,6 +748,7 @@ void MainWindow::updateShortcutActionStates() {
         shortcutManager,
         {ActionMap::save, ActionMap::saveAs, ActionMap::showDocumentMetadata,
          ActionMap::setSinglePageMode, ActionMap::setContinuousScrollMode,
+         ActionMap::setDoublePageMode, ActionMap::setGridViewMode,
          ActionMap::zoomIn, ActionMap::zoomOut, ActionMap::fitToWidth,
          ActionMap::fitToPage, ActionMap::fitToHeight, ActionMap::rotateLeft,
          ActionMap::rotateRight, ActionMap::showSearch, ActionMap::findNext,
@@ -744,13 +791,16 @@ void MainWindow::updatePageShortcutActions(int pageNumber, int totalPages) {
 }
 
 void MainWindow::updateViewModeShortcutActions(PDFViewMode mode) {
-    const bool continuous = mode == PDFViewMode::ContinuousScroll;
     shortcutManager->setActionChecked(ActionMap::setSinglePageMode,
-                                      !continuous);
+                                      mode == PDFViewMode::SinglePage);
     shortcutManager->setActionChecked(ActionMap::setContinuousScrollMode,
-                                      continuous);
+                                      mode == PDFViewMode::ContinuousScroll);
+    shortcutManager->setActionChecked(ActionMap::setDoublePageMode,
+                                      mode == PDFViewMode::DoublePage);
+    shortcutManager->setActionChecked(ActionMap::setGridViewMode,
+                                      mode == PDFViewMode::GridView);
     if (toolBar) {
-        toolBar->setViewModeIndex(continuous ? 1 : 0);
+        toolBar->setViewModeIndex(static_cast<int>(mode));
     }
 }
 

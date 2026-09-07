@@ -50,6 +50,26 @@ int normalizeRotation(int rotation) {
 int quantizeLayoutValue(qreal value) { return qRound(value * 1000.0); }
 
 int quantizeZoom(double zoom) { return qRound(zoom * 10000.0); }
+
+// All modes except SinglePage render on the continuous canvas (viewStack
+// index 1); they differ only in PDFContinuousLayoutOptions.
+bool isContinuousMode(PDFViewMode mode) {
+    return mode != PDFViewMode::SinglePage;
+}
+
+QString viewModeDisplayName(PDFViewMode mode) {
+    switch (mode) {
+        case PDFViewMode::SinglePage:
+            return QStringLiteral("单页");
+        case PDFViewMode::ContinuousScroll:
+            return QStringLiteral("连续滚动");
+        case PDFViewMode::DoublePage:
+            return QStringLiteral("双页对开");
+        case PDFViewMode::GridView:
+            return QStringLiteral("多页网格");
+    }
+    return QStringLiteral("单页");
+}
 }  // namespace
 
 struct PDFViewer::Private {
@@ -65,6 +85,11 @@ struct PDFViewer::Private {
         int marginRightKey = 0;
         int marginBottomKey = 0;
         int horizontalAlignment = 0;
+        int layoutType = 0;
+        int firstPageAlone = 0;
+        int verticalAlignment = 0;
+        int gridColumns = 0;
+        int columnSpacingKey = 0;
 
         bool operator==(const ContinuousLayoutFingerprint& other) const {
             return documentId == other.documentId &&
@@ -76,7 +101,12 @@ struct PDFViewer::Private {
                    marginTopKey == other.marginTopKey &&
                    marginRightKey == other.marginRightKey &&
                    marginBottomKey == other.marginBottomKey &&
-                   horizontalAlignment == other.horizontalAlignment;
+                   horizontalAlignment == other.horizontalAlignment &&
+                   layoutType == other.layoutType &&
+                   firstPageAlone == other.firstPageAlone &&
+                   verticalAlignment == other.verticalAlignment &&
+                   gridColumns == other.gridColumns &&
+                   columnSpacingKey == other.columnSpacingKey;
         }
     };
 
@@ -152,6 +182,28 @@ struct PDFViewer::Private {
                                                 STYLE.margin(), STYLE.margin());
             options.pageSpacing = STYLE.spacing() * 2;
         }
+        options.columnSpacing = options.pageSpacing;
+        switch (currentViewMode) {
+            case PDFViewMode::DoublePage:
+                options.layoutType = PDFLayoutType::Spread;
+                // Double-page mode shows consecutive pages in every row;
+                // the first page is not treated as a standalone cover.
+                options.firstPageAlone = false;
+                options.verticalAlignment = PDFVerticalAlignment::AlignCenter;
+                break;
+            case PDFViewMode::GridView:
+                options.layoutType = PDFLayoutType::Grid;
+                // Multi-page mode is a continuous two-column grid. Two
+                // consecutive rows form the visible 2x2 arrangement.
+                options.gridColumns = 2;
+                options.verticalAlignment = PDFVerticalAlignment::AlignTop;
+                break;
+            case PDFViewMode::SinglePage:
+            case PDFViewMode::ContinuousScroll:
+            default:
+                options.layoutType = PDFLayoutType::Single;
+                break;
+        }
         return options;
     }
 
@@ -173,6 +225,12 @@ struct PDFViewer::Private {
         fingerprint.marginBottomKey =
             quantizeLayoutValue(options.documentMargins.bottom());
         fingerprint.horizontalAlignment = int(options.horizontalAlignment);
+        fingerprint.layoutType = int(options.layoutType);
+        fingerprint.firstPageAlone = options.firstPageAlone ? 1 : 0;
+        fingerprint.verticalAlignment = int(options.verticalAlignment);
+        fingerprint.gridColumns = options.gridColumns;
+        fingerprint.columnSpacingKey =
+            quantizeLayoutValue(options.columnSpacing);
         return fingerprint;
     }
 };
@@ -273,6 +331,8 @@ void PDFViewer::setupViewModes() {
     // 创建连续滚动视图
     d->continuousScrollArea = new QAbstractScrollArea(this);
     d->continuousScrollArea->setObjectName("continuousScrollArea");
+    d->continuousScrollArea->setHorizontalScrollBarPolicy(
+        Qt::ScrollBarAsNeeded);
     d->continuousCanvas =
         new PDFContinuousCanvas(d->continuousScrollArea->viewport());
     d->continuousCanvas->setImageCache(&d->continuousImageCache);
@@ -346,10 +406,22 @@ void PDFViewer::setupConnections() {
                 }
                 d->scrollTimer->start();
             });
+    connect(d->continuousScrollArea->horizontalScrollBar(),
+            &QScrollBar::valueChanged, this, [this](int value) {
+                if (d->continuousCanvas) {
+                    d->continuousCanvas->setContentOffsetX(value);
+                }
+            });
 
     connect(d->continuousCanvas,
             &PDFContinuousCanvas::currentPageCandidateChanged, this,
             [this](int pageIndex) {
+                // Ignore transient candidates while a continuous view is
+                // being rebuilt. The saved page is restored after the
+                // viewport and blueprint become ready.
+                if (!d->isWidgetReady) {
+                    return;
+                }
                 if (pageIndex >= 0 && pageIndex != d->currentPageNumber) {
                     d->currentPageNumber = pageIndex;
                     emit pageChanged(pageIndex);
@@ -530,7 +602,7 @@ void PDFViewer::setDocument(std::shared_ptr<Poppler::Document> doc) {
             updatePageDisplay();
 
             // 如果是连续模式，创建所有页面
-            if (d->currentViewMode == PDFViewMode::ContinuousScroll) {
+            if (isContinuousMode(d->currentViewMode)) {
                 d->continuousLayoutFingerprintValid = false;
                 createContinuousPages("document");
             }
@@ -551,7 +623,10 @@ void PDFViewer::setDocument(std::shared_ptr<Poppler::Document> doc) {
             if (d->annotationModel) {
                 d->annotationModel->setDocument(nullptr);
             }
+            d->continuousScrollArea->horizontalScrollBar()->setRange(0, 0);
             d->continuousScrollArea->verticalScrollBar()->setRange(0, 0);
+            d->continuousCanvas->setContentOffsetX(0.0);
+            d->continuousCanvas->setContentOffsetY(0.0);
 
             setMessage("文档已关闭");
         }
@@ -723,7 +798,7 @@ void PDFViewer::updatePageDisplay() {
                                          d->zoomController->currentZoom(),
                                          d->currentRotation);
         }
-    } else if (d->currentViewMode == PDFViewMode::ContinuousScroll) {
+    } else if (isContinuousMode(d->currentViewMode)) {
         if (!d->isWidgetReady) {
             return;
         }
@@ -734,7 +809,7 @@ void PDFViewer::updatePageDisplay() {
 }
 
 void PDFViewer::updateContinuousView(const char* reason) {
-    if (!d->document || d->currentViewMode != PDFViewMode::ContinuousScroll) {
+    if (!d->document || !isContinuousMode(d->currentViewMode)) {
         return;
     }
 
@@ -771,7 +846,7 @@ void PDFViewer::setViewMode(PDFViewMode mode) {
     d->currentViewMode = mode;
 
     try {
-        if (mode == PDFViewMode::ContinuousScroll) {
+        if (isContinuousMode(mode)) {
             d->continuousProfilingActive = true;
             d->continuousSwitchStart = std::chrono::steady_clock::now();
             d->profiledTargetPage = savedPageNumber;
@@ -799,8 +874,7 @@ void PDFViewer::setViewMode(PDFViewMode mode) {
             switchToContinuousMode();
 
             QTimer::singleShot(0, this, [this, savedPageNumber]() {
-                if (d->currentViewMode != PDFViewMode::ContinuousScroll ||
-                    !d->document) {
+                if (!isContinuousMode(d->currentViewMode) || !d->document) {
                     return;
                 }
 
@@ -843,9 +917,7 @@ void PDFViewer::setViewMode(PDFViewMode mode) {
         }
 
         emit viewModeChanged(mode);
-        setMessage(
-            QString("切换到%1模式")
-                .arg(mode == PDFViewMode::SinglePage ? "单页" : "连续滚动"));
+        setMessage(QString("切换到%1模式").arg(viewModeDisplayName(mode)));
 
     } catch (const std::exception& e) {
         // 恢复到原来的模式
@@ -933,7 +1005,7 @@ void PDFViewer::rebuildContinuousCanvasBlueprint(const char* reason) {
 }
 
 void PDFViewer::handleContinuousResize() {
-    if (!d->document || d->currentViewMode != PDFViewMode::ContinuousScroll ||
+    if (!d->document || !isContinuousMode(d->currentViewMode) ||
         !d->continuousCanvas) {
         return;
     }
@@ -952,20 +1024,31 @@ void PDFViewer::updateContinuousCanvasGeometry() {
     }
 
     const auto blueprint = d->continuousCanvas->blueprint();
+    const qreal documentWidth =
+        blueprint ? blueprint->documentSize().width() : 0.0;
     const qreal documentHeight = blueprint ? blueprint->documentHeight() : 0.0;
+    const int viewportWidth = d->continuousScrollArea->viewport()->width();
     const int viewportHeight = d->continuousScrollArea->viewport()->height();
+    const int maxHorizontalOffset =
+        qMax(0, qCeil(documentWidth) - viewportWidth);
     const int maxOffset = qMax(0, qCeil(documentHeight) - viewportHeight);
+    QScrollBar* horizontalBar = d->continuousScrollArea->horizontalScrollBar();
+    horizontalBar->setRange(0, maxHorizontalOffset);
+    horizontalBar->setPageStep(viewportWidth);
+    horizontalBar->setSingleStep(qMax(16, viewportWidth / 12));
     QScrollBar* verticalBar = d->continuousScrollArea->verticalScrollBar();
     verticalBar->setRange(0, maxOffset);
     verticalBar->setPageStep(viewportHeight);
     verticalBar->setSingleStep(qMax(16, viewportHeight / 12));
-    d->continuousScrollArea->horizontalScrollBar()->setRange(0, 0);
+    if (d->continuousCanvas) {
+        d->continuousCanvas->setContentOffsetX(horizontalBar->value());
+    }
     d->continuousCanvas->setContentOffsetY(verticalBar->value());
     d->continuousCanvas->update();
 }
 
 void PDFViewer::updateVisiblePages() {
-    if (!d->document || d->currentViewMode != PDFViewMode::ContinuousScroll ||
+    if (!d->document || !isContinuousMode(d->currentViewMode) ||
         !d->isWidgetReady || !d->continuousCanvas) {
         return;
     }
@@ -987,7 +1070,7 @@ void PDFViewer::renderVisiblePages() {
 }
 
 void PDFViewer::onScrollChanged() {
-    if (d->currentViewMode == PDFViewMode::ContinuousScroll) {
+    if (isContinuousMode(d->currentViewMode)) {
         updateVisiblePages();
     }
 }
@@ -995,7 +1078,7 @@ void PDFViewer::onScrollChanged() {
 void PDFViewer::finalizeContinuousModeInitialization(int pageNumber,
                                                      int attemptsRemaining) {
     Q_UNUSED(attemptsRemaining)
-    if (d->currentViewMode != PDFViewMode::ContinuousScroll || !d->document) {
+    if (!isContinuousMode(d->currentViewMode) || !d->document) {
         return;
     }
 
@@ -1004,7 +1087,7 @@ void PDFViewer::finalizeContinuousModeInitialization(int pageNumber,
 }
 
 void PDFViewer::scrollToPageInContinuousView(int pageNumber) {
-    if (!d->document || d->currentViewMode != PDFViewMode::ContinuousScroll ||
+    if (!d->document || !isContinuousMode(d->currentViewMode) ||
         !d->continuousCanvas || pageNumber < 0 ||
         pageNumber >= d->document->numPages()) {
         return;
@@ -1018,6 +1101,12 @@ void PDFViewer::scrollToPageInContinuousView(int pageNumber) {
     const qreal targetOffset = blueprint->scrollOffsetForPage(
         pageNumber, d->continuousScrollArea->viewport()->height(),
         PageScrollAlignment::Center);
+    const QRectF pageRect = blueprint->pageContentRect(pageNumber);
+    const qreal targetHorizontalOffset =
+        pageRect.center().x() -
+        d->continuousScrollArea->viewport()->width() / 2.0;
+    d->continuousScrollArea->horizontalScrollBar()->setValue(
+        qRound(targetHorizontalOffset));
     d->continuousScrollArea->verticalScrollBar()->setValue(
         qRound(targetOffset));
     updateVisiblePages();
@@ -1112,7 +1201,7 @@ bool PDFViewer::eventFilter(QObject* object, QEvent* event) {
     if ((object == d->continuousScrollArea ||
          object == d->continuousScrollArea->viewport()) &&
         event->type() == QEvent::Resize &&
-        d->currentViewMode == PDFViewMode::ContinuousScroll && d->document) {
+        isContinuousMode(d->currentViewMode) && d->document) {
         QResizeEvent* resizeEvent = static_cast<QResizeEvent*>(event);
         const char* resizeObject =
             object == d->continuousScrollArea ? "scrollArea" : "viewport";
@@ -1230,7 +1319,7 @@ void PDFViewer::setRotation(int degrees) {
 }
 
 void PDFViewer::updateContinuousViewRotation() {
-    if (!d->document || d->currentViewMode != PDFViewMode::ContinuousScroll) {
+    if (!d->document || !isContinuousMode(d->currentViewMode)) {
         return;
     }
     updateContinuousView("rotation");
@@ -1316,8 +1405,7 @@ void PDFViewer::clearSearchHighlights() {
 
     if (d->currentViewMode == PDFViewMode::SinglePage && d->singlePageWidget) {
         d->singlePageWidget->clearSearchHighlights();
-    } else if (d->currentViewMode == PDFViewMode::ContinuousScroll &&
-               d->continuousCanvas) {
+    } else if (isContinuousMode(d->currentViewMode) && d->continuousCanvas) {
         d->continuousCanvas->clearSearchHighlights();
     }
 }
@@ -1336,15 +1424,14 @@ void PDFViewer::updateSearchHighlightsForCurrentPage() {
             d->searchController->resultsForPage(d->currentPageNumber);
         d->singlePageWidget->setSearchResults(pageResults);
 
-    } else if (d->currentViewMode == PDFViewMode::ContinuousScroll) {
+    } else if (isContinuousMode(d->currentViewMode)) {
         updateAllPagesSearchHighlights();
     }
 }
 
 void PDFViewer::updateAllPagesSearchHighlights() {
     if (d->searchController->isEmpty() ||
-        d->currentViewMode != PDFViewMode::ContinuousScroll ||
-        !d->continuousCanvas) {
+        !isContinuousMode(d->currentViewMode) || !d->continuousCanvas) {
         return;
     }
 

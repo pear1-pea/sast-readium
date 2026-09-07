@@ -238,9 +238,10 @@ void SideBar::setOutlineModel(PDFOutlineModel* model) {
     }
 }
 
-void SideBar::setDocument(std::shared_ptr<Poppler::Document> document) {
+void SideBar::setDocument(std::shared_ptr<Poppler::Document> document,
+                          const QVector<QSize>& pageSizes) {
     if (thumbnailModel) {
-        thumbnailModel->setDocument(document);
+        thumbnailModel->setDocument(std::move(document), pageSizes);
     }
 }
 

@@ -27,9 +27,9 @@ public:
     std::optional<PDFPageHit> hitTest(const QPointF& documentPoint) const;
 
     QPointF viewportToDocument(const QPointF& viewportPoint,
-                               qreal contentOffsetY) const;
+                               const QPointF& contentOffset) const;
     QPointF documentToViewport(const QPointF& documentPoint,
-                               qreal contentOffsetY) const;
+                               const QPointF& contentOffset) const;
 
     QPointF documentToPage(int pageIndex, const QPointF& documentPoint) const;
     QPointF pageToDocument(int pageIndex, const QPointF& pagePoint) const;
@@ -50,6 +50,11 @@ private:
     static int normalizeRotation(int rotation);
     static QSizeF rotatedSize(const QSizeF& size, int rotation);
     int nearestPageByY(qreal documentY) const;
+
+    // Group page indices into rows according to the active layout type.
+    // Each inner vector holds the document-order page indices on one row.
+    QVector<QVector<int>> buildRows(const QVector<QSizeF>& scaledSizes,
+                                    qreal availableWidth) const;
 
     QVector<PDFPageGeometry> m_pages;
     PDFContinuousLayoutOptions m_options;

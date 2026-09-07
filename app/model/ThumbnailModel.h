@@ -15,6 +15,7 @@
 #include <QSize>
 #include <QTimer>
 #include <QVariant>
+#include <QVector>
 #include <memory>
 
 // 前向声明
@@ -58,9 +59,9 @@ public:
     Qt::ItemFlags flags(const QModelIndex& index) const override;
     QHash<int, QByteArray> roleNames() const override;
 
-    // 文档管理
-    void setDocument(std::shared_ptr<Poppler::Document> document);
-    std::shared_ptr<Poppler::Document> document() const { return m_document; }
+    // Document metadata management
+    void setDocument(std::shared_ptr<Poppler::Document> document,
+                     const QVector<QSize>& pageSizes);
 
     // 缩略图设置
     void setThumbnailSize(const QSize& size);
@@ -157,7 +158,8 @@ private:
     bool isInViewport(int pageNumber) const;
 
     // 数据成员
-    std::shared_ptr<Poppler::Document> m_document;
+    int m_pageCount = 0;
+    QVector<QSize> m_pageSizes;
     std::unique_ptr<ThumbnailGenerator> m_generator;
 
     mutable QHash<int, ThumbnailItem> m_thumbnails;

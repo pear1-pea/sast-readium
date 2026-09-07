@@ -21,9 +21,15 @@ void PDFContinuousLayout::rebuild(const QVector<QSizeF>& originalPageSizes,
     m_options.rotation = normalizeRotation(options.rotation);
     m_pages.clear();
 
+    const int pageCount = originalPageSizes.size();
+    if (pageCount == 0) {
+        m_documentSize = QSizeF();
+        return;
+    }
+
     qreal maxPageWidth = 0.0;
     QVector<QSizeF> scaledSizes;
-    scaledSizes.reserve(originalPageSizes.size());
+    scaledSizes.reserve(pageCount);
     for (const QSizeF& originalSize : originalPageSizes) {
         const QSizeF rotated = rotatedSize(originalSize, m_options.rotation);
         const QSizeF scaled(rotated.width() * m_options.zoom,
@@ -35,36 +41,143 @@ void PDFContinuousLayout::rebuild(const QVector<QSizeF>& originalPageSizes,
     const qreal availableWidth = std::max(
         qreal(0.0), m_options.viewportWidth - m_options.documentMargins.left() -
                         m_options.documentMargins.right());
-    const qreal layoutWidth = std::max(maxPageWidth, availableWidth);
+
+    // Group pages into rows (single = one page per row).
+    const QVector<QVector<int>> rows = buildRows(scaledSizes, availableWidth);
+
+    // Layout width must accommodate the widest row's total content.
+    qreal maxRowWidth = maxPageWidth;
+    for (const QVector<int>& row : rows) {
+        qreal rowWidth = 0.0;
+        for (int idx : row) {
+            rowWidth += scaledSizes.at(idx).width();
+        }
+        if (row.size() > 1) {
+            rowWidth += m_options.columnSpacing * (row.size() - 1);
+        }
+        maxRowWidth = std::max(maxRowWidth, rowWidth);
+    }
+    const qreal layoutWidth = std::max(maxRowWidth, availableWidth);
     const qreal documentWidth = m_options.documentMargins.left() + layoutWidth +
                                 m_options.documentMargins.right();
 
+    m_pages.resize(pageCount);
+
     qreal y = m_options.documentMargins.top();
-    m_pages.reserve(originalPageSizes.size());
-    for (int i = 0; i < originalPageSizes.size(); ++i) {
-        const QSizeF scaled = scaledSizes.at(i);
-        qreal x = m_options.documentMargins.left();
-        if (m_options.horizontalAlignment.testFlag(Qt::AlignHCenter)) {
-            x += (layoutWidth - scaled.width()) / 2.0;
-        } else if (m_options.horizontalAlignment.testFlag(Qt::AlignRight)) {
-            x += layoutWidth - scaled.width();
+    for (int r = 0; r < rows.size(); ++r) {
+        const QVector<int>& row = rows.at(r);
+
+        // Row width and row height (tallest page in the row).
+        qreal rowWidth = 0.0;
+        qreal rowHeight = 0.0;
+        for (int idx : row) {
+            const QSizeF& scaled = scaledSizes.at(idx);
+            rowWidth += scaled.width();
+            rowHeight = std::max(rowHeight, scaled.height());
+        }
+        if (row.size() > 1) {
+            rowWidth += m_options.columnSpacing * (row.size() - 1);
         }
 
-        PDFPageGeometry geometry;
-        geometry.pageIndex = i;
-        geometry.originalSize = originalPageSizes.at(i);
-        geometry.pageRect = QRectF(QPointF(x, y), scaled);
-        geometry.contentRect = geometry.pageRect;
-        m_pages.push_back(geometry);
+        // Horizontal placement of the whole row inside layoutWidth.
+        qreal x = m_options.documentMargins.left();
+        if (m_options.horizontalAlignment.testFlag(Qt::AlignHCenter)) {
+            x += (layoutWidth - rowWidth) / 2.0;
+        } else if (m_options.horizontalAlignment.testFlag(Qt::AlignRight)) {
+            x += layoutWidth - rowWidth;
+        }
 
-        y += scaled.height();
-        if (i != originalPageSizes.size() - 1) {
+        for (int idx : row) {
+            const QSizeF& scaled = scaledSizes.at(idx);
+
+            // Vertical alignment within the row band.
+            qreal pageY = y;
+            const qreal slack = rowHeight - scaled.height();
+            if (m_options.verticalAlignment ==
+                PDFVerticalAlignment::AlignCenter) {
+                pageY += slack / 2.0;
+            } else if (m_options.verticalAlignment ==
+                       PDFVerticalAlignment::AlignBottom) {
+                pageY += slack;
+            }
+
+            PDFPageGeometry geometry;
+            geometry.pageIndex = idx;
+            geometry.originalSize = originalPageSizes.at(idx);
+            geometry.pageRect = QRectF(QPointF(x, pageY), scaled);
+            geometry.contentRect = geometry.pageRect;
+            m_pages[idx] = geometry;
+
+            x += scaled.width() + m_options.columnSpacing;
+        }
+
+        y += rowHeight;
+        if (r != rows.size() - 1) {
             y += m_options.pageSpacing;
         }
     }
 
     y += m_options.documentMargins.bottom();
     m_documentSize = QSizeF(documentWidth, y);
+}
+
+QVector<QVector<int>> PDFContinuousLayout::buildRows(
+    const QVector<QSizeF>& scaledSizes, qreal availableWidth) const {
+    const int pageCount = scaledSizes.size();
+    QVector<QVector<int>> rows;
+
+    switch (m_options.layoutType) {
+        case PDFLayoutType::Grid: {
+            const int columns = std::max(1, m_options.gridColumns);
+            for (int i = 0; i < pageCount; i += columns) {
+                QVector<int> row;
+                for (int c = 0; c < columns && i + c < pageCount; ++c) {
+                    row.push_back(i + c);
+                }
+                rows.push_back(row);
+            }
+            break;
+        }
+        case PDFLayoutType::Spread: {
+            // A page wider than half the available width spans its own row
+            // (handles landscape pages mixed into a portrait document).
+            const qreal halfWidth =
+                availableWidth > 0.0
+                    ? (availableWidth - m_options.columnSpacing) / 2.0
+                    : 0.0;
+            int i = 0;
+            while (i < pageCount) {
+                if (i == 0 && m_options.firstPageAlone) {
+                    rows.push_back({0});
+                    i = 1;
+                    continue;
+                }
+                const bool wide =
+                    halfWidth > 0.0 && scaledSizes.at(i).width() > halfWidth;
+                if (wide) {
+                    rows.push_back({i});
+                    i += 1;
+                } else if (i + 1 < pageCount &&
+                           !(halfWidth > 0.0 &&
+                             scaledSizes.at(i + 1).width() > halfWidth)) {
+                    rows.push_back({i, i + 1});
+                    i += 2;
+                } else {
+                    rows.push_back({i});
+                    i += 1;
+                }
+            }
+            break;
+        }
+        case PDFLayoutType::Single:
+        default:
+            for (int i = 0; i < pageCount; ++i) {
+                rows.push_back({i});
+            }
+            break;
+    }
+
+    return rows;
 }
 
 const PDFContinuousLayoutOptions& PDFContinuousLayout::layoutOptions() const {
@@ -95,19 +208,32 @@ QRectF PDFContinuousLayout::pageContentRect(int pageIndex) const {
 }
 
 int PDFContinuousLayout::pageAt(const QPointF& documentPoint) const {
-    const auto it =
-        std::upper_bound(m_pages.begin(), m_pages.end(), documentPoint.y(),
-                         [](qreal y, const PDFPageGeometry& geometry) {
-                             return y < geometry.contentRect.top();
-                         });
+    // Single-column layouts keep pages sorted by top, so binary search works.
+    if (m_options.layoutType == PDFLayoutType::Single) {
+        const auto it =
+            std::upper_bound(m_pages.begin(), m_pages.end(), documentPoint.y(),
+                             [](qreal y, const PDFPageGeometry& geometry) {
+                                 return y < geometry.contentRect.top();
+                             });
 
-    if (it == m_pages.begin()) {
-        return -1;
+        if (it == m_pages.begin()) {
+            return -1;
+        }
+
+        const PDFPageGeometry& candidate = *(it - 1);
+        return candidate.contentRect.contains(documentPoint)
+                   ? candidate.pageIndex
+                   : -1;
     }
 
-    const PDFPageGeometry& candidate = *(it - 1);
-    return candidate.contentRect.contains(documentPoint) ? candidate.pageIndex
-                                                         : -1;
+    // Multi-row layouts (spread/grid) can share row Y ranges and, with
+    // vertical alignment, break top-monotonicity — scan directly.
+    for (const PDFPageGeometry& geometry : m_pages) {
+        if (geometry.contentRect.contains(documentPoint)) {
+            return geometry.pageIndex;
+        }
+    }
+    return -1;
 }
 
 std::optional<PDFPageHit> PDFContinuousLayout::hitTest(
@@ -125,14 +251,14 @@ std::optional<PDFPageHit> PDFContinuousLayout::hitTest(
     return hit;
 }
 
-QPointF PDFContinuousLayout::viewportToDocument(const QPointF& viewportPoint,
-                                                qreal contentOffsetY) const {
-    return QPointF(viewportPoint.x(), viewportPoint.y() + contentOffsetY);
+QPointF PDFContinuousLayout::viewportToDocument(
+    const QPointF& viewportPoint, const QPointF& contentOffset) const {
+    return viewportPoint + contentOffset;
 }
 
-QPointF PDFContinuousLayout::documentToViewport(const QPointF& documentPoint,
-                                                qreal contentOffsetY) const {
-    return QPointF(documentPoint.x(), documentPoint.y() - contentOffsetY);
+QPointF PDFContinuousLayout::documentToViewport(
+    const QPointF& documentPoint, const QPointF& contentOffset) const {
+    return documentPoint - contentOffset;
 }
 
 QPointF PDFContinuousLayout::documentToPage(

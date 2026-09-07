@@ -34,6 +34,10 @@ PDFContinuousCanvas::PDFContinuousCanvas(QWidget* parent) : QWidget(parent) {
 void PDFContinuousCanvas::setBlueprint(
     std::shared_ptr<const PDFContinuousBlueprint> blueprint) {
     m_blueprint = std::move(blueprint);
+    if (!m_blueprint) {
+        m_contentOffsetX = 0.0;
+        m_contentOffsetY = 0.0;
+    }
     m_pageLinks.clear();
     if (!m_blueprint) {
         m_annotationsByPage.clear();
@@ -55,6 +59,19 @@ std::shared_ptr<const PDFContinuousBlueprint> PDFContinuousCanvas::blueprint()
     const {
     return m_blueprint;
 }
+
+void PDFContinuousCanvas::setContentOffsetX(qreal offsetX) {
+    if (qFuzzyCompare(m_contentOffsetX, offsetX)) {
+        return;
+    }
+
+    m_contentOffsetX = offsetX;
+    updateVisibleRangeSignals();
+    requestVisiblePageRenders(devicePixelRatioF());
+    update();
+}
+
+qreal PDFContinuousCanvas::contentOffsetX() const { return m_contentOffsetX; }
 
 void PDFContinuousCanvas::setContentOffsetY(qreal offsetY) {
     if (qFuzzyCompare(m_contentOffsetY, offsetY)) {
@@ -196,6 +213,7 @@ void PDFContinuousCanvas::requestVisiblePageRenders(qreal devicePixelRatio) {
             QSize(qCeil(targetSize.width() * devicePixelRatio),
                   qCeil(targetSize.height() * devicePixelRatio));
         request.generation = generation;
+        request.priority = qAbs(i - (range.first + range.second) / 2);
         if (!m_imageCache->contains(request.key)) {
             requests.push_back(request);
         }
@@ -234,7 +252,8 @@ QRectF PDFContinuousCanvas::viewportRectInDocument() const {
         return QRectF();
     }
 
-    return QRectF(QPointF(0.0, m_contentOffsetY), QSizeF(width(), height()));
+    return QRectF(QPointF(m_contentOffsetX, m_contentOffsetY),
+                  QSizeF(width(), height()));
 }
 
 QPair<int, int> PDFContinuousCanvas::visiblePageRange(
@@ -279,7 +298,8 @@ QPointF PDFContinuousCanvas::viewportToDocument(
     if (!m_blueprint) {
         return QPointF();
     }
-    return m_blueprint->viewportToDocument(viewportPoint, m_contentOffsetY);
+    return m_blueprint->viewportToDocument(
+        viewportPoint, QPointF(m_contentOffsetX, m_contentOffsetY));
 }
 
 QPointF PDFContinuousCanvas::documentToViewport(
@@ -287,7 +307,8 @@ QPointF PDFContinuousCanvas::documentToViewport(
     if (!m_blueprint) {
         return QPointF();
     }
-    return m_blueprint->documentToViewport(documentPoint, m_contentOffsetY);
+    return m_blueprint->documentToViewport(
+        documentPoint, QPointF(m_contentOffsetX, m_contentOffsetY));
 }
 
 std::optional<PDFPageHit> PDFContinuousCanvas::hitTestViewportPoint(
@@ -711,6 +732,9 @@ void PDFContinuousCanvas::updateVisibleRangeSignals() {
 PDFContinuousRenderKey PDFContinuousCanvas::renderKeyForPage(
     int pageIndex, qreal devicePixelRatio) const {
     PDFContinuousRenderKey key;
+    if (m_renderScheduler) {
+        key.documentToken = m_renderScheduler->documentToken();
+    }
     key.pageIndex = pageIndex;
     if (m_blueprint) {
         const PDFContinuousLayoutOptions& options =

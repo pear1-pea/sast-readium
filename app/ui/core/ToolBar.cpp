@@ -67,9 +67,11 @@ void ToolBar::setupViewActions() {
     viewModeCombo = STYLE.createComboBox(this);
     viewModeCombo->addItem("单页视图");
     viewModeCombo->addItem("连续滚动");
+    viewModeCombo->addItem("双页对开");
+    viewModeCombo->addItem("多页网格");
     viewModeCombo->setCurrentIndex(0);
     viewModeCombo->setToolTip("选择视图模式");
-    viewModeCombo->setFixedWidth(100);
+    viewModeCombo->setFixedWidth(110);
 
     QWidgetAction* viewAction = new QWidgetAction(this);
     viewAction->setDefaultWidget(viewModeCombo);
@@ -173,9 +175,20 @@ void ToolBar::setViewModeIndex(int mode) {
 
 void ToolBar::onViewModeChanged() {
     int mode = viewModeCombo->currentIndex();
-    if (mode == 0) {
-        emit actionTriggered(ActionMap::setSinglePageMode);
-    } else if (mode == 1) {
-        emit actionTriggered(ActionMap::setContinuousScrollMode);
+    switch (mode) {
+        case 0:
+            emit actionTriggered(ActionMap::setSinglePageMode);
+            break;
+        case 1:
+            emit actionTriggered(ActionMap::setContinuousScrollMode);
+            break;
+        case 2:
+            emit actionTriggered(ActionMap::setDoublePageMode);
+            break;
+        case 3:
+            emit actionTriggered(ActionMap::setGridViewMode);
+            break;
+        default:
+            break;
     }
 }

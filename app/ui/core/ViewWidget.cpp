@@ -161,6 +161,12 @@ void ViewWidget::executePDFAction(ActionMap action) {
         case ActionMap::setContinuousScrollMode:
             currentViewer->setViewMode(PDFViewMode::ContinuousScroll);
             break;
+        case ActionMap::setDoublePageMode:
+            currentViewer->setViewMode(PDFViewMode::DoublePage);
+            break;
+        case ActionMap::setGridViewMode:
+            currentViewer->setViewMode(PDFViewMode::GridView);
+            break;
         default:
             qWarning() << "Unhandled PDF action in ViewWidget:"
                        << static_cast<int>(action);

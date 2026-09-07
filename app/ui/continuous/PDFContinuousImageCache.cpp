@@ -5,14 +5,15 @@
 
 bool PDFContinuousRenderKey::operator==(
     const PDFContinuousRenderKey& other) const {
-    return pageIndex == other.pageIndex && qAbs(zoom - other.zoom) < 0.0001 &&
+    return documentToken == other.documentToken &&
+           pageIndex == other.pageIndex && qAbs(zoom - other.zoom) < 0.0001 &&
            rotation == other.rotation &&
            qAbs(devicePixelRatio - other.devicePixelRatio) < 0.0001;
 }
 
 size_t qHash(const PDFContinuousRenderKey& key, size_t seed) {
-    return qHashMulti(seed, key.pageIndex, static_cast<int>(key.zoom * 10000),
-                      key.rotation,
+    return qHashMulti(seed, key.documentToken, key.pageIndex,
+                      static_cast<int>(key.zoom * 10000), key.rotation,
                       static_cast<int>(key.devicePixelRatio * 10000));
 }
 

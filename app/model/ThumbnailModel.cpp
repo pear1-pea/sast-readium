@@ -69,16 +69,16 @@ void ThumbnailModel::initializeModel() {
 
 int ThumbnailModel::rowCount(const QModelIndex& parent) const {
     Q_UNUSED(parent)
-    return m_document ? m_document->numPages() : 0;
+    return m_pageCount;
 }
 
 QVariant ThumbnailModel::data(const QModelIndex& index, int role) const {
-    if (!index.isValid() || !m_document) {
+    if (!index.isValid()) {
         return QVariant();
     }
 
     int pageNumber = index.row();
-    if (pageNumber < 0 || pageNumber >= m_document->numPages()) {
+    if (pageNumber < 0 || pageNumber >= m_pageCount) {
         return QVariant();
     }
 
@@ -117,21 +117,13 @@ QVariant ThumbnailModel::data(const QModelIndex& index, int role) const {
                 return it->pageSize;
             }
 
-            // 如果没有缓存页面尺寸，尝试获取
-            if (m_document) {
-                std::unique_ptr<Poppler::Page> page(
-                    m_document->page(pageNumber));
-                if (page) {
-                    QSizeF pageSize = page->pageSizeF();
-                    QSize size = pageSize.toSize();
-
-                    // 缓存页面尺寸
-                    ThumbnailItem& item = const_cast<ThumbnailModel*>(this)
-                                              ->m_thumbnails[pageNumber];
-                    item.pageSize = size;
-
-                    return size;
-                }
+            if (pageNumber < m_pageSizes.size() &&
+                m_pageSizes.at(pageNumber).isValid()) {
+                const QSize size = m_pageSizes.at(pageNumber);
+                ThumbnailItem& item =
+                    const_cast<ThumbnailModel*>(this)->m_thumbnails[pageNumber];
+                item.pageSize = size;
+                return size;
             }
             return QVariant();
         }
@@ -159,14 +151,15 @@ QHash<int, QByteArray> ThumbnailModel::roleNames() const {
     return roles;
 }
 
-void ThumbnailModel::setDocument(std::shared_ptr<Poppler::Document> document) {
+void ThumbnailModel::setDocument(std::shared_ptr<Poppler::Document> document,
+                                 const QVector<QSize>& pageSizes) {
     beginResetModel();
-
-    m_document = document;
+    m_pageCount = pageSizes.size();
+    m_pageSizes = pageSizes;
     clearCache();
 
     if (m_generator) {
-        m_generator->setDocument(document);
+        m_generator->setDocument(std::move(document));
         m_generator->start();
     }
 
@@ -283,7 +276,7 @@ void ThumbnailModel::setPreloadRange(int range) {
 }
 
 void ThumbnailModel::requestThumbnail(int pageNumber) {
-    if (!m_document || pageNumber < 0 || pageNumber >= m_document->numPages()) {
+    if (pageNumber < 0 || pageNumber >= m_pageCount) {
         return;
     }
 
@@ -337,9 +330,11 @@ void ThumbnailModel::requestThumbnail(int pageNumber) {
 
     locker.unlock();
 
-    // 发送生成请求，使用优先级
+    // Send the generation request with the current viewport priority.
     if (m_generator) {
         int priority = calculatePriority(pageNumber);
+        LOG_DEBUG("ThumbnailModel: Dispatch page {} with priority {}",
+                  pageNumber, priority);
         m_generator->generateThumbnail(pageNumber, m_thumbnailSize,
                                        m_thumbnailQuality, priority);
     }
@@ -352,10 +347,10 @@ void ThumbnailModel::requestThumbnail(int pageNumber) {
 }
 
 void ThumbnailModel::requestThumbnailRange(int startPage, int endPage) {
-    if (!m_document)
+    if (m_pageCount <= 0)
         return;
 
-    int numPages = m_document->numPages();
+    int numPages = m_pageCount;
     startPage = qMax(0, startPage);
     endPage = qMin(numPages - 1, endPage);
 
@@ -386,7 +381,7 @@ QString ThumbnailModel::errorMessage(int pageNumber) const {
 }
 
 void ThumbnailModel::refreshThumbnail(int pageNumber) {
-    if (!m_document || pageNumber < 0 || pageNumber >= m_document->numPages()) {
+    if (pageNumber < 0 || pageNumber >= m_pageCount) {
         return;
     }
 
@@ -417,10 +412,10 @@ void ThumbnailModel::refreshAllThumbnails() {
 }
 
 void ThumbnailModel::preloadVisibleRange(int firstVisible, int lastVisible) {
-    if (!m_document)
+    if (m_pageCount <= 0)
         return;
 
-    int numPages = m_document->numPages();
+    int numPages = m_pageCount;
 
     // 扩展预加载范围
     int startPage = qMax(0, firstVisible - m_preloadRange);
@@ -590,7 +585,7 @@ void ThumbnailModel::updateMemoryUsage() {
 }
 
 bool ThumbnailModel::shouldPreload(int pageNumber) const {
-    if (!m_document || pageNumber < 0 || pageNumber >= m_document->numPages()) {
+    if (pageNumber < 0 || pageNumber >= m_pageCount) {
         return false;
     }
 
@@ -648,31 +643,38 @@ void ThumbnailModel::setViewportRange(int start, int end, int margin) {
 }
 
 void ThumbnailModel::cancelOutOfRangeRequests(int keepStart, int keepEnd) {
-    {
-        QMutexLocker locker(&m_thumbnailsMutex);
-        for (auto it = m_thumbnails.begin(); it != m_thumbnails.end(); ++it) {
-            int page = it.key();
-            if (it->isLoading && (page < keepStart || page > keepEnd)) {
-                it->isLoading = false;
-            }
-        }
-    }
+    Q_UNUSED(keepStart);
+    Q_UNUSED(keepEnd);
+
+    QVector<int> clearedPages;
     if (m_generator) {
-        m_generator->clearQueue();
+        clearedPages = m_generator->clearQueue();
+    }
+
+    // clearQueue() returns queued requests only; active jobs remain tracked by
+    // the generator. Every cleared queued request must be made requestable
+    // again, including pages that are still inside the current viewport.
+    QMutexLocker locker(&m_thumbnailsMutex);
+    for (int page : clearedPages) {
+        auto it = m_thumbnails.find(page);
+        if (it != m_thumbnails.end() && it->isLoading) {
+            it->isLoading = false;
+        }
     }
 }
 
 void ThumbnailModel::updateViewportPriorities() {
-    if (!m_document)
+    if (m_pageCount <= 0)
         return;
 
+    const QList<int> oldPriorityPages = m_pagePriorities.keys();
     int oldPriorityCount = m_pagePriorities.size();
     m_pagePriorities.clear();
 
     // 可见区域最高优先级
     int visibleCount = 0;
     for (int i = m_visibleStart; i <= m_visibleEnd; ++i) {
-        if (i >= 0 && i < m_document->numPages()) {
+        if (i >= 0 && i < m_pageCount) {
             m_pagePriorities[i] = 0;  // 最高优先级
             visibleCount++;
         }
@@ -680,8 +682,7 @@ void ThumbnailModel::updateViewportPriorities() {
 
     // 预加载区域次高优先级
     int preloadStart = qMax(0, m_visibleStart - m_viewportMargin);
-    int preloadEnd =
-        qMin(m_document->numPages() - 1, m_visibleEnd + m_viewportMargin);
+    int preloadEnd = qMin(m_pageCount - 1, m_visibleEnd + m_viewportMargin);
 
     int preloadCount = 0;
     for (int i = preloadStart; i < m_visibleStart; ++i) {
@@ -691,6 +692,17 @@ void ThumbnailModel::updateViewportPriorities() {
     for (int i = m_visibleEnd + 1; i <= preloadEnd; ++i) {
         m_pagePriorities[i] = 1;
         preloadCount++;
+    }
+
+    if (m_generator) {
+        // Reprioritize queued work so a new viewport takes effect immediately.
+        for (int page : oldPriorityPages) {
+            m_generator->setPriority(page, 5);
+        }
+        for (auto it = m_pagePriorities.cbegin(); it != m_pagePriorities.cend();
+             ++it) {
+            m_generator->setPriority(it.key(), it.value());
+        }
     }
 
     LOG_DEBUG(

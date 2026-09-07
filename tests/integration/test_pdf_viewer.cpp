@@ -230,17 +230,37 @@ void TestPDFViewer::testRotation() {
 void TestPDFViewer::testViewModeSwitch() {
     QSignalSpy modeSpy(m_viewer, &PDFViewer::viewModeChanged);
 
+    m_viewer->resize(800, 1000);
+    m_viewer->show();
+    QCoreApplication::processEvents();
+    m_viewer->goToPage(1);
+
     m_viewer->setViewMode(PDFViewMode::ContinuousScroll);
     QCOMPARE(m_viewer->getViewMode(), PDFViewMode::ContinuousScroll);
     QCOMPARE(modeSpy.count(), 1);
+    QCoreApplication::processEvents();
+    QCOMPARE(m_viewer->getCurrentPage(), 1);
+
+    m_viewer->setViewMode(PDFViewMode::DoublePage);
+    QCOMPARE(m_viewer->getViewMode(), PDFViewMode::DoublePage);
+    QCOMPARE(modeSpy.count(), 2);
+    QCoreApplication::processEvents();
+    QCOMPARE(m_viewer->getCurrentPage(), 1);
+
+    m_viewer->setViewMode(PDFViewMode::GridView);
+    QCOMPARE(m_viewer->getViewMode(), PDFViewMode::GridView);
+    QCOMPARE(modeSpy.count(), 3);
+    QCoreApplication::processEvents();
+    QCOMPARE(m_viewer->getCurrentPage(), 1);
 
     m_viewer->setViewMode(PDFViewMode::SinglePage);
     QCOMPARE(m_viewer->getViewMode(), PDFViewMode::SinglePage);
-    QCOMPARE(modeSpy.count(), 2);
+    QCOMPARE(modeSpy.count(), 4);
+    QCOMPARE(m_viewer->getCurrentPage(), 1);
 
     // Same mode → no signal
     m_viewer->setViewMode(PDFViewMode::SinglePage);
-    QCOMPARE(modeSpy.count(), 2);
+    QCOMPARE(modeSpy.count(), 4);
 }
 
 void TestPDFViewer::testContinuousModeRendersCanvas() {

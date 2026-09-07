@@ -170,6 +170,20 @@ void ShortcutManager::registerDefaults() {
                     {},
                     Scope::Global,
                     true});
+    registerAction({ActionMap::setDoublePageMode,
+                    tr("双页对开"),
+                    tr("切换到双页对开视图"),
+                    QKeySequence("Ctrl+3"),
+                    {},
+                    Scope::Global,
+                    true});
+    registerAction({ActionMap::setGridViewMode,
+                    tr("多页网格"),
+                    tr("切换到多页网格视图"),
+                    QKeySequence("Ctrl+4"),
+                    {},
+                    Scope::Global,
+                    true});
     registerAction({ActionMap::firstPage, tr("第一页"), tr("跳到第一页"),
                     QKeySequence("Ctrl+Home")});
     registerAction({ActionMap::previousPage, tr("上一页"), tr("上一页"),

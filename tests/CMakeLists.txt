@@ -146,6 +146,11 @@ if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/unit/test_logger.cpp)
         ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 endif()
 
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/unit/test_thumbnail_priority.cpp)
+    create_unit_test(test_thumbnail_priority
+        unit/test_thumbnail_priority.cpp)
+endif()
+
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/unit/test_recent_pdf_thumbnail_provider.cpp)
     add_executable(test_recent_pdf_thumbnail_provider
         unit/test_recent_pdf_thumbnail_provider.cpp)

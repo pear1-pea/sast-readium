@@ -8,6 +8,7 @@
 #include <cstdint>
 
 struct PDFContinuousRenderKey {
+    std::uint64_t documentToken = 0;
     int pageIndex = -1;
     double zoom = 1.0;
     int rotation = 0;
@@ -20,6 +21,7 @@ struct PDFContinuousRenderRequest {
     PDFContinuousRenderKey key;
     QSize targetPixelSize;
     std::uint64_t generation = 0;
+    int priority = 0;
 };
 
 struct PDFContinuousRenderResult {

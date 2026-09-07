@@ -27,9 +27,9 @@ public:
     std::optional<PDFPageHit> hitTest(const QPointF& documentPoint) const;
 
     QPointF viewportToDocument(const QPointF& viewportPoint,
-                               qreal contentOffsetY) const;
+                               const QPointF& contentOffset) const;
     QPointF documentToViewport(const QPointF& documentPoint,
-                               qreal contentOffsetY) const;
+                               const QPointF& contentOffset) const;
 
     QPointF documentToPage(int pageIndex, const QPointF& documentPoint) const;
     QPointF pageToDocument(int pageIndex, const QPointF& pagePoint) const;

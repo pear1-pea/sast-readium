@@ -27,6 +27,8 @@ public:
     void setBlueprint(std::shared_ptr<const PDFContinuousBlueprint> blueprint);
     std::shared_ptr<const PDFContinuousBlueprint> blueprint() const;
 
+    void setContentOffsetX(qreal offsetX);
+    qreal contentOffsetX() const;
     void setContentOffsetY(qreal offsetY);
     qreal contentOffsetY() const;
 
@@ -91,6 +93,7 @@ private:
 
     std::shared_ptr<const PDFContinuousBlueprint> m_blueprint;
     std::shared_ptr<Poppler::Document> m_document;
+    qreal m_contentOffsetX = 0.0;
     qreal m_contentOffsetY = 0.0;
     PDFContinuousImageCache* m_imageCache = nullptr;
     PDFContinuousRenderScheduler* m_renderScheduler = nullptr;
