@@ -3,6 +3,8 @@
 #include "PDFContinuousRenderScheduler.h"
 #include "managers/StyleManager.h"
 
+#include <QApplication>
+#include <QClipboard>
 #include <QMouseEvent>
 #include <QPaintEvent>
 #include <QPainter>
@@ -27,6 +29,7 @@ QColor canvasShadowColor() {
 
 PDFContinuousCanvas::PDFContinuousCanvas(QWidget* parent) : QWidget(parent) {
     setMouseTracking(true);
+    setFocusPolicy(Qt::StrongFocus);
     setAutoFillBackground(false);
     m_lastDevicePixelRatio = devicePixelRatioF();
 }
@@ -39,6 +42,7 @@ void PDFContinuousCanvas::setBlueprint(
         m_contentOffsetY = 0.0;
     }
     m_pageLinks.clear();
+    m_pageText.clear();
     if (!m_blueprint) {
         m_annotationsByPage.clear();
     }
@@ -90,6 +94,7 @@ void PDFContinuousCanvas::setDocument(
     std::shared_ptr<Poppler::Document> document) {
     m_document = std::move(document);
     m_pageLinks.clear();
+    m_pageText.clear();
     if (!m_document) {
         m_annotationsByPage.clear();
     }
@@ -245,6 +250,27 @@ void PDFContinuousCanvas::setAnnotations(
 void PDFContinuousCanvas::clearAnnotationOverlays() {
     m_annotationsByPage.clear();
     update();
+}
+
+bool PDFContinuousCanvas::hasTextSelection() const {
+    if (!m_selectionStart || !m_selectionEnd ||
+        m_selectionStart->pageIndex != m_selectionEnd->pageIndex) {
+        return false;
+    }
+    return !selectedText().isEmpty();
+}
+
+bool PDFContinuousCanvas::copySelectedText() {
+    const QString text = selectedText();
+    if (text.isEmpty()) {
+        return false;
+    }
+
+    if (QClipboard* clipboard = QApplication::clipboard()) {
+        clipboard->setText(text);
+        return true;
+    }
+    return false;
 }
 
 QRectF PDFContinuousCanvas::viewportRectInDocument() const {
@@ -476,6 +502,7 @@ void PDFContinuousCanvas::mouseMoveEvent(QMouseEvent* event) {
 
 void PDFContinuousCanvas::mousePressEvent(QMouseEvent* event) {
     if (event->button() == Qt::LeftButton) {
+        setFocus(Qt::MouseFocusReason);
         const Poppler::Link* link = linkAtViewportPoint(event->position());
         const auto hit = hitTestViewportPoint(event->position());
         if (link && hit) {
@@ -520,6 +547,124 @@ void PDFContinuousCanvas::loadPageLinks(int pageIndex) const {
         return;
     }
     m_pageLinks.emplace(pageIndex, page->links());
+}
+
+void PDFContinuousCanvas::loadPageText(int pageIndex) const {
+    if (m_pageText.contains(pageIndex) || !m_document || pageIndex < 0 ||
+        pageIndex >= m_document->numPages()) {
+        return;
+    }
+
+    std::unique_ptr<Poppler::Page> page(m_document->page(pageIndex));
+    if (!page) {
+        m_pageText.emplace(pageIndex,
+                           std::vector<std::unique_ptr<Poppler::TextBox>>{});
+        return;
+    }
+    m_pageText.emplace(pageIndex, page->textList());
+}
+
+QRectF PDFContinuousCanvas::selectionRectInOriginalCoordinates(
+    int pageIndex) const {
+    if (!m_selectionStart || !m_selectionEnd || !m_blueprint ||
+        m_selectionStart->pageIndex != pageIndex ||
+        m_selectionEnd->pageIndex != pageIndex) {
+        return QRectF();
+    }
+
+    const PDFPageGeometry* geometry = m_blueprint->pageGeometry(pageIndex);
+    if (!geometry || geometry->originalSize.isEmpty()) {
+        return QRectF();
+    }
+
+    const QRectF scaledSelectionRect =
+        QRectF(m_selectionStart->pagePoint, m_selectionEnd->pagePoint)
+            .normalized();
+    const qreal zoom = m_blueprint->layoutOptions().zoom;
+    if (qFuzzyIsNull(zoom)) {
+        return QRectF();
+    }
+    const QRectF selectedDisplayRect(scaledSelectionRect.left() / zoom,
+                                     scaledSelectionRect.top() / zoom,
+                                     scaledSelectionRect.width() / zoom,
+                                     scaledSelectionRect.height() / zoom);
+    const QSizeF originalSize = geometry->originalSize;
+    const int rotation =
+        ((m_blueprint->layoutOptions().rotation % 360) + 360) % 360;
+
+    auto toOriginal = [&](const QPointF& point) {
+        switch (rotation) {
+            case 90:
+                return QPointF(point.y(), originalSize.height() - point.x());
+            case 180:
+                return QPointF(originalSize.width() - point.x(),
+                               originalSize.height() - point.y());
+            case 270:
+                return QPointF(originalSize.width() - point.y(), point.x());
+            default:
+                return point;
+        }
+    };
+
+    const QVector<QPointF> corners{
+        toOriginal(selectedDisplayRect.topLeft()),
+        toOriginal(selectedDisplayRect.topRight()),
+        toOriginal(selectedDisplayRect.bottomLeft()),
+        toOriginal(selectedDisplayRect.bottomRight())};
+    QRectF result(corners.first(), QSizeF());
+    for (const QPointF& corner : corners) {
+        result = result.united(QRectF(corner, QSizeF()));
+    }
+    return result.normalized();
+}
+
+QString PDFContinuousCanvas::selectedText() const {
+    if (!m_selectionStart || !m_selectionEnd ||
+        m_selectionStart->pageIndex != m_selectionEnd->pageIndex) {
+        return QString();
+    }
+
+    const int pageIndex = m_selectionStart->pageIndex;
+    const QRectF selection = selectionRectInOriginalCoordinates(pageIndex);
+    if (selection.isEmpty()) {
+        return QString();
+    }
+
+    loadPageText(pageIndex);
+    const auto it = m_pageText.find(pageIndex);
+    if (it == m_pageText.end()) {
+        return QString();
+    }
+
+    QString result;
+    qreal previousTop = 0.0;
+    qreal previousHeight = 0.0;
+    bool hasPrevious = false;
+    for (const std::unique_ptr<Poppler::TextBox>& textBox : it->second) {
+        if (!textBox || !textBox->boundingBox().intersects(selection)) {
+            continue;
+        }
+
+        const QRectF box = textBox->boundingBox();
+        if (hasPrevious) {
+            const qreal lineThreshold = qMax(previousHeight, box.height());
+            if (qAbs(box.top() - previousTop) > lineThreshold * 0.8) {
+                result += QChar('\n');
+            } else if (result.endsWith(QChar('\n')) == false &&
+                       !result.endsWith(QChar(' '))) {
+                result += QChar(' ');
+            }
+        }
+        result += textBox->text();
+        if (textBox->hasSpaceAfter()) {
+            result += QChar(' ');
+        }
+        previousTop = box.top();
+        previousHeight = box.height();
+        hasPrevious = true;
+    }
+
+    return result.trimmed();
 }
 
 QPointF PDFContinuousCanvas::linkPointForHit(const PDFPageHit& hit) const {

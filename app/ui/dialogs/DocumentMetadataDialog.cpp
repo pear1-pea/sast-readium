@@ -131,23 +131,41 @@ void DocumentMetadataDialog::setupUI() {
     m_encryptedEdit->setReadOnly(true);
     m_securityLayout->addWidget(m_encryptedEdit, 0, 1);
 
+    // Locked state
+    m_securityLayout->addWidget(new QLabel(tr("需要密码: ")), 1, 0);
+    m_lockedEdit = new QLineEdit();
+    m_lockedEdit->setReadOnly(true);
+    m_securityLayout->addWidget(m_lockedEdit, 1, 1);
+
     // 可提取文本
-    m_securityLayout->addWidget(new QLabel(tr("可提取文本:")), 1, 0);
+    m_securityLayout->addWidget(new QLabel(tr("可复制/提取文本:")), 2, 0);
     m_canExtractTextEdit = new QLineEdit();
     m_canExtractTextEdit->setReadOnly(true);
-    m_securityLayout->addWidget(m_canExtractTextEdit, 1, 1);
+    m_securityLayout->addWidget(m_canExtractTextEdit, 2, 1);
 
     // 可打印
-    m_securityLayout->addWidget(new QLabel(tr("可打印:")), 2, 0);
+    m_securityLayout->addWidget(new QLabel(tr("可打印:")), 3, 0);
     m_canPrintEdit = new QLineEdit();
     m_canPrintEdit->setReadOnly(true);
-    m_securityLayout->addWidget(m_canPrintEdit, 2, 1);
+    m_securityLayout->addWidget(m_canPrintEdit, 3, 1);
+
+    // 可高质量打印
+    m_securityLayout->addWidget(new QLabel(tr("可高质量打印:")), 4, 0);
+    m_canPrintHighResEdit = new QLineEdit();
+    m_canPrintHighResEdit->setReadOnly(true);
+    m_securityLayout->addWidget(m_canPrintHighResEdit, 4, 1);
 
     // 可修改
-    m_securityLayout->addWidget(new QLabel(tr("可修改:")), 3, 0);
+    m_securityLayout->addWidget(new QLabel(tr("可修改:")), 5, 0);
     m_canModifyEdit = new QLineEdit();
     m_canModifyEdit->setReadOnly(true);
-    m_securityLayout->addWidget(m_canModifyEdit, 3, 1);
+    m_securityLayout->addWidget(m_canModifyEdit, 5, 1);
+
+    // 可添加批注
+    m_securityLayout->addWidget(new QLabel(tr("可添加批注:")), 6, 0);
+    m_canAddNotesEdit = new QLineEdit();
+    m_canAddNotesEdit->setReadOnly(true);
+    m_securityLayout->addWidget(m_canAddNotesEdit, 6, 1);
 
     m_contentLayout->addWidget(m_securityGroup);
 
@@ -221,9 +239,12 @@ void DocumentMetadataDialog::clearMetadata() {
     m_modificationDateEdit->clear();
 
     m_encryptedEdit->clear();
+    m_lockedEdit->clear();
     m_canExtractTextEdit->clear();
     m_canPrintEdit->clear();
+    m_canPrintHighResEdit->clear();
     m_canModifyEdit->clear();
+    m_canAddNotesEdit->clear();
 }
 
 void DocumentMetadataDialog::populateBasicInfo(const QString& filePath) {
@@ -273,11 +294,17 @@ void DocumentMetadataDialog::populateDocumentProperties() {
     QString producer = m_currentDocument->info("Producer");
     m_producerEdit->setText(producer.isEmpty() ? tr("未设置") : producer);
 
-    QString creationDate = m_currentDocument->info("CreationDate");
-    m_creationDateEdit->setText(formatDateTime(creationDate));
+    m_creationDateEdit->setText(
+        m_currentDocument->creationDate().isValid()
+            ? QLocale::system().toString(m_currentDocument->creationDate(),
+                                         QLocale::ShortFormat)
+            : tr("未设置"));
 
-    QString modificationDate = m_currentDocument->info("ModDate");
-    m_modificationDateEdit->setText(formatDateTime(modificationDate));
+    m_modificationDateEdit->setText(
+        m_currentDocument->modificationDate().isValid()
+            ? QLocale::system().toString(m_currentDocument->modificationDate(),
+                                         QLocale::ShortFormat)
+            : tr("未设置"));
 }
 
 void DocumentMetadataDialog::populateSecurityInfo() {
@@ -286,14 +313,19 @@ void DocumentMetadataDialog::populateSecurityInfo() {
     }
 
     // 直接使用Poppler::Document的方法获取安全信息
-    bool isEncrypted = m_currentDocument->isEncrypted();
+    const bool isEncrypted = m_currentDocument->isEncrypted();
     m_encryptedEdit->setText(isEncrypted ? tr("是") : tr("否"));
-
-    // 简化的权限检查 - 对于基本的元数据显示，这些就足够了
-    m_canExtractTextEdit->setText(
-        tr("是"));  // 如果能打开文档，通常可以提取文本
-    m_canPrintEdit->setText(tr("是"));   // 简化处理
-    m_canModifyEdit->setText(tr("否"));  // PDF查看器通常不允许修改
+    m_lockedEdit->setText(m_currentDocument->isLocked() ? tr("是") : tr("否"));
+    m_canExtractTextEdit->setText(m_currentDocument->okToCopy() ? tr("是")
+                                                                : tr("否"));
+    m_canPrintEdit->setText(m_currentDocument->okToPrint() ? tr("是")
+                                                           : tr("否"));
+    m_canPrintHighResEdit->setText(
+        m_currentDocument->okToPrintHighRes() ? tr("是") : tr("否"));
+    m_canModifyEdit->setText(m_currentDocument->okToChange() ? tr("是")
+                                                             : tr("否"));
+    m_canAddNotesEdit->setText(m_currentDocument->okToAddNotes() ? tr("是")
+                                                                 : tr("否"));
 }
 
 QString DocumentMetadataDialog::formatDateTime(const QString& dateTimeStr) {

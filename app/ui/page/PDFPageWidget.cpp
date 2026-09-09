@@ -1,5 +1,7 @@
 #include "PDFPageWidget.h"
 
+#include <QApplication>
+#include <QClipboard>
 #include <QPainter>
 #include <QPen>
 #include <QWheelEvent>
@@ -123,6 +125,9 @@ void PDFPageWidget::setPage(Poppler::Page* page, double scaleFactor,
     currentPage = page;
     currentScaleFactor = scaleFactor;
     currentRotation = rotation;
+    m_isSelectingText = false;
+    m_selectionStart = QPointF();
+    m_selectionEnd = QPointF();
     renderPage();
 }
 
@@ -279,6 +284,12 @@ void PDFPageWidget::paintEvent(QPaintEvent* event) {
     }
 
     QLabel::paintEvent(event);
+
+    if (m_isSelectingText || !selectionRectInPageCoordinates().isEmpty()) {
+        painter.setPen(Qt::NoPen);
+        painter.setBrush(QColor(64, 128, 255, 90));
+        painter.drawRect(QRectF(m_selectionStart, m_selectionEnd).normalized());
+    }
 }
 
 void PDFPageWidget::wheelEvent(QWheelEvent* event) {
@@ -299,15 +310,105 @@ void PDFPageWidget::wheelEvent(QWheelEvent* event) {
 }
 
 void PDFPageWidget::mousePressEvent(QMouseEvent* event) {
+    if (event->button() == Qt::LeftButton && currentPage) {
+        setFocus(Qt::MouseFocusReason);
+        m_isSelectingText = true;
+        m_selectionStart = event->position();
+        m_selectionEnd = m_selectionStart;
+        update();
+        event->accept();
+        return;
+    }
     QLabel::mousePressEvent(event);
 }
 
 void PDFPageWidget::mouseMoveEvent(QMouseEvent* event) {
+    if (m_isSelectingText) {
+        m_selectionEnd = event->position();
+        update();
+        event->accept();
+        return;
+    }
     QLabel::mouseMoveEvent(event);
 }
 
 void PDFPageWidget::mouseReleaseEvent(QMouseEvent* event) {
+    if (event->button() == Qt::LeftButton && m_isSelectingText) {
+        m_selectionEnd = event->position();
+        m_isSelectingText = false;
+        update();
+        event->accept();
+        return;
+    }
     QLabel::mouseReleaseEvent(event);
+}
+
+bool PDFPageWidget::copySelectedText() {
+    const QString text = selectedText();
+    if (text.isEmpty()) {
+        return false;
+    }
+    if (QClipboard* clipboard = QApplication::clipboard()) {
+        clipboard->setText(text);
+        return true;
+    }
+    return false;
+}
+
+QRectF PDFPageWidget::selectionRectInPageCoordinates() const {
+    if (!currentPage ||
+        (m_selectionStart == m_selectionEnd && !m_isSelectingText)) {
+        return QRectF();
+    }
+
+    const QRectF widgetRect =
+        QRectF(m_selectionStart, m_selectionEnd).normalized();
+    if (widgetRect.isEmpty() || qFuzzyIsNull(currentScaleFactor)) {
+        return QRectF();
+    }
+
+    return QRectF(widgetRect.left() / currentScaleFactor,
+                  widgetRect.top() / currentScaleFactor,
+                  widgetRect.width() / currentScaleFactor,
+                  widgetRect.height() / currentScaleFactor);
+}
+
+QString PDFPageWidget::selectedText() const {
+    const QRectF selection = selectionRectInPageCoordinates();
+    if (selection.isEmpty() || !currentPage) {
+        return QString();
+    }
+
+    const auto textBoxes = currentPage->textList(
+        static_cast<Poppler::Page::Rotation>(currentRotation / 90));
+    QString result;
+    qreal previousTop = 0.0;
+    qreal previousHeight = 0.0;
+    bool hasPrevious = false;
+    for (const std::unique_ptr<Poppler::TextBox>& textBox : textBoxes) {
+        if (!textBox || !textBox->boundingBox().intersects(selection)) {
+            continue;
+        }
+
+        const QRectF box = textBox->boundingBox();
+        if (hasPrevious) {
+            const qreal lineThreshold = qMax(previousHeight, box.height());
+            if (qAbs(box.top() - previousTop) > lineThreshold * 0.8) {
+                result += QChar('\n');
+            } else if (!result.endsWith(QChar('\n')) &&
+                       !result.endsWith(QChar(' '))) {
+                result += QChar(' ');
+            }
+        }
+        result += textBox->text();
+        if (textBox->hasSpaceAfter()) {
+            result += QChar(' ');
+        }
+        previousTop = box.top();
+        previousHeight = box.height();
+        hasPrevious = true;
+    }
+    return result.trimmed();
 }
 
 // Search highlighting implementation

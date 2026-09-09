@@ -432,6 +432,10 @@ void PDFViewer::setupConnections() {
     connect(d->continuousCanvas, &PDFContinuousCanvas::browseLinkClicked, this,
             [](const QString& url) { QDesktopServices::openUrl(QUrl(url)); });
 
+    auto* copySelection = new QShortcut(QKeySequence::Copy, this);
+    connect(copySelection, &QShortcut::activated, this,
+            &PDFViewer::copySelectedText);
+
     connect(
         d->annotationModel, &AnnotationModel::annotationsLoaded, this,
         [this](int) {
@@ -1366,6 +1370,15 @@ void PDFViewer::findPrevious() {
 void PDFViewer::clearSearch() {
     if (d->searchWidget) {
         d->searchWidget->clearSearch();
+    }
+}
+
+void PDFViewer::copySelectedText() {
+    const bool copied = d->currentViewMode == PDFViewMode::SinglePage
+                            ? d->singlePageWidget->copySelectedText()
+                            : d->continuousCanvas->copySelectedText();
+    if (copied) {
+        setMessage(QStringLiteral("已复制选中文本"));
     }
 }
 

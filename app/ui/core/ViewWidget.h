@@ -1,9 +1,11 @@
 #pragma once
 
+#include <QHash>
 #include <QStackedWidget>
 #include <QVBoxLayout>
 #include <QWidget>
 #include "../../controller/tool.hpp"
+#include "../../managers/ReadingProgressManager.h"
 #include "../../model/DocumentModel.h"
 #include "../../model/PDFOutlineModel.h"
 #include "../viewer/PDFViewer.h"
@@ -14,6 +16,7 @@ class ViewWidget : public QWidget {
 
 public:
     ViewWidget(DocumentModel* model, QWidget* parent = nullptr);
+    ~ViewWidget() override;
 
     // 设置目录模型（保留，因为目录模型是动态变化的）
     void setOutlineModel(PDFOutlineModel* model);
@@ -100,4 +103,9 @@ private:
     void removePDFViewer(int index);
     void showEmptyState();
     void hideEmptyState();
+
+    void saveReadingProgress(PDFViewer* viewer);
+
+    ReadingProgressManager m_readingProgress;
+    QHash<PDFViewer*, QString> m_viewerFilePaths;
 };

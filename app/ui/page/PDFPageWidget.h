@@ -43,6 +43,7 @@ public:
     void updateHighlightColors(const QColor& normalColor,
                                const QColor& currentColor);
     bool hasSearchResults() const { return !m_searchResults.isEmpty(); }
+    bool copySelectedText();
 
 signals:
     void scaleChanged(double scale);
@@ -70,6 +71,9 @@ private:
     int m_currentSearchResultIndex;
     QColor m_normalHighlightColor;
     QColor m_currentHighlightColor;
+    bool m_isSelectingText = false;
+    QPointF m_selectionStart;
+    QPointF m_selectionEnd;
 
     // Rendering optimization
     QTimer* m_renderTimer;
@@ -80,4 +84,6 @@ private:
     // Helper methods for highlighting
     void drawSearchHighlights(QPainter& painter);
     void updateSearchResultCoordinates();
+    QString selectedText() const;
+    QRectF selectionRectInPageCoordinates() const;
 };

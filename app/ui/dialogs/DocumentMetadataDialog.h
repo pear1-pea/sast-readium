@@ -1,6 +1,7 @@
 #pragma once
 
 #include <poppler/qt6/poppler-qt6.h>
+#include <QDateTime>
 #include <QDialog>
 #include <QFrame>
 #include <QGridLayout>
@@ -72,9 +73,12 @@ private:
     QGroupBox* m_securityGroup;
     QGridLayout* m_securityLayout;
     QLineEdit* m_encryptedEdit;
+    QLineEdit* m_lockedEdit;
     QLineEdit* m_canExtractTextEdit;
     QLineEdit* m_canPrintEdit;
+    QLineEdit* m_canPrintHighResEdit;
     QLineEdit* m_canModifyEdit;
+    QLineEdit* m_canAddNotesEdit;
 
     // 按钮
     QHBoxLayout* m_buttonLayout;

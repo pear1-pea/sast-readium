@@ -151,6 +151,13 @@ if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/unit/test_thumbnail_priority.cpp)
         unit/test_thumbnail_priority.cpp)
 endif()
 
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/unit/test_reading_progress_manager.cpp)
+    create_unit_test(test_reading_progress_manager
+        unit/test_reading_progress_manager.cpp)
+    target_sources(test_reading_progress_manager PRIVATE
+        ../app/managers/ReadingProgressManager.cpp)
+endif()
+
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/unit/test_recent_pdf_thumbnail_provider.cpp)
     add_executable(test_recent_pdf_thumbnail_provider
         unit/test_recent_pdf_thumbnail_provider.cpp)

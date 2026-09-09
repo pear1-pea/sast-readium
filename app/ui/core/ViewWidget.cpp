@@ -28,6 +28,12 @@ ViewWidget::ViewWidget(DocumentModel* model, QWidget* parent)
     }
 }
 
+ViewWidget::~ViewWidget() {
+    for (PDFViewer* viewer : pdfViewers) {
+        saveReadingProgress(viewer);
+    }
+}
+
 void ViewWidget::setupUI() {
     mainLayout = new QVBoxLayout(this);
     mainLayout->setContentsMargins(0, 0, 0, 0);
@@ -245,7 +251,13 @@ void ViewWidget::onDocumentOpened(int index, const QString& fileName) {
 
     // 创建新的PDF查看器
     PDFViewer* viewer = createPDFViewer();
+    m_viewerFilePaths.insert(viewer, filePath);
     viewer->setDocument(document);
+
+    const int savedPage = m_readingProgress.pageForFile(filePath);
+    if (savedPage > 0 && savedPage < viewer->getPageCount()) {
+        viewer->goToPage(savedPage);
+    }
 
     // 创建目录模型并解析目录
     PDFOutlineModel* docOutlineModel = new PDFOutlineModel(this);
@@ -353,7 +365,9 @@ void ViewWidget::onCurrentDocumentChanged(int index) {
 void ViewWidget::onAllDocumentsClosed() {
     // 清理所有PDF查看器
     for (PDFViewer* viewer : pdfViewers) {
+        saveReadingProgress(viewer);
         viewerStack->removeWidget(viewer);
+        m_viewerFilePaths.remove(viewer);
         viewer->deleteLater();
     }
     pdfViewers.clear();
@@ -489,6 +503,8 @@ void ViewWidget::removePDFViewer(int index) {
         return;
 
     PDFViewer* viewer = pdfViewers.takeAt(index);
+    saveReadingProgress(viewer);
+    m_viewerFilePaths.remove(viewer);
     viewerStack->removeWidget(viewer);
     viewer->deleteLater();
 }
@@ -520,8 +536,20 @@ void ViewWidget::onPDFPageChanged(int pageNumber) {
 
     if (currentIndex >= 0 && currentIndex < pdfViewers.size() &&
         pdfViewers[currentIndex] == sender) {
+        saveReadingProgress(sender);
         int totalPages = getCurrentPageCount();
         emit currentViewerPageChanged(pageNumber, totalPages);
+    }
+}
+
+void ViewWidget::saveReadingProgress(PDFViewer* viewer) {
+    if (!viewer) {
+        return;
+    }
+
+    const QString filePath = m_viewerFilePaths.value(viewer);
+    if (!filePath.isEmpty() && viewer->hasDocument()) {
+        m_readingProgress.savePageForFile(filePath, viewer->getCurrentPage());
     }
 }
 

@@ -66,6 +66,7 @@ public:
     void findNext();
     void findPrevious();
     void clearSearch();
+    void copySelectedText();
 
     // Search highlighting functionality
     void setSearchResults(const QList<SearchResult>& results);

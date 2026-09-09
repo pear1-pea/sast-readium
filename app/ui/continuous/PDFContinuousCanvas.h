@@ -41,6 +41,8 @@ public:
     void setAnnotations(
         const QHash<int, QList<PDFAnnotation>>& annotationsByPage);
     void clearAnnotationOverlays();
+    bool copySelectedText();
+    bool hasTextSelection() const;
 
     QRectF viewportRectInDocument() const;
     QPair<int, int> visiblePageRange(qreal preloadMargin = 0.0) const;
@@ -90,6 +92,9 @@ private:
     QRectF annotationRectToViewportRect(const QRectF& annotationRect,
                                         const PDFPageGeometry& geometry) const;
     void emitTypedLinkClicked(const Poppler::Link* link);
+    void loadPageText(int pageIndex) const;
+    QString selectedText() const;
+    QRectF selectionRectInOriginalCoordinates(int pageIndex) const;
 
     std::shared_ptr<const PDFContinuousBlueprint> m_blueprint;
     std::shared_ptr<Poppler::Document> m_document;
@@ -99,6 +104,9 @@ private:
     PDFContinuousRenderScheduler* m_renderScheduler = nullptr;
     mutable std::unordered_map<int, std::vector<std::unique_ptr<Poppler::Link>>>
         m_pageLinks;
+    mutable std::unordered_map<int,
+                               std::vector<std::unique_ptr<Poppler::TextBox>>>
+        m_pageText;
     QHash<int, QList<SearchResult>> m_searchResultsByPage;
     QHash<int, QList<PDFAnnotation>> m_annotationsByPage;
     qreal m_lastDevicePixelRatio = 1.0;
