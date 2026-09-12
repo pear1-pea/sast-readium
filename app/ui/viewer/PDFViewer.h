@@ -2,13 +2,18 @@
 
 #include <poppler/qt6/poppler-qt6.h>
 #include <QAbstractScrollArea>
+#include <QColor>
 #include <QEvent>
 #include <QList>
 #include <QWidget>
 #include <memory>
 
 #include "ZoomTypes.h"
+#include "model/AnnotationModel.h"
 #include "model/SearchModel.h"
+
+class QDragEnterEvent;
+class QDropEvent;
 
 // 页面查看模式枚举
 // 顺序必须与 ToolBar 的 viewModeCombo 索引一致 (0/1/2/3)，
@@ -80,6 +85,18 @@ public:
     void toggleBookmark();
     bool hasBookmarkForCurrentPage() const;
 
+    // Annotation tools
+    AnnotationModel* annotationModel() const;
+    void setAnnotationStoragePath(const QString& storagePath);
+    bool saveAnnotations();
+    bool loadAnnotations();
+    void clearAnnotations();
+    void setAnnotationTool(AnnotationType tool);
+    void setAnnotationColor(const QColor& color);
+    void setAnnotationOpacity(double opacity);
+    void setAnnotationLineWidth(double width);
+    void setAnnotationFont(const QString& family, int size);
+
     // 查看模式操作
     void setViewMode(PDFViewMode mode);
     PDFViewMode getViewMode() const;
@@ -132,6 +149,8 @@ protected:
     // Search highlighting helper methods
     void updateSearchHighlightsForCurrentPage();
     void updateAllPagesSearchHighlights();
+    void dragEnterEvent(QDragEnterEvent* event) override;
+    void dropEvent(QDropEvent* event) override;
 
 private slots:
     void onScaleChanged(double scale);
@@ -156,4 +175,5 @@ signals:
     void bookmarkRequested(int pageNumber);
     void fullscreenToggled(bool fullscreen);
     void fileDropped(const QString& filePath);
+    void filesDropped(const QStringList& filePaths);
 };

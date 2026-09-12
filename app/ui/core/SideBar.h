@@ -9,8 +9,8 @@
 #include "model/PDFOutlineModel.h"
 #include "model/ThumbnailModel.h"
 #include "ui/thumbnail/ThumbnailListView.h"
-#include "ui/viewer/PDFBookmarkWidget.h"
 #include "ui/viewer/PDFOutlineWidget.h"
+#include "ui/widgets/BookmarkWidget.h"
 
 // 前向声明
 namespace Poppler {
@@ -41,6 +41,8 @@ public:
     // PDF目录相关
     void setOutlineModel(PDFOutlineModel* model);
     PDFOutlineWidget* getOutlineWidget() const { return outlineWidget; }
+    BookmarkWidget* getBookmarkWidget() const { return bookmarkWidget; }
+    void setBookmarkContext(const QString& documentPath, int pageNumber);
 
     // 缩略图相关
     void setDocument(std::shared_ptr<Poppler::Document> document,
@@ -72,7 +74,7 @@ private:
     QPropertyAnimation* animation;
     QSettings* settings;
     PDFOutlineWidget* outlineWidget;
-    PDFBookmarkWidget* bookmarkWidget;
+    BookmarkWidget* bookmarkWidget;
 
     // 缩略图组件
     ThumbnailListView* thumbnailView;

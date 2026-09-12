@@ -103,6 +103,8 @@ private slots:
     void testRotation();
     void testViewModeSwitch();
     void testContinuousModeRendersCanvas();
+    void testSinglePagePaintDoesNotCrash();
+    void testAnnotationPlacementDoesNotCrash();
     void testBookmark();
 };
 
@@ -282,6 +284,43 @@ void TestPDFViewer::testContinuousModeRendersCanvas() {
     QVERIFY(renderSpy.first().at(0).toInt() >= 0);
 
     m_viewer->setViewMode(PDFViewMode::SinglePage);
+}
+
+void TestPDFViewer::testSinglePagePaintDoesNotCrash() {
+    m_viewer->resize(800, 1000);
+    m_viewer->show();
+    m_viewer->setViewMode(PDFViewMode::SinglePage);
+    m_viewer->goToPage(0);
+    QTest::qWait(250);
+    QCoreApplication::processEvents();
+    QVERIFY(m_viewer->isVisible());
+}
+
+void TestPDFViewer::testAnnotationPlacementDoesNotCrash() {
+    m_viewer->resize(800, 1000);
+    m_viewer->show();
+    m_viewer->setViewMode(PDFViewMode::ContinuousScroll);
+    QTest::qWait(100);
+
+    auto* canvas = m_viewer->findChild<PDFContinuousCanvas*>();
+    QVERIFY(canvas != nullptr);
+    QVERIFY(canvas->width() > 0);
+    QVERIFY(canvas->height() > 0);
+
+    AnnotationModel* model = m_viewer->annotationModel();
+    QVERIFY(model != nullptr);
+    const int initialCount = model->getTotalAnnotationCount();
+
+    m_viewer->setAnnotationTool(AnnotationType::Highlight);
+    const QPoint start(qMax(20, canvas->width() / 4),
+                       qMax(20, canvas->height() / 4));
+    const QPoint end(start.x() + 30, start.y() + 20);
+    QTest::mousePress(canvas, Qt::LeftButton, Qt::NoModifier, start);
+    QTest::mouseMove(canvas, end);
+    QTest::mouseRelease(canvas, Qt::LeftButton, Qt::NoModifier, end);
+    QCoreApplication::processEvents();
+
+    QCOMPARE(model->getTotalAnnotationCount(), initialCount + 1);
 }
 
 void TestPDFViewer::testBookmark() {

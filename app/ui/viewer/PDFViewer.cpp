@@ -5,8 +5,11 @@
 #include <QDateTime>
 #include <QDebug>
 #include <QDesktopServices>
+#include <QDragEnterEvent>
+#include <QDropEvent>
 #include <QGraphicsOpacityEffect>
 #include <QGroupBox>
+#include <QMimeData>
 #include <QPropertyAnimation>
 #include <QRect>
 #include <QScrollBar>
@@ -17,6 +20,7 @@
 #include <QSplitter>
 #include <QStackedWidget>
 #include <QStyle>
+#include <QUrl>
 #include <QWheelEvent>
 #include <QtCore>
 #include <QtGlobal>
@@ -39,6 +43,25 @@
 #include "utils/LoggingMacros.h"
 
 namespace {
+QStringList pdfPathsFromMimeData(const QMimeData* mimeData) {
+    QStringList paths;
+    if (!mimeData || !mimeData->hasUrls()) {
+        return paths;
+    }
+
+    for (const QUrl& url : mimeData->urls()) {
+        if (!url.isLocalFile()) {
+            continue;
+        }
+        const QString path = url.toLocalFile();
+        if (QFileInfo(path).isFile() &&
+            path.endsWith(QStringLiteral(".pdf"), Qt::CaseInsensitive)) {
+            paths.append(path);
+        }
+    }
+    return paths;
+}
+
 int normalizeRotation(int rotation) {
     int normalized = rotation % 360;
     if (normalized < 0) {
@@ -138,6 +161,12 @@ struct PDFViewer::Private {
     // 搜索控制器
     SearchController* searchController = nullptr;
     AnnotationModel* annotationModel = nullptr;
+    AnnotationType annotationTool = AnnotationType::Highlight;
+    QColor annotationColor = Qt::yellow;
+    double annotationOpacity = 0.7;
+    double annotationLineWidth = 2.0;
+    QString annotationFontFamily = QStringLiteral("Arial");
+    int annotationFontSize = 12;
 
     // 文档数据
     std::shared_ptr<Poppler::Document> document;
@@ -287,6 +316,26 @@ PDFViewer::PDFViewer(QWidget* parent, bool enableStyling)
 }
 
 PDFViewer::~PDFViewer() = default;
+
+void PDFViewer::dragEnterEvent(QDragEnterEvent* event) {
+    if (!pdfPathsFromMimeData(event->mimeData()).isEmpty()) {
+        event->acceptProposedAction();
+        return;
+    }
+    event->ignore();
+}
+
+void PDFViewer::dropEvent(QDropEvent* event) {
+    const QStringList paths = pdfPathsFromMimeData(event->mimeData());
+    if (paths.isEmpty()) {
+        event->ignore();
+        return;
+    }
+
+    emit filesDropped(paths);
+    emit fileDropped(paths.first());
+    event->acceptProposedAction();
+}
 
 void PDFViewer::setupUI() {
     d->mainLayout = new QVBoxLayout(this);
@@ -490,6 +539,57 @@ void PDFViewer::setupConnections() {
                     d->continuousCanvas->clearAnnotationOverlays();
                 }
             });
+    connect(
+        d->continuousCanvas, &PDFContinuousCanvas::annotationPlacementRequested,
+        this,
+        [this](int pageNumber, AnnotationType type,
+               const QRectF& normalizedRect) {
+            LOG_DEBUG(
+                "[annotation] received placement page={} tool={} rect=({}, {}, "
+                "{}, {})",
+                pageNumber, static_cast<int>(type), normalizedRect.x(),
+                normalizedRect.y(), normalizedRect.width(),
+                normalizedRect.height());
+            if (!d->annotationModel || !d->document) {
+                LOG_WARNING(
+                    "[annotation] ignored placement without document/model");
+                return;
+            }
+
+            PDFAnnotation annotation;
+            annotation.type = type;
+            annotation.pageNumber = pageNumber;
+            annotation.boundingRect = normalizedRect;
+            annotation.color = d->annotationColor;
+            annotation.opacity = d->annotationOpacity;
+            annotation.lineWidth = d->annotationLineWidth;
+            annotation.fontFamily = d->annotationFontFamily;
+            annotation.fontSize = d->annotationFontSize;
+            annotation.author = qEnvironmentVariable("USER");
+            if (annotation.author.isEmpty()) {
+                annotation.author = QStringLiteral("SAST Readium");
+            }
+
+            if (type == AnnotationType::Note ||
+                type == AnnotationType::FreeText) {
+                bool accepted = false;
+                const QString content = QInputDialog::getMultiLineText(
+                    this, QStringLiteral("添加批注"), QStringLiteral("内容:"),
+                    QString(), &accepted);
+                if (!accepted || content.trimmed().isEmpty()) {
+                    return;
+                }
+                annotation.content = content.trimmed();
+                annotation.fontFamily = QStringLiteral("Arial");
+                annotation.fontSize = 12;
+            }
+
+            d->annotationModel->addAnnotation(annotation);
+            LOG_INFO("[annotation] added id={} page={} tool={}",
+                     annotation.id.toStdString(), pageNumber,
+                     static_cast<int>(type));
+            setMessage(QStringLiteral("已添加批注"));
+        });
 
     // 搜索结果更新 → 重新应用高亮
     connect(d->searchController, &SearchController::resultsChanged, this,
@@ -650,6 +750,79 @@ void PDFViewer::setDocument(std::shared_ptr<Poppler::Document> doc) {
 }
 
 void PDFViewer::clearDocument() { setDocument(nullptr); }
+
+AnnotationModel* PDFViewer::annotationModel() const {
+    return d->annotationModel;
+}
+
+void PDFViewer::setAnnotationStoragePath(const QString& storagePath) {
+    if (d->annotationModel) {
+        d->annotationModel->setStoragePath(storagePath);
+    }
+}
+
+bool PDFViewer::saveAnnotations() {
+    if (!d->annotationModel ||
+        !d->annotationModel->saveAnnotationsToStorage()) {
+        setMessage(QStringLiteral("批注保存失败"));
+        return false;
+    }
+    setMessage(QStringLiteral("批注已保存"));
+    return true;
+}
+
+bool PDFViewer::loadAnnotations() {
+    if (!d->annotationModel ||
+        !d->annotationModel->loadAnnotationsFromStorage()) {
+        setMessage(QStringLiteral("没有可加载的批注"));
+        return false;
+    }
+    setMessage(QStringLiteral("批注已加载"));
+    return true;
+}
+
+void PDFViewer::clearAnnotations() {
+    if (d->annotationModel) {
+        d->annotationModel->clearAnnotations();
+        setMessage(QStringLiteral("批注已清除（保存后生效）"));
+    }
+}
+
+void PDFViewer::setAnnotationTool(AnnotationType tool) {
+    d->annotationTool = tool;
+    if (d->continuousCanvas) {
+        d->continuousCanvas->setAnnotationTool(tool);
+    }
+}
+
+void PDFViewer::setAnnotationColor(const QColor& color) {
+    d->annotationColor = color;
+    if (d->continuousCanvas) {
+        d->continuousCanvas->setAnnotationColor(color);
+    }
+}
+
+void PDFViewer::setAnnotationOpacity(double opacity) {
+    d->annotationOpacity = opacity;
+    if (d->continuousCanvas) {
+        d->continuousCanvas->setAnnotationOpacity(opacity);
+    }
+}
+
+void PDFViewer::setAnnotationLineWidth(double width) {
+    d->annotationLineWidth = width;
+    if (d->continuousCanvas) {
+        d->continuousCanvas->setAnnotationLineWidth(width);
+    }
+}
+
+void PDFViewer::setAnnotationFont(const QString& family, int size) {
+    d->annotationFontFamily = family;
+    d->annotationFontSize = size;
+    if (d->continuousCanvas) {
+        d->continuousCanvas->setAnnotationFont(family, size);
+    }
+}
 
 void PDFViewer::goToPage(int pageNumber) {
     goToPageWithValidation(pageNumber, false);

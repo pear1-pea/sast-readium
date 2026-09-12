@@ -1,9 +1,12 @@
 #include "MainWindow.h"
 #include <QAction>
 #include <QApplication>
+#include <QDragEnterEvent>
+#include <QDropEvent>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QMessageBox>
+#include <QMimeData>
 #include <QStandardPaths>
 #include <QTimer>
 #include "managers/FileTypeIconManager.h"
@@ -18,6 +21,31 @@
 #include "utils/LoggingMacros.h"
 
 namespace {
+QStringList pdfPathsFromMimeData(const QMimeData* mimeData) {
+    QStringList paths;
+    if (!mimeData || !mimeData->hasUrls()) {
+        return paths;
+    }
+
+    for (const QUrl& url : mimeData->urls()) {
+        if (!url.isLocalFile()) {
+            continue;
+        }
+        const QString path = url.toLocalFile();
+        if (QFileInfo(path).isFile() &&
+            path.endsWith(QStringLiteral(".pdf"), Qt::CaseInsensitive)) {
+            paths.append(path);
+        }
+    }
+    return paths;
+}
+
+QString normalizedDocumentPath(const QString& path) {
+    const QFileInfo fileInfo(path);
+    return fileInfo.exists() ? fileInfo.canonicalFilePath()
+                             : fileInfo.absoluteFilePath();
+}
+
 void setActionsEnabled(ShortcutManager* shortcutManager,
                        std::initializer_list<ActionMap> actions, bool enabled) {
     if (!shortcutManager) {
@@ -110,8 +138,36 @@ MainWindow::MainWindow(const AppComponents& deps, QWidget* parent)
 
 MainWindow::~MainWindow() noexcept {}
 
+void MainWindow::openFiles(const QStringList& filePaths) {
+    if (m_documentOrchestrator) {
+        m_documentOrchestrator->openDocuments(filePaths);
+    }
+}
+
+void MainWindow::dragEnterEvent(QDragEnterEvent* event) {
+    if (!pdfPathsFromMimeData(event->mimeData()).isEmpty()) {
+        event->acceptProposedAction();
+        return;
+    }
+    event->ignore();
+}
+
+void MainWindow::dropEvent(QDropEvent* event) {
+    const QStringList paths = pdfPathsFromMimeData(event->mimeData());
+    if (paths.isEmpty()) {
+        event->ignore();
+        return;
+    }
+
+    openFiles(paths);
+    event->acceptProposedAction();
+}
+
 // initialize
-void MainWindow::initWindow() { resize(1280, 800); }
+void MainWindow::initWindow() {
+    resize(1280, 800);
+    setAcceptDrops(true);
+}
 
 void MainWindow::initContent() {
     shortcutManager->registerDefaults();
@@ -219,6 +275,118 @@ void MainWindow::initConnection() {
     });
     connect(viewWidget, &ViewWidget::newTabRequested, this,
             [this]() { routeAction(ActionMap::newTab); });
+    connect(viewWidget, &ViewWidget::filesDropped, this,
+            [this](const QStringList& filePaths) {
+                m_documentOrchestrator->openDocuments(filePaths);
+            });
+
+    connect(viewWidget, &ViewWidget::bookmarkRequested, this,
+            [this](const QString& documentPath, int pageNumber) {
+                if (sideBar && sideBar->getBookmarkWidget()) {
+                    sideBar->getBookmarkWidget()->addBookmark(documentPath,
+                                                              pageNumber);
+                }
+            });
+    connect(sideBar->getBookmarkWidget(), &BookmarkWidget::navigateToBookmark,
+            this, &MainWindow::onBookmarkNavigationRequested);
+
+    if (rightSideBar && rightSideBar->annotationToolbar()) {
+        AnnotationToolbar* annotationToolbar =
+            rightSideBar->annotationToolbar();
+        connect(annotationToolbar, &AnnotationToolbar::toolChanged, this,
+                [this](AnnotationType tool) {
+                    if (PDFViewer* viewer = viewWidget->getCurrentViewer()) {
+                        viewer->setAnnotationTool(tool);
+                    }
+                });
+        connect(annotationToolbar, &AnnotationToolbar::colorChanged, this,
+                [this](const QColor& color) {
+                    if (PDFViewer* viewer = viewWidget->getCurrentViewer()) {
+                        viewer->setAnnotationColor(color);
+                    }
+                });
+        connect(annotationToolbar, &AnnotationToolbar::opacityChanged, this,
+                [this](double opacity) {
+                    if (PDFViewer* viewer = viewWidget->getCurrentViewer()) {
+                        viewer->setAnnotationOpacity(opacity);
+                    }
+                });
+        connect(annotationToolbar, &AnnotationToolbar::lineWidthChanged, this,
+                [this](double width) {
+                    if (PDFViewer* viewer = viewWidget->getCurrentViewer()) {
+                        viewer->setAnnotationLineWidth(width);
+                    }
+                });
+        connect(annotationToolbar, &AnnotationToolbar::fontSizeChanged, this,
+                [this, annotationToolbar](int size) {
+                    if (PDFViewer* viewer = viewWidget->getCurrentViewer()) {
+                        viewer->setAnnotationFont(
+                            annotationToolbar->getCurrentFontFamily(), size);
+                    }
+                });
+        connect(annotationToolbar, &AnnotationToolbar::fontFamilyChanged, this,
+                [this, annotationToolbar](const QString& family) {
+                    if (PDFViewer* viewer = viewWidget->getCurrentViewer()) {
+                        viewer->setAnnotationFont(
+                            family, annotationToolbar->getCurrentFontSize());
+                    }
+                });
+        connect(annotationToolbar, &AnnotationToolbar::clearAllAnnotations,
+                this, [this]() {
+                    if (PDFViewer* viewer = viewWidget->getCurrentViewer()) {
+                        viewer->clearAnnotations();
+                    }
+                });
+        connect(annotationToolbar, &AnnotationToolbar::saveAnnotations, this,
+                [this]() {
+                    if (PDFViewer* viewer = viewWidget->getCurrentViewer()) {
+                        viewer->saveAnnotations();
+                    }
+                });
+        connect(annotationToolbar, &AnnotationToolbar::loadAnnotations, this,
+                [this]() {
+                    if (PDFViewer* viewer = viewWidget->getCurrentViewer()) {
+                        viewer->loadAnnotations();
+                    }
+                });
+        annotationToolbar->setEnabled(viewWidget->hasDocuments());
+    }
+
+    connect(documentModel, &DocumentModel::currentDocumentChanged, this,
+            [this](int index) {
+                if (sideBar && sideBar->getBookmarkWidget()) {
+                    sideBar->setBookmarkContext(
+                        documentModel->getDocumentFilePath(index),
+                        viewWidget->getCurrentPage());
+                }
+                if (rightSideBar && rightSideBar->annotationToolbar()) {
+                    rightSideBar->annotationToolbar()->setEnabled(index >= 0);
+                }
+            });
+    connect(documentModel, &DocumentModel::allDocumentsClosed, this, [this]() {
+        if (sideBar && sideBar->getBookmarkWidget()) {
+            sideBar->setBookmarkContext(QString(), -1);
+        }
+        if (rightSideBar && rightSideBar->annotationToolbar()) {
+            rightSideBar->annotationToolbar()->setEnabled(false);
+        }
+    });
+    connect(
+        documentModel, &DocumentModel::documentOpened, this,
+        [this](int index, const QString&) {
+            if (m_pendingBookmarkNavigation.first.isEmpty() ||
+                normalizedDocumentPath(
+                    documentModel->getDocumentFilePath(index)) !=
+                    normalizedDocumentPath(m_pendingBookmarkNavigation.first)) {
+                return;
+            }
+
+            const int pageNumber = m_pendingBookmarkNavigation.second;
+            m_pendingBookmarkNavigation = {};
+            QTimer::singleShot(0, this, [this, pageNumber]() {
+                viewWidget->goToPage(pageNumber);
+            });
+        });
 
     // 文档模型信号以同步目录
     connect(documentModel, &DocumentModel::currentDocumentChanged, this,
@@ -393,6 +561,29 @@ void MainWindow::onThumbnailPageDoubleClicked(int pageNumber) {
 
     // 可选：触发特殊操作，如适合页面宽度
     // 这里可以添加更多功能
+}
+
+void MainWindow::onBookmarkNavigationRequested(const QString& documentPath,
+                                               int pageNumber) {
+    if (!documentModel || !m_documentOrchestrator || documentPath.isEmpty() ||
+        pageNumber < 0) {
+        return;
+    }
+
+    const QString normalizedPath = normalizedDocumentPath(documentPath);
+    for (int index = 0; index < documentModel->getDocumentCount(); ++index) {
+        if (normalizedDocumentPath(documentModel->getDocumentFilePath(index)) ==
+            normalizedPath) {
+            m_documentOrchestrator->switchToDocument(index);
+            QTimer::singleShot(0, this, [this, pageNumber]() {
+                viewWidget->goToPage(pageNumber);
+            });
+            return;
+        }
+    }
+
+    m_pendingBookmarkNavigation = {documentPath, pageNumber};
+    m_documentOrchestrator->openDocument(documentPath);
 }
 
 void MainWindow::updateStatusBarInfo() {
@@ -591,6 +782,8 @@ void MainWindow::onPageChangedForThumbnailSync(int pageNumber, int totalPages) {
 
         // 设置当前页面（这会自动更新高光并滚动到当前页面）
         thumbnailView->setCurrentPage(pageNumber, true);  // true表示使用动画
+        sideBar->setBookmarkContext(documentModel->getCurrentFilePath(),
+                                    pageNumber);
 
         LOG_DEBUG("MainWindow: Synchronized thumbnail highlight to page {}",
                   pageNumber + 1);

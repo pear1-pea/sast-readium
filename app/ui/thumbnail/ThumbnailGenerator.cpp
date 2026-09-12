@@ -327,9 +327,9 @@ void ThumbnailGenerator::startNextJob() {
     // 创建新任务
     auto job = std::make_unique<GenerationJob>();
     job->request = request;
-    job->watcher = new QFutureWatcher<QPixmap>();
+    job->watcher = new QFutureWatcher<QImage>();
 
-    connect(job->watcher, &QFutureWatcher<QPixmap>::finished, this,
+    connect(job->watcher, &QFutureWatcher<QImage>::finished, this,
             &ThumbnailGenerator::onGenerationFinished);
 
     // 启动异步生成
@@ -346,11 +346,11 @@ void ThumbnailGenerator::startNextJob() {
 }
 
 void ThumbnailGenerator::onGenerationFinished() {
-    QFutureWatcher<QPixmap>* watcher =
-        static_cast<QFutureWatcher<QPixmap>*>(sender());
+    QFutureWatcher<QImage>* watcher =
+        static_cast<QFutureWatcher<QImage>*>(sender());
 
     // 使用 QPointer 安全检查
-    QPointer<QFutureWatcher<QPixmap>> safeWatcher(watcher);
+    QPointer<QFutureWatcher<QImage>> safeWatcher(watcher);
     if (!safeWatcher) {
         return;  // watcher 已经被删除
     }
@@ -388,11 +388,11 @@ void ThumbnailGenerator::onGenerationFinished() {
             LOG_DEBUG("ThumbnailGenerator: Discarding cancelled page {}",
                       pageNumber);
         } else if (safeWatcher) {
-            QPixmap pixmap = safeWatcher->result();
+            const QImage image = safeWatcher->result();
 
-            if (!pixmap.isNull()) {
+            if (!image.isNull()) {
                 handleJobCompletion(job);
-                emit thumbnailGenerated(pageNumber, pixmap);
+                emit thumbnailGenerated(pageNumber, image);
                 m_totalGenerated++;
             } else {
                 handleJobError(job, "Failed to generate pixmap");
@@ -408,7 +408,7 @@ void ThumbnailGenerator::onGenerationFinished() {
 
     // Detach the watcher before deleting the job. GenerationJob owns the
     // watcher, so deleting the job first would leave the pointer dangling.
-    QFutureWatcher<QPixmap>* watcherToDelete = nullptr;
+    QFutureWatcher<QImage>* watcherToDelete = nullptr;
     {
         QMutexLocker locker(&m_jobsMutex);
         if (m_activeJobs.contains(pageNumber)) {
@@ -446,7 +446,7 @@ void ThumbnailGenerator::cleanupJobs() {
             job->watcher->waitForFinished();
         }
         if (job) {
-            QFutureWatcher<QPixmap>* watcher = job->watcher;
+            QFutureWatcher<QImage>* watcher = job->watcher;
             job->watcher = nullptr;
             delete watcher;
             delete job;
@@ -489,14 +489,14 @@ void ThumbnailGenerator::handleJobError(GenerationJob* job,
     }
 }
 
-QPixmap ThumbnailGenerator::generatePixmap(const GenerationRequest& request) {
+QImage ThumbnailGenerator::generatePixmap(const GenerationRequest& request) {
     QMutexLocker locker(&m_documentMutex);
 
     if (!m_document) {
-        return QPixmap();
+        return QImage();
     }
 
-    QPixmap result;
+    QImage result;
     try {
         std::unique_ptr<Poppler::Page> page(
             m_document->page(request.pageNumber));
@@ -526,18 +526,18 @@ QPixmap ThumbnailGenerator::generatePixmap(const GenerationRequest& request) {
     return result;
 }
 
-QPixmap ThumbnailGenerator::renderPageToPixmap(Poppler::Page* page,
-                                               const QSize& size,
-                                               double quality) {
+QImage ThumbnailGenerator::renderPageToPixmap(Poppler::Page* page,
+                                              const QSize& size,
+                                              double quality) {
     // 使用优化版本
     return renderPageToPixmapOptimized(page, size, quality);
 }
 
-QPixmap ThumbnailGenerator::renderPageToPixmapOptimized(Poppler::Page* page,
-                                                        const QSize& size,
-                                                        double quality) {
+QImage ThumbnailGenerator::renderPageToPixmapOptimized(Poppler::Page* page,
+                                                       const QSize& size,
+                                                       double quality) {
     if (!page) {
-        return QPixmap();
+        return QImage();
     }
 
     try {
@@ -549,7 +549,7 @@ QPixmap ThumbnailGenerator::renderPageToPixmapOptimized(Poppler::Page* page,
                                            Poppler::Page::Rotate0);
 
         if (image.isNull()) {
-            return QPixmap();
+            return QImage();
         }
 
         // 优化缩放操作
@@ -559,18 +559,18 @@ QPixmap ThumbnailGenerator::renderPageToPixmapOptimized(Poppler::Page* page,
             image = image.scaled(size, Qt::KeepAspectRatio, mode);
         }
 
-        return QPixmap::fromImage(image);
+        return image;
 
     } catch (const std::exception& e) {
         LOG_WARNING(
             "ThumbnailGenerator: Exception in renderPageToPixmapOptimized - {}",
             e.what());
-        return QPixmap();
+        return QImage();
     } catch (...) {
         LOG_WARNING(
             "ThumbnailGenerator: Unknown exception in "
             "renderPageToPixmapOptimized");
-        return QPixmap();
+        return QImage();
     }
 }
 

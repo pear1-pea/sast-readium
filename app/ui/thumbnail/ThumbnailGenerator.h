@@ -4,9 +4,9 @@
 #include <QDateTime>
 #include <QFuture>
 #include <QFutureWatcher>
+#include <QImage>
 #include <QMutex>
 #include <QObject>
-#include <QPixmap>
 #include <QQueue>
 #include <QSize>
 #include <QThread>
@@ -109,7 +109,7 @@ public:
     bool isRunning() const { return m_running; }
 
 signals:
-    void thumbnailGenerated(int pageNumber, const QPixmap& pixmap);
+    void thumbnailGenerated(int pageNumber, const QImage& image);
     void thumbnailError(int pageNumber, const QString& error);
     void queueSizeChanged(int size);
     void activeJobsChanged(int count);
@@ -123,8 +123,8 @@ private slots:
 private:
     struct GenerationJob {
         GenerationRequest request;
-        QFuture<QPixmap> future;
-        QFutureWatcher<QPixmap>* watcher;
+        QFuture<QImage> future;
+        QFutureWatcher<QImage>* watcher;
         bool cancelled = false;
 
         GenerationJob() : watcher(nullptr) {}
@@ -137,9 +137,9 @@ private:
     void handleJobCompletion(GenerationJob* job);
     void handleJobError(GenerationJob* job, const QString& error);
 
-    QPixmap generatePixmap(const GenerationRequest& request);
-    QPixmap renderPageToPixmap(Poppler::Page* page, const QSize& size,
-                               double quality);
+    QImage generatePixmap(const GenerationRequest& request);
+    QImage renderPageToPixmap(Poppler::Page* page, const QSize& size,
+                              double quality);
     double calculateOptimalDPI(const QSize& targetSize, const QSizeF& pageSize,
                                double quality);
 
@@ -147,8 +147,8 @@ private:
     void logPerformance(const GenerationRequest& request, qint64 duration);
 
     // 优化方法
-    QPixmap renderPageToPixmapOptimized(Poppler::Page* page, const QSize& size,
-                                        double quality);
+    QImage renderPageToPixmapOptimized(Poppler::Page* page, const QSize& size,
+                                       double quality);
     double getCachedDPI(const QSize& targetSize, const QSizeF& pageSize,
                         double quality);
     void cacheDPI(const QSize& targetSize, const QSizeF& pageSize,

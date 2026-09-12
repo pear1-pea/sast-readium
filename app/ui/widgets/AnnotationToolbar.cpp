@@ -169,7 +169,7 @@ void AnnotationToolbar::setupUI() {
     m_saveBtn = new QPushButton("保存");
     m_saveBtn->setIcon(
         QApplication::style()->standardIcon(QStyle::SP_DialogSaveButton));
-    m_saveBtn->setToolTip("保存注释到文档");
+    m_saveBtn->setToolTip("保存批注到伴随文件");
 
     m_loadBtn = new QPushButton("加载");
     m_loadBtn->setIcon(

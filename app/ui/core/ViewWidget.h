@@ -43,6 +43,7 @@ public:
     int getCurrentPageCount() const;
     double getCurrentZoom() const;
     PDFViewMode getCurrentViewMode() const;
+    PDFViewer* getCurrentViewer() const;
 
 protected:
     void setupUI();
@@ -75,6 +76,7 @@ signals:
     void currentViewerZoomChanged(double zoomFactor);
     void currentViewerViewModeChanged(PDFViewMode mode);
     void currentOutlineModelChanged(PDFOutlineModel* model);
+    void bookmarkRequested(const QString& documentPath, int pageNumber);
 
     /** Emitted when the user requests to close a tab (via tab bar). */
     void tabCloseRequested(int index);
@@ -84,6 +86,7 @@ signals:
 
     /** Emitted when the user requests a new tab from the tab bar. */
     void newTabRequested();
+    void filesDropped(const QStringList& filePaths);
 
 private:
     // UI组件

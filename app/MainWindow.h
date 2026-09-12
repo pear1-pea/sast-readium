@@ -2,7 +2,9 @@
 
 #include <QMainWindow>
 
+#include <QPair>
 #include <QStackedWidget>
+#include <QStringList>
 #include "controller/DocumentOrchestrator.h"
 #include "controller/tool.hpp"
 #include "core/AppComponents.h"
@@ -23,12 +25,21 @@
 #include "ui/managers/WelcomeScreenManager.h"
 #include "ui/widgets/WelcomeWidget.h"
 
+class QDragEnterEvent;
+class QDropEvent;
+
 class MainWindow : public QMainWindow {
     Q_OBJECT
 
 public:
     MainWindow(const AppComponents& deps, QWidget* parent = nullptr);
     ~MainWindow() noexcept;
+
+    void openFiles(const QStringList& filePaths);
+
+protected:
+    void dragEnterEvent(QDragEnterEvent* event) override;
+    void dropEvent(QDropEvent* event) override;
 
 private slots:
     void onSideBarVisibilityChanged(bool visible);
@@ -45,6 +56,8 @@ private slots:
 
     // 缩略图同步的槽函数
     void onPageChangedForThumbnailSync(int pageNumber, int totalPages);
+    void onBookmarkNavigationRequested(const QString& documentPath,
+                                       int pageNumber);
 
     // Welcome screen slots
     void onWelcomeScreenShowRequested();
@@ -100,6 +113,8 @@ private:
     ShortcutManager* shortcutManager;
 
     ThemeManager* m_themeManager;
+
+    QPair<QString, int> m_pendingBookmarkNavigation;
 
 signals:
     void pdfViewerActionRequested(ActionMap action);

@@ -112,8 +112,8 @@ QWidget* SideBar::createBookmarksTab() {
     QWidget* bookmarksTab = new QWidget();
     QVBoxLayout* bookmarkLayout = new QVBoxLayout(bookmarksTab);
 
-    // 创建PDF书签组件
-    bookmarkWidget = new PDFBookmarkWidget();
+    // Create the persistent bookmark management widget.
+    bookmarkWidget = new BookmarkWidget();
     bookmarkLayout->addWidget(bookmarkWidget);
     return bookmarksTab;
 }
@@ -236,6 +236,14 @@ void SideBar::setOutlineModel(PDFOutlineModel* model) {
     if (outlineWidget) {
         outlineWidget->setOutlineModel(model);
     }
+}
+
+void SideBar::setBookmarkContext(const QString& documentPath, int pageNumber) {
+    if (!bookmarkWidget) {
+        return;
+    }
+    bookmarkWidget->setCurrentDocument(documentPath);
+    bookmarkWidget->setCurrentPage(pageNumber);
 }
 
 void SideBar::setDocument(std::shared_ptr<Poppler::Document> document,

@@ -7,6 +7,7 @@
 #include <QFuture>
 #include <QFutureWatcher>
 #include <QHash>
+#include <QImage>
 #include <QModelIndex>
 #include <QMutex>
 #include <QObject>
@@ -117,7 +118,7 @@ signals:
     void loadingStateChanged(int pageNumber, bool loading);
 
 private slots:
-    void onThumbnailGenerated(int pageNumber, const QPixmap& pixmap);
+    void onThumbnailGenerated(int pageNumber, const QImage& image);
     void onThumbnailError(int pageNumber, const QString& error);
     void onPreloadTimer();
     void cleanupCache();

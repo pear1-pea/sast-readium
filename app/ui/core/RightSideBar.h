@@ -7,6 +7,7 @@
 #include <QVBoxLayout>
 #include <QWidget>
 #include <memory>
+#include "../widgets/AnnotationToolbar.h"
 
 // Forward declaration
 class DebugLogPanel;
@@ -31,6 +32,7 @@ public:
     // 状态持久化
     void saveState();
     void restoreState();
+    AnnotationToolbar* annotationToolbar() const { return m_annotationToolbar; }
 
 public slots:
     void show(bool animated = true);
@@ -48,6 +50,7 @@ private:
     QPropertyAnimation* animation;
     QSettings* settings;
     DebugLogPanel* debugLogPanel;
+    AnnotationToolbar* m_annotationToolbar;
 
     bool isCurrentlyVisible;
     int preferredWidth;

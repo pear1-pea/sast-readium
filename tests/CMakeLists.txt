@@ -158,6 +158,22 @@ if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/unit/test_reading_progress_manager.cpp)
         ../app/managers/ReadingProgressManager.cpp)
 endif()
 
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/unit/test_bookmark_model.cpp)
+    create_unit_test(test_bookmark_model
+        unit/test_bookmark_model.cpp)
+    target_sources(test_bookmark_model PRIVATE
+        ../app/model/BookmarkModel.cpp)
+    set_tests_properties(test_bookmark_model PROPERTIES
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen;HOME=/tmp/sast-readium-test")
+endif()
+
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/unit/test_annotation_model.cpp)
+    create_unit_test(test_annotation_model
+        unit/test_annotation_model.cpp)
+    target_sources(test_annotation_model PRIVATE
+        ../app/model/AnnotationModel.cpp)
+endif()
+
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/unit/test_recent_pdf_thumbnail_provider.cpp)
     add_executable(test_recent_pdf_thumbnail_provider
         unit/test_recent_pdf_thumbnail_provider.cpp)

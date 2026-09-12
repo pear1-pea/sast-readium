@@ -267,6 +267,11 @@ void PDFPageWidget::onRenderTimeout() {
 }
 
 void PDFPageWidget::paintEvent(QPaintEvent* event) {
+    // Let QLabel finish its own painting before creating an overlay painter.
+    // Painting the same widget while another QPainter is active can corrupt
+    // Qt's raster paint engine on macOS.
+    QLabel::paintEvent(event);
+
     QPainter painter(this);
 
     painter.setRenderHints(QPainter::Antialiasing |
@@ -282,8 +287,6 @@ void PDFPageWidget::paintEvent(QPaintEvent* event) {
     if (!m_searchResults.isEmpty()) {
         drawSearchHighlights(painter);
     }
-
-    QLabel::paintEvent(event);
 
     if (m_isSelectingText || !selectionRectInPageCoordinates().isEmpty()) {
         painter.setPen(Qt::NoPen);

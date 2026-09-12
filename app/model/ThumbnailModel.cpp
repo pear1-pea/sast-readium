@@ -434,14 +434,17 @@ void ThumbnailModel::preloadVisibleRange(int firstVisible, int lastVisible) {
     }
 }
 
-void ThumbnailModel::onThumbnailGenerated(int pageNumber,
-                                          const QPixmap& pixmap) {
+void ThumbnailModel::onThumbnailGenerated(int pageNumber, const QImage& image) {
     QMutexLocker locker(&m_thumbnailsMutex);
 
     auto it = m_thumbnails.find(pageNumber);
     if (it == m_thumbnails.end()) {
         return;  // 项目可能已被清理
     }
+
+    // Convert to QPixmap only on the GUI thread. Worker threads return QImage
+    // because QPixmap may access platform GUI resources on macOS.
+    const QPixmap pixmap = QPixmap::fromImage(image);
 
     // Update cache item
     it->pixmap = pixmap;

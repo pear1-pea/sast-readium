@@ -26,6 +26,7 @@ RightSideBar::RightSideBar(QWidget* parent)
       animation(nullptr),
       settings(nullptr),
       debugLogPanel(nullptr),
+      m_annotationToolbar(nullptr),
       isCurrentlyVisible(true),
       preferredWidth(defaultWidth),
       lastWidth(defaultWidth) {
@@ -98,11 +99,13 @@ QWidget* RightSideBar::createToolsTab() {
     titleLabel->setStyleSheet("font-weight: bold; font-size: 12px;");
     layout->addWidget(titleLabel);
 
-    // 占位内容
-    QLabel* placeholderLabel = new QLabel("工具面板将在此显示", toolsTab);
-    placeholderLabel->setStyleSheet("color: gray; font-size: 10px;");
-    placeholderLabel->setAlignment(Qt::AlignCenter);
-    layout->addWidget(placeholderLabel);
+    m_annotationToolbar = new AnnotationToolbar(toolsTab);
+    auto* scrollArea = new QScrollArea(toolsTab);
+    scrollArea->setWidgetResizable(false);
+    scrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    scrollArea->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    scrollArea->setWidget(m_annotationToolbar);
+    layout->addWidget(scrollArea, 1);
 
     layout->addStretch();
     return toolsTab;

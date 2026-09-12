@@ -2,6 +2,8 @@
 #include <QColor>
 #include <QDateTime>
 #include <QDebug>
+#include <QFile>
+#include <QFont>
 #include <QHash>
 #include <QJsonDocument>
 #include <QPointF>
@@ -309,7 +311,9 @@ bool AnnotationModel::addAnnotation(const PDFAnnotation& annotation) {
     m_annotations.append(annotation);
     endInsertRows();
 
+    beginResetModel();
     sortAnnotations();
+    endResetModel();
     emit annotationAdded(annotation);
 
     return true;
@@ -400,6 +404,16 @@ void AnnotationModel::setDocument(std::shared_ptr<Poppler::Document> document) {
     clearAnnotations();
     if (m_document) {
         loadAnnotationsFromDocument();
+    }
+    if (!m_storagePath.isEmpty()) {
+        loadAnnotationsFromStorage();
+    }
+}
+
+void AnnotationModel::setStoragePath(const QString& storagePath) {
+    m_storagePath = storagePath;
+    if (!m_storagePath.isEmpty()) {
+        loadAnnotationsFromStorage();
     }
 }
 
@@ -507,6 +521,7 @@ bool AnnotationModel::saveAnnotationsToDocument() {
                     annotation.toPopplerAnnotation();
                 if (popplerAnnot) {
                     page->addAnnotation(popplerAnnot);
+                    delete popplerAnnot;
                     savedCount++;
                 }
             } catch (const std::exception& e) {
@@ -520,6 +535,78 @@ bool AnnotationModel::saveAnnotationsToDocument() {
     qDebug() << "Saved" << savedCount << "annotations to document";
 
     return savedCount > 0;
+}
+
+bool AnnotationModel::loadAnnotationsFromStorage() {
+    if (m_storagePath.isEmpty()) {
+        return false;
+    }
+
+    QFile file(m_storagePath);
+    if (!file.exists() || !file.open(QIODevice::ReadOnly)) {
+        return false;
+    }
+
+    const QJsonDocument document = QJsonDocument::fromJson(file.readAll());
+    if (!document.isObject()) {
+        return false;
+    }
+
+    const QJsonArray annotations =
+        document.object().value(QStringLiteral("annotations")).toArray();
+    int loadedCount = 0;
+    beginResetModel();
+    for (const QJsonValue& value : annotations) {
+        if (!value.isObject()) {
+            continue;
+        }
+        const PDFAnnotation annotation =
+            PDFAnnotation::fromJson(value.toObject());
+        if (annotation.id.isEmpty() ||
+            findAnnotationIndex(annotation.id) >= 0) {
+            continue;
+        }
+        m_annotations.append(annotation);
+        ++loadedCount;
+    }
+    sortAnnotations();
+    endResetModel();
+
+    if (loadedCount > 0) {
+        emit annotationsLoaded(loadedCount);
+    }
+    qDebug() << "Loaded" << loadedCount << "annotations from storage"
+             << m_storagePath;
+    return true;
+}
+
+bool AnnotationModel::saveAnnotationsToStorage() const {
+    if (m_storagePath.isEmpty()) {
+        return false;
+    }
+
+    QJsonArray annotations;
+    for (const PDFAnnotation& annotation : m_annotations) {
+        if (annotation.id.startsWith(QStringLiteral("ann_"))) {
+            annotations.append(annotation.toJson());
+        }
+    }
+
+    QJsonObject root;
+    root[QStringLiteral("version")] = 1;
+    root[QStringLiteral("annotations")] = annotations;
+
+    QFile file(m_storagePath);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        qWarning() << "Failed to open annotation storage for writing:"
+                   << m_storagePath;
+        return false;
+    }
+    file.write(QJsonDocument(root).toJson(QJsonDocument::Indented));
+    file.close();
+    qDebug() << "Saved" << annotations.size() << "annotations to storage"
+             << m_storagePath;
+    return true;
 }
 
 QList<PDFAnnotation> AnnotationModel::searchAnnotations(
@@ -598,27 +685,94 @@ QStringList AnnotationModel::getAuthors() const {
 
 // Poppler integration methods
 Poppler::Annotation* PDFAnnotation::toPopplerAnnotation() const {
-    // Note: Creating Poppler annotations programmatically is complex and
-    // requires specific constructors that may not be publicly available in all
-    // Poppler versions. This is a simplified implementation that demonstrates
-    // the concept.
-
     if (pageNumber < 0) {
         return nullptr;
     }
 
-    // For now, we'll return nullptr and log that this feature needs
-    // a more sophisticated implementation with proper Poppler annotation
-    // factories
-    qDebug() << "toPopplerAnnotation: Converting annotation type"
-             << static_cast<int>(type) << "on page" << pageNumber
-             << "- full implementation requires Poppler annotation factories";
+    auto configure = [this](Poppler::Annotation* annotation) {
+        if (!annotation) {
+            return annotation;
+        }
+        annotation->setBoundary(boundingRect);
+        annotation->setUniqueName(id);
+        annotation->setAuthor(author);
+        annotation->setContents(content);
+        annotation->setCreationDate(createdTime);
+        annotation->setModificationDate(modifiedTime);
+        Poppler::Annotation::Style style = annotation->style();
+        style.setColor(color);
+        style.setOpacity(opacity);
+        style.setWidth(lineWidth);
+        annotation->setStyle(style);
+        return annotation;
+    };
 
-    // In a production implementation, you would:
-    // 1. Use Poppler's annotation factory methods if available
-    // 2. Or use a PDF writing library like QPdf or PoDoFo
-    // 3. Or implement custom annotation serialization to PDF format
-
+    switch (type) {
+        case AnnotationType::Highlight:
+        case AnnotationType::Underline:
+        case AnnotationType::StrikeOut:
+        case AnnotationType::Squiggly: {
+            auto* annotation = new Poppler::HighlightAnnotation();
+            Poppler::HighlightAnnotation::Quad quad{};
+            quad.points[0] = boundingRect.topLeft();
+            quad.points[1] = boundingRect.topRight();
+            quad.points[2] = boundingRect.bottomRight();
+            quad.points[3] = boundingRect.bottomLeft();
+            quad.capStart = false;
+            quad.capEnd = false;
+            quad.feather = 0.0;
+            annotation->setHighlightQuads({quad});
+            const auto highlightType =
+                type == AnnotationType::Underline
+                    ? Poppler::HighlightAnnotation::Underline
+                : type == AnnotationType::StrikeOut
+                    ? Poppler::HighlightAnnotation::StrikeOut
+                : type == AnnotationType::Squiggly
+                    ? Poppler::HighlightAnnotation::Squiggly
+                    : Poppler::HighlightAnnotation::Highlight;
+            annotation->setHighlightType(highlightType);
+            return configure(annotation);
+        }
+        case AnnotationType::Note: {
+            auto* annotation =
+                new Poppler::TextAnnotation(Poppler::TextAnnotation::Linked);
+            annotation->setTextIcon(QStringLiteral("Note"));
+            return configure(annotation);
+        }
+        case AnnotationType::FreeText: {
+            auto* annotation =
+                new Poppler::TextAnnotation(Poppler::TextAnnotation::InPlace);
+            annotation->setTextFont(QFont(fontFamily, fontSize));
+            annotation->setTextColor(color);
+            return configure(annotation);
+        }
+        case AnnotationType::Rectangle:
+        case AnnotationType::Circle: {
+            auto* annotation = new Poppler::GeomAnnotation();
+            annotation->setGeomType(
+                type == AnnotationType::Circle
+                    ? Poppler::GeomAnnotation::InscribedCircle
+                    : Poppler::GeomAnnotation::InscribedSquare);
+            return configure(annotation);
+        }
+        case AnnotationType::Line:
+        case AnnotationType::Arrow: {
+            auto* annotation = new Poppler::LineAnnotation(
+                Poppler::LineAnnotation::StraightLine);
+            annotation->setLinePoints({startPoint, endPoint});
+            if (type == AnnotationType::Arrow) {
+                annotation->setLineEndStyle(
+                    Poppler::LineAnnotation::ClosedArrow);
+                annotation->setLineIntent(Poppler::LineAnnotation::Arrow);
+            }
+            return configure(annotation);
+        }
+        case AnnotationType::Ink: {
+            auto* annotation = new Poppler::InkAnnotation();
+            annotation->setInkPaths({inkPath.toVector()});
+            return configure(annotation);
+        }
+    }
     return nullptr;
 }
 

@@ -133,8 +133,12 @@ public:
 
     // Document integration
     void setDocument(std::shared_ptr<Poppler::Document> document);
+    void setStoragePath(const QString& storagePath);
+    QString storagePath() const { return m_storagePath; }
     bool loadAnnotationsFromDocument();
     bool saveAnnotationsToDocument();
+    bool loadAnnotationsFromStorage();
+    bool saveAnnotationsToStorage() const;
     void clearAnnotations();
 
     // Search and filtering
@@ -163,4 +167,5 @@ private:
 
     QList<PDFAnnotation> m_annotations;
     std::shared_ptr<Poppler::Document> m_document;
+    QString m_storagePath;
 };

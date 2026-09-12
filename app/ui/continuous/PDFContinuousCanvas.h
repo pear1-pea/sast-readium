@@ -41,6 +41,11 @@ public:
     void setAnnotations(
         const QHash<int, QList<PDFAnnotation>>& annotationsByPage);
     void clearAnnotationOverlays();
+    void setAnnotationTool(AnnotationType tool);
+    void setAnnotationColor(const QColor& color);
+    void setAnnotationOpacity(double opacity);
+    void setAnnotationLineWidth(double width);
+    void setAnnotationFont(const QString& family, int size);
     bool copySelectedText();
     bool hasTextSelection() const;
 
@@ -65,6 +70,8 @@ signals:
     void linkClicked(int pageIndex, const Poppler::Link* link);
     void browseLinkClicked(const QString& url);
     void gotoLinkClicked(int pageIndex);
+    void annotationPlacementRequested(int pageIndex, AnnotationType type,
+                                      const QRectF& normalizedRect);
     void renderApplied(int pageIndex, quint64 generation);
 
 protected:
@@ -95,6 +102,7 @@ private:
     void loadPageText(int pageIndex) const;
     QString selectedText() const;
     QRectF selectionRectInOriginalCoordinates(int pageIndex) const;
+    QRectF annotationRectInNormalizedCoordinates(int pageIndex) const;
 
     std::shared_ptr<const PDFContinuousBlueprint> m_blueprint;
     std::shared_ptr<Poppler::Document> m_document;
@@ -117,4 +125,14 @@ private:
     bool m_isSelectingText = false;
     std::optional<PDFPageHit> m_selectionStart;
     std::optional<PDFPageHit> m_selectionEnd;
+    bool m_annotationMode = false;
+    AnnotationType m_annotationTool = AnnotationType::Highlight;
+    QColor m_annotationColor = Qt::yellow;
+    qreal m_annotationOpacity = 0.7;
+    qreal m_annotationLineWidth = 2.0;
+    QString m_annotationFontFamily = QStringLiteral("Arial");
+    int m_annotationFontSize = 12;
+    bool m_isCreatingAnnotation = false;
+    std::optional<PDFPageHit> m_annotationStart;
+    std::optional<PDFPageHit> m_annotationEnd;
 };

@@ -32,6 +32,8 @@ public:
     // Model access
     BookmarkModel* getBookmarkModel() const { return m_bookmarkModel; }
     void setCurrentDocument(const QString& documentPath);
+    void setCurrentPage(int pageNumber);
+    void addCurrentBookmark();
 
     // Bookmark operations
     bool addBookmark(const QString& documentPath, int pageNumber,
@@ -106,4 +108,5 @@ private:
     // Data
     BookmarkModel* m_bookmarkModel;
     QString m_currentDocument;
+    int m_currentPage = -1;
 };

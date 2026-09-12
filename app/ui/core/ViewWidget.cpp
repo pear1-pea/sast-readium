@@ -232,6 +232,14 @@ PDFViewMode ViewWidget::getCurrentViewMode() const {
     return PDFViewMode::SinglePage;
 }
 
+PDFViewer* ViewWidget::getCurrentViewer() const {
+    const int currentIndex = getCurrentDocumentIndex();
+    if (currentIndex < 0 || currentIndex >= pdfViewers.size()) {
+        return nullptr;
+    }
+    return pdfViewers.at(currentIndex);
+}
+
 void ViewWidget::setCurrentZoom(int percentage) {
     int currentIndex = getCurrentDocumentIndex();
     if (currentIndex >= 0 && currentIndex < pdfViewers.size()) {
@@ -253,6 +261,8 @@ void ViewWidget::onDocumentOpened(int index, const QString& fileName) {
     PDFViewer* viewer = createPDFViewer();
     m_viewerFilePaths.insert(viewer, filePath);
     viewer->setDocument(document);
+    viewer->setAnnotationStoragePath(filePath +
+                                     QStringLiteral(".sast-annotations.json"));
 
     const int savedPage = m_readingProgress.pageForFile(filePath);
     if (savedPage > 0 && savedPage < viewer->getPageCount()) {
@@ -463,6 +473,14 @@ PDFViewer* ViewWidget::createPDFViewer() {
             &ViewWidget::onPDFZoomChanged);
     connect(viewer, &PDFViewer::viewModeChanged, this,
             &ViewWidget::onPDFViewModeChanged);
+    connect(viewer, &PDFViewer::bookmarkRequested, this,
+            [this, viewer](int pageNumber) {
+                const QString filePath = m_viewerFilePaths.value(viewer);
+                if (!filePath.isEmpty()) {
+                    emit bookmarkRequested(filePath, pageNumber);
+                }
+            });
+    connect(viewer, &PDFViewer::filesDropped, this, &ViewWidget::filesDropped);
 
     return viewer;
 }

@@ -1,5 +1,7 @@
 #include <config.h>
 #include <QApplication>
+#include <QFileInfo>
+#include <QTimer>
 #include "MainWindow.h"
 #include "core/AppBootstrap.h"
 #include "utils/LoggingConfig.h"
@@ -46,6 +48,21 @@ int main(int argc, char** argv) {
         MainWindow w(deps);
         w.show();
         LOG_INFO("Main window created and shown successfully");
+
+        QStringList commandLineFiles;
+        const QStringList arguments = app.arguments();
+        for (const QString& argument : arguments.mid(1)) {
+            const QFileInfo fileInfo(argument);
+            if (fileInfo.isFile() &&
+                fileInfo.suffix().compare("pdf", Qt::CaseInsensitive) == 0) {
+                commandLineFiles.append(fileInfo.absoluteFilePath());
+            }
+        }
+        if (!commandLineFiles.isEmpty()) {
+            QTimer::singleShot(0, &w, [&w, commandLineFiles]() {
+                w.openFiles(commandLineFiles);
+            });
+        }
 
         int result = QApplication::exec();
         LOG_INFO("Application exiting with code: {}", result);
