@@ -1090,6 +1090,7 @@ void ThumbnailListView::updatePreloadRange() {
         // target
         thumbnailModel->cancelOutOfRangeRequests(m_visibleRange.first,
                                                  m_visibleRange.second);
+        ++m_cancelledOutOfRangeCount;
         int predictedPage = predictLandingPage();
         if (predictedPage >= 0) {
             const PreloadSpan span = weightedPreloadSpan(
@@ -1175,6 +1176,11 @@ void ThumbnailListView::requestThumbnailRange(int startPage, int endPage) {
 
     for (int page : requestOrder) {
         thumbnailModel->requestThumbnail(page);
+    }
+
+    m_dispatchedRequestCount += requestOrder.size();
+    if (visibleStart <= visibleEnd) {
+        m_visibleRequestCount += visibleEnd - visibleStart + 1;
     }
 
     LOG_DEBUG(

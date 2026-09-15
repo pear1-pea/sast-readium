@@ -11,6 +11,7 @@ private slots:
     void cacheKeyIsStableForSamePathAndSize();
     void cacheKeyChangesWhenSizeChanges();
     void diskCacheFreshnessUsesFileModificationTimes();
+    void providerStatisticsStartAtZero();
 };
 
 void RecentPdfThumbnailProviderTest::cacheKeyIsStableForSamePathAndSize() {
@@ -21,6 +22,15 @@ void RecentPdfThumbnailProviderTest::cacheKeyIsStableForSamePathAndSize() {
 
     QVERIFY(!first.isEmpty());
     QCOMPARE(first, second);
+}
+
+void RecentPdfThumbnailProviderTest::providerStatisticsStartAtZero() {
+    RecentPdfThumbnailProvider provider;
+    QCOMPARE(provider.memoryHitCount(), quint64(0));
+    QCOMPARE(provider.diskHitCount(), quint64(0));
+    provider.resetStatistics();
+    QCOMPARE(provider.memoryHitCount(), quint64(0));
+    QCOMPARE(provider.diskHitCount(), quint64(0));
 }
 
 void RecentPdfThumbnailProviderTest::cacheKeyChangesWhenSizeChanges() {

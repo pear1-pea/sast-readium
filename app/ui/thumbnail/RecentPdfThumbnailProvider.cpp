@@ -38,6 +38,7 @@ QPixmap RecentPdfThumbnailProvider::cachedThumbnail(const QString& filePath,
         auto it = m_memoryCache.constFind(key);
         if (it != m_memoryCache.constEnd()) {
             m_cacheAccessTimes[key] = QDateTime::currentDateTimeUtc();
+            ++m_memoryHitCount;
             return it.value();
         }
     }
@@ -52,9 +53,30 @@ QPixmap RecentPdfThumbnailProvider::cachedThumbnail(const QString& filePath,
         return {};
     }
 
+    {
+        QMutexLocker locker(&m_mutex);
+        ++m_diskHitCount;
+    }
+
     const_cast<RecentPdfThumbnailProvider*>(this)->insertMemoryCache(key,
                                                                      pixmap);
     return pixmap;
+}
+
+quint64 RecentPdfThumbnailProvider::memoryHitCount() const {
+    QMutexLocker locker(&m_mutex);
+    return m_memoryHitCount;
+}
+
+quint64 RecentPdfThumbnailProvider::diskHitCount() const {
+    QMutexLocker locker(&m_mutex);
+    return m_diskHitCount;
+}
+
+void RecentPdfThumbnailProvider::resetStatistics() {
+    QMutexLocker locker(&m_mutex);
+    m_memoryHitCount = 0;
+    m_diskHitCount = 0;
 }
 
 void RecentPdfThumbnailProvider::requestThumbnail(const QString& filePath,

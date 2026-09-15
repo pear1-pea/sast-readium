@@ -80,6 +80,18 @@ public:
     // 预加载控制
     void setPreloadMargin(int margin);
     int preloadMargin() const { return m_preloadMargin; }
+    QPair<int, int> visibleRange() const { return m_visibleRange; }
+    QPair<int, int> preloadRange() const {
+        return {m_lastPreloadStart, m_lastPreloadEnd};
+    }
+    double scrollVelocity() const { return m_scrollVelocity; }
+    int scrollDirection() const { return m_scrollDirection; }
+    int preloadBiasDirection() const { return m_preloadBiasDirection; }
+    quint64 dispatchedRequestCount() const { return m_dispatchedRequestCount; }
+    quint64 visibleRequestCount() const { return m_visibleRequestCount; }
+    quint64 cancelledOutOfRangeCount() const {
+        return m_cancelledOutOfRangeCount;
+    }
 
     void setAutoPreload(bool enabled);
     bool autoPreload() const { return m_autoPreload; }
@@ -204,6 +216,9 @@ private:
     bool m_isScrolling;
     int m_lastPreloadStart;
     int m_lastPreloadEnd;
+    quint64 m_dispatchedRequestCount = 0;
+    quint64 m_visibleRequestCount = 0;
+    quint64 m_cancelledOutOfRangeCount = 0;
 
     // Heuristic scroll velocity tracking
     double m_scrollVelocity;  // pixels/ms

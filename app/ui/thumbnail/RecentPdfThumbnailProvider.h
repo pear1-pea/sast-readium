@@ -24,6 +24,9 @@ public:
                                       const QSize& size);
     static bool isDiskCacheFreshForTesting(const QString& sourcePath,
                                            const QString& cachePath);
+    quint64 memoryHitCount() const;
+    quint64 diskHitCount() const;
+    void resetStatistics();
 
 signals:
     void thumbnailReady(const QString& filePath, const QPixmap& pixmap);
@@ -50,6 +53,8 @@ private:
     mutable QHash<QString, QPixmap> m_memoryCache;
     mutable QHash<QString, QDateTime> m_cacheAccessTimes;
     QSet<QString> m_pendingRequests;
+    mutable quint64 m_memoryHitCount = 0;
+    mutable quint64 m_diskHitCount = 0;
     QString m_cacheDirectory;
 
     static const int MAX_MEMORY_CACHE_ITEMS = 50;
