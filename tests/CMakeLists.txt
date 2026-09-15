@@ -62,6 +62,7 @@ function(create_integration_test TEST_NAME TEST_SOURCE)
         ../app/managers/ShortcutManager.cpp
         ../app/ui/continuous/PDFContinuousLayout.cpp
         ../app/ui/continuous/PDFContinuousBlueprint.cpp
+        ../app/ui/continuous/PDFContinuousCoordinateMapper.cpp
         ../app/ui/continuous/PDFContinuousCanvas.cpp
         ../app/ui/continuous/PDFContinuousImageCache.cpp
         ../app/ui/continuous/PDFContinuousRenderScheduler.cpp
@@ -204,6 +205,15 @@ if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/unit/test_pdf_continuous_blueprint.cpp)
         ../app/ui/continuous/PDFContinuousBlueprint.cpp)
 endif()
 
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/unit/test_pdf_continuous_coordinate_mapper.cpp)
+    create_unit_test(test_pdf_continuous_coordinate_mapper
+        unit/test_pdf_continuous_coordinate_mapper.cpp)
+    target_sources(test_pdf_continuous_coordinate_mapper PRIVATE
+        ../app/ui/continuous/PDFContinuousLayout.cpp
+        ../app/ui/continuous/PDFContinuousBlueprint.cpp
+        ../app/ui/continuous/PDFContinuousCoordinateMapper.cpp)
+endif()
+
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/unit/test_pdf_continuous_render_scheduler.cpp)
     create_unit_test(test_pdf_continuous_render_scheduler
         unit/test_pdf_continuous_render_scheduler.cpp)
@@ -213,6 +223,13 @@ if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/unit/test_pdf_continuous_render_scheduler.
         ../app/utils/Logger.cpp)
     target_link_libraries(test_pdf_continuous_render_scheduler PRIVATE
         Qt6::Concurrent spdlog::spdlog)
+endif()
+
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/unit/test_pdf_continuous_image_cache.cpp)
+    create_unit_test(test_pdf_continuous_image_cache
+        unit/test_pdf_continuous_image_cache.cpp)
+    target_sources(test_pdf_continuous_image_cache PRIVATE
+        ../app/ui/continuous/PDFContinuousImageCache.cpp)
 endif()
 
 # ===== Integration Tests =====

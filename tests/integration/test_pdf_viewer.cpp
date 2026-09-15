@@ -90,6 +90,7 @@ class TestPDFViewer : public QObject {
 private:
     PDFViewer* m_viewer = nullptr;
     Poppler::Document* m_doc = nullptr;
+    QString m_pdfPath;
 
 private slots:
     void initTestCase();
@@ -116,6 +117,7 @@ void TestPDFViewer::initTestCase() {
     QString path =
         QStandardPaths::writableLocation(QStandardPaths::TempLocation) +
         "/pdfviewer_test.pdf";
+    m_pdfPath = path;
     {
         QFile f(path);
         QVERIFY(f.open(QIODevice::WriteOnly));
@@ -126,7 +128,7 @@ void TestPDFViewer::initTestCase() {
     QVERIFY(m_doc != nullptr);
 
     m_viewer = new PDFViewer(nullptr, false);  // no styling
-    m_viewer->setDocument(std::shared_ptr<Poppler::Document>(m_doc));
+    m_viewer->setDocument(std::shared_ptr<Poppler::Document>(m_doc), m_pdfPath);
 }
 
 void TestPDFViewer::cleanupTestCase() {

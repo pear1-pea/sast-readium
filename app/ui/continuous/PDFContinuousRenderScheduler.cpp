@@ -1,26 +1,37 @@
 #include "PDFContinuousRenderScheduler.h"
 
 #include <QFutureWatcher>
-#include <QMutexLocker>
 #include <QtConcurrent>
 
+#include <atomic>
+#include <memory>
+
 #include "utils/LoggingMacros.h"
+
+namespace {
+std::atomic<std::uint64_t> g_nextDocumentToken{0};
+}  // namespace
 
 PDFContinuousRenderScheduler::PDFContinuousRenderScheduler(QObject* parent)
     : QObject(parent) {
     m_renderPool.setMaxThreadCount(2);
 }
 
-void PDFContinuousRenderScheduler::setDocument(
-    std::shared_ptr<Poppler::Document> document) {
-    m_document = std::move(document);
-    ++m_documentToken;
+void PDFContinuousRenderScheduler::setDocumentSource(const QString& filePath,
+                                                     int pageCount) {
+    m_documentPath = filePath;
+    m_pageCount = qMax(0, pageCount);
+    m_documentToken = ++g_nextDocumentToken;
     clearPendingRequests();
+}
+
+void PDFContinuousRenderScheduler::clearDocumentSource() {
+    setDocumentSource({}, 0);
 }
 
 void PDFContinuousRenderScheduler::requestPage(
     const PDFContinuousRenderRequest& request) {
-    if (!m_document) {
+    if (m_documentPath.isEmpty() || m_pageCount <= 0) {
         LOG_DEBUG(
             "[continuous-render] drop request reason=no_document page={} "
             "generation={} current_generation={}",
@@ -28,12 +39,11 @@ void PDFContinuousRenderScheduler::requestPage(
         return;
     }
 
-    if (request.key.pageIndex < 0 ||
-        request.key.pageIndex >= m_document->numPages()) {
+    if (request.key.pageIndex < 0 || request.key.pageIndex >= m_pageCount) {
         LOG_DEBUG(
             "[continuous-render] drop request reason=page_out_of_range page={} "
             "pages={} generation={} current_generation={}",
-            request.key.pageIndex, m_document->numPages(), request.generation,
+            request.key.pageIndex, m_pageCount, request.generation,
             m_currentGeneration);
         return;
     }
@@ -43,6 +53,14 @@ void PDFContinuousRenderScheduler::requestPage(
             "[continuous-render] drop request reason=stale_generation page={} "
             "generation={} current_generation={}",
             request.key.pageIndex, request.generation, m_currentGeneration);
+        return;
+    }
+
+    if (request.key.documentToken != m_documentToken) {
+        LOG_DEBUG(
+            "[continuous-render] drop request reason=stale_document page={} "
+            "document_token={} current_document_token={}",
+            request.key.pageIndex, request.key.documentToken, m_documentToken);
         return;
     }
 
@@ -69,7 +87,9 @@ void PDFContinuousRenderScheduler::requestPage(
 void PDFContinuousRenderScheduler::requestPages(
     const QVector<PDFContinuousRenderRequest>& requests) {
     for (const PDFContinuousRenderRequest& request : requests) {
-        if (!m_document || request.generation != m_currentGeneration) {
+        if (m_documentPath.isEmpty() || m_pageCount <= 0 ||
+            request.generation != m_currentGeneration ||
+            request.key.documentToken != m_documentToken) {
             continue;
         }
         const PDFContinuousPendingKey pendingKey{request.generation,
@@ -77,8 +97,7 @@ void PDFContinuousRenderScheduler::requestPages(
         if (m_pendingKeys.contains(pendingKey)) {
             continue;
         }
-        if (request.key.pageIndex < 0 ||
-            request.key.pageIndex >= m_document->numPages()) {
+        if (request.key.pageIndex < 0 || request.key.pageIndex >= m_pageCount) {
             continue;
         }
         m_pendingKeys.insert(pendingKey);
@@ -152,7 +171,7 @@ void PDFContinuousRenderScheduler::dispatchPendingRequests() {
 
         watcher->setFuture(QtConcurrent::run(
             &m_renderPool, &PDFContinuousRenderScheduler::renderPage,
-            m_document, request, m_renderMutex));
+            m_documentPath, m_documentToken, request));
     }
 }
 
@@ -194,19 +213,49 @@ int PDFContinuousRenderScheduler::pendingRequestCount() const {
 }
 
 PDFContinuousRenderResult PDFContinuousRenderScheduler::renderPage(
-    std::shared_ptr<Poppler::Document> document,
-    const PDFContinuousRenderRequest& request,
-    std::shared_ptr<QMutex> renderMutex) {
+    const QString& documentPath, std::uint64_t documentToken,
+    const PDFContinuousRenderRequest& request) {
     PDFContinuousRenderResult result;
     result.request = request;
 
-    if (!document) {
-        result.error = QStringLiteral("No document");
+    // QThreadPool reuses its threads, so keep one Poppler document per worker
+    // thread and replace it when the source token changes.
+    struct RenderThreadContext {
+        QString path;
+        std::uint64_t documentToken = 0;
+        std::unique_ptr<Poppler::Document> document;
+    };
+    thread_local RenderThreadContext context;
+
+    if (context.path != documentPath ||
+        context.documentToken != documentToken || !context.document) {
+        context.document.reset();
+        context.path = documentPath;
+        context.documentToken = documentToken;
+        context.document = Poppler::Document::load(documentPath);
+        if (context.document) {
+            context.document->setRenderHint(Poppler::Document::Antialiasing,
+                                            true);
+            context.document->setRenderHint(Poppler::Document::TextAntialiasing,
+                                            true);
+            context.document->setRenderHint(Poppler::Document::TextHinting,
+                                            true);
+            context.document->setRenderHint(
+                Poppler::Document::TextSlightHinting, true);
+            context.document->setRenderHint(Poppler::Document::ThinLineShape,
+                                            true);
+            context.document->setRenderHint(Poppler::Document::OverprintPreview,
+                                            true);
+        }
+    }
+
+    if (!context.document) {
+        result.error = QStringLiteral("Cannot load worker document");
         return result;
     }
 
-    QMutexLocker locker(renderMutex.get());
-    std::unique_ptr<Poppler::Page> page(document->page(request.key.pageIndex));
+    std::unique_ptr<Poppler::Page> page(
+        context.document->page(request.key.pageIndex));
     if (!page) {
         result.error = QStringLiteral("Cannot access page");
         return result;

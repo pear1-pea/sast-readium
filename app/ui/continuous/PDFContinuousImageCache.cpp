@@ -51,9 +51,11 @@ QImage PDFContinuousImageCache::get(const PDFContinuousRenderKey& key) const {
     QMutexLocker locker(&m_mutex);
     auto it = m_images.find(key);
     if (it == m_images.end()) {
+        ++m_missCount;
         return QImage();
     }
 
+    ++m_hitCount;
     m_lruOrder.removeAll(key);
     m_lruOrder.push_back(key);
     return it.value();
@@ -86,6 +88,22 @@ qint64 PDFContinuousImageCache::maxCostBytes() const {
 qint64 PDFContinuousImageCache::currentCostBytes() const {
     QMutexLocker locker(&m_mutex);
     return m_currentCostBytes;
+}
+
+quint64 PDFContinuousImageCache::hitCount() const {
+    QMutexLocker locker(&m_mutex);
+    return m_hitCount;
+}
+
+quint64 PDFContinuousImageCache::missCount() const {
+    QMutexLocker locker(&m_mutex);
+    return m_missCount;
+}
+
+void PDFContinuousImageCache::resetStatistics() {
+    QMutexLocker locker(&m_mutex);
+    m_hitCount = 0;
+    m_missCount = 0;
 }
 
 void PDFContinuousImageCache::evictIfNeeded() {
