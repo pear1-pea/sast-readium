@@ -33,7 +33,8 @@ public:
     ~PDFViewer();
 
     // 文档操作
-    void setDocument(std::shared_ptr<Poppler::Document> document);
+    void setDocument(std::shared_ptr<Poppler::Document> document,
+                     const QString& filePath);
     void clearDocument();
 
     // 页面导航
@@ -92,6 +93,7 @@ public:
     bool loadAnnotations();
     void clearAnnotations();
     void setAnnotationTool(AnnotationType tool);
+    void setAnnotationMode(bool enabled);
     void setAnnotationColor(const QColor& color);
     void setAnnotationOpacity(double opacity);
     void setAnnotationLineWidth(double width);

@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "PDFContinuousBlueprint.h"
+#include "PDFContinuousCoordinateMapper.h"
 #include "PDFContinuousImageCache.h"
 #include "model/AnnotationModel.h"
 #include "model/SearchModel.h"
@@ -42,6 +43,7 @@ public:
         const QHash<int, QList<PDFAnnotation>>& annotationsByPage);
     void clearAnnotationOverlays();
     void setAnnotationTool(AnnotationType tool);
+    void setAnnotationMode(bool enabled);
     void setAnnotationColor(const QColor& color);
     void setAnnotationOpacity(double opacity);
     void setAnnotationLineWidth(double width);
@@ -78,6 +80,7 @@ protected:
     void paintEvent(QPaintEvent* event) override;
     void resizeEvent(QResizeEvent* event) override;
     bool event(QEvent* event) override;
+    void keyPressEvent(QKeyEvent* event) override;
     void mouseMoveEvent(QMouseEvent* event) override;
     void mousePressEvent(QMouseEvent* event) override;
     void mouseReleaseEvent(QMouseEvent* event) override;
@@ -100,11 +103,13 @@ private:
                                         const PDFPageGeometry& geometry) const;
     void emitTypedLinkClicked(const Poppler::Link* link);
     void loadPageText(int pageIndex) const;
+    bool textBoxAtViewportPoint(const QPointF& viewportPoint,
+                                int* pageIndex = nullptr) const;
     QString selectedText() const;
-    QRectF selectionRectInOriginalCoordinates(int pageIndex) const;
     QRectF annotationRectInNormalizedCoordinates(int pageIndex) const;
 
     std::shared_ptr<const PDFContinuousBlueprint> m_blueprint;
+    PDFContinuousCoordinateMapper m_coordinateMapper;
     std::shared_ptr<Poppler::Document> m_document;
     qreal m_contentOffsetX = 0.0;
     qreal m_contentOffsetY = 0.0;

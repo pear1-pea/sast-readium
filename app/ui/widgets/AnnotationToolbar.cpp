@@ -28,6 +28,12 @@ void AnnotationToolbar::setupUI() {
     m_toolLayout = new QHBoxLayout(m_toolGroup);
     m_toolButtonGroup = new QButtonGroup(this);
 
+    m_selectBtn = new QPushButton("选择");
+    m_selectBtn->setCheckable(true);
+    m_selectBtn->setChecked(true);
+    m_selectBtn->setToolTip("选择文本或页面内容");
+    m_toolLayout->addWidget(m_selectBtn);
+
     // Create tool buttons
     m_highlightBtn = new QPushButton("高亮");
     m_highlightBtn->setCheckable(true);
@@ -195,6 +201,8 @@ void AnnotationToolbar::setupConnections() {
     connect(m_toolButtonGroup,
             QOverload<QAbstractButton*>::of(&QButtonGroup::buttonClicked), this,
             &AnnotationToolbar::onToolButtonClicked);
+    connect(m_selectBtn, &QPushButton::clicked, this,
+            [this]() { setAnnotationMode(false); });
 
     // Color selection
     connect(m_colorButton, &QPushButton::clicked, this,
@@ -226,6 +234,17 @@ void AnnotationToolbar::setCurrentTool(AnnotationType tool) {
         updatePropertyControls();
         emit toolChanged(tool);
     }
+}
+
+void AnnotationToolbar::setAnnotationMode(bool enabled) {
+    if (m_annotationMode == enabled) {
+        updateToolButtons();
+        return;
+    }
+
+    m_annotationMode = enabled;
+    updateToolButtons();
+    emit annotationModeChanged(enabled);
 }
 
 void AnnotationToolbar::setCurrentColor(const QColor& color) {
@@ -276,6 +295,7 @@ void AnnotationToolbar::setEnabled(bool enabled) {
 
 void AnnotationToolbar::resetToDefaults() {
     setCurrentTool(AnnotationType::Highlight);
+    setAnnotationMode(false);
     setCurrentColor(Qt::yellow);
     setCurrentOpacity(0.7);
     setCurrentLineWidth(2.0);
@@ -288,6 +308,7 @@ void AnnotationToolbar::onToolButtonClicked() {
     if (button) {
         int toolValue = button->property("tool").toInt();
         setCurrentTool(static_cast<AnnotationType>(toolValue));
+        setAnnotationMode(true);
     }
 }
 
@@ -321,13 +342,18 @@ void AnnotationToolbar::onFontFamilyChanged(const QString& family) {
 }
 
 void AnnotationToolbar::updateToolButtons() {
+    if (m_selectBtn) {
+        m_selectBtn->setChecked(!m_annotationMode);
+    }
+
     // Find and check the button corresponding to current tool
     for (QAbstractButton* button : m_toolButtonGroup->buttons()) {
         QPushButton* pushButton = qobject_cast<QPushButton*>(button);
         if (pushButton) {
             int toolValue = pushButton->property("tool").toInt();
-            pushButton->setChecked(static_cast<AnnotationType>(toolValue) ==
-                                   m_currentTool);
+            pushButton->setChecked(m_annotationMode &&
+                                   static_cast<AnnotationType>(toolValue) ==
+                                       m_currentTool);
         }
     }
 }

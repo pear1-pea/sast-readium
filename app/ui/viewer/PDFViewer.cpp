@@ -170,6 +170,7 @@ struct PDFViewer::Private {
 
     // 文档数据
     std::shared_ptr<Poppler::Document> document;
+    QString documentPath;
     int currentPageNumber = 0;
     PDFViewMode currentViewMode = PDFViewMode::SinglePage;
     int currentRotation = 0;
@@ -653,7 +654,8 @@ void PDFViewer::setupShortcuts() {
             [this]() { goToPage(d->currentPageNumber - 10); });
 }
 
-void PDFViewer::setDocument(std::shared_ptr<Poppler::Document> doc) {
+void PDFViewer::setDocument(std::shared_ptr<Poppler::Document> doc,
+                            const QString& filePath) {
     try {
         // 清理旧文档
         if (d->document) {
@@ -661,11 +663,17 @@ void PDFViewer::setDocument(std::shared_ptr<Poppler::Document> doc) {
         }
 
         d->document = doc;
+        d->documentPath = filePath;
         d->currentPageNumber = 0;
         d->currentRotation = 0;  // 重置旋转
         d->continuousLayoutFingerprintValid = false;
 
         if (d->document) {
+            if (d->documentPath.isEmpty()) {
+                throw std::runtime_error(
+                    "PDFViewer requires a file path for continuous rendering");
+            }
+
             // Configure d->document for high-quality rendering
             d->document->setRenderHint(Poppler::Document::Antialiasing, true);
             d->document->setRenderHint(Poppler::Document::TextAntialiasing,
@@ -680,9 +688,6 @@ void PDFViewer::setDocument(std::shared_ptr<Poppler::Document> doc) {
             // Share d->document with d->prerenderer
             if (d->prerenderer) {
                 d->prerenderer->setDocument(d->document.get());
-            }
-            if (d->continuousRenderScheduler) {
-                d->continuousRenderScheduler->setDocument(d->document);
             }
             if (d->continuousCanvas) {
                 d->continuousCanvas->setDocument(d->document);
@@ -703,6 +708,11 @@ void PDFViewer::setDocument(std::shared_ptr<Poppler::Document> doc) {
                 throw std::runtime_error("无法访问文档页面");
             }
 
+            if (d->continuousRenderScheduler) {
+                d->continuousRenderScheduler->setDocumentSource(d->documentPath,
+                                                                numPages);
+            }
+
             updatePageDisplay();
 
             // 如果是连续模式，创建所有页面
@@ -714,10 +724,11 @@ void PDFViewer::setDocument(std::shared_ptr<Poppler::Document> doc) {
             setMessage(QString("文档加载成功，共 %1 页").arg(numPages));
 
         } else {
+            d->documentPath.clear();
             d->singlePageWidget->setPage(nullptr);
             d->continuousImageCache.clear();
             if (d->continuousRenderScheduler) {
-                d->continuousRenderScheduler->setDocument(nullptr);
+                d->continuousRenderScheduler->clearDocumentSource();
             }
             if (d->continuousCanvas) {
                 d->continuousCanvas->setDocument(nullptr);
@@ -740,7 +751,16 @@ void PDFViewer::setDocument(std::shared_ptr<Poppler::Document> doc) {
     } catch (const std::exception& e) {
         // 文档加载失败，清理状态
         d->document = nullptr;
+        d->documentPath.clear();
         d->singlePageWidget->setPage(nullptr);
+        d->continuousImageCache.clear();
+        if (d->continuousRenderScheduler) {
+            d->continuousRenderScheduler->clearDocumentSource();
+        }
+        if (d->continuousCanvas) {
+            d->continuousCanvas->setDocument(nullptr);
+            d->continuousCanvas->setBlueprint(nullptr);
+        }
 
         setMessage(QString("文档加载失败: %1").arg(e.what()));
         qDebug() << "Document loading failed:" << e.what();
@@ -749,7 +769,7 @@ void PDFViewer::setDocument(std::shared_ptr<Poppler::Document> doc) {
     }
 }
 
-void PDFViewer::clearDocument() { setDocument(nullptr); }
+void PDFViewer::clearDocument() { setDocument(nullptr, QString()); }
 
 AnnotationModel* PDFViewer::annotationModel() const {
     return d->annotationModel;
@@ -792,6 +812,12 @@ void PDFViewer::setAnnotationTool(AnnotationType tool) {
     d->annotationTool = tool;
     if (d->continuousCanvas) {
         d->continuousCanvas->setAnnotationTool(tool);
+    }
+}
+
+void PDFViewer::setAnnotationMode(bool enabled) {
+    if (d->continuousCanvas) {
+        d->continuousCanvas->setAnnotationMode(enabled);
     }
 }
 

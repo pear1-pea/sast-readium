@@ -1,6 +1,8 @@
 #include "ToolBar.h"
 #include <QAction>
+#include <QApplication>
 #include <QHBoxLayout>
+#include <QStyle>
 #include <QWidget>
 #include "../../managers/ShortcutManager.h"
 #include "../../managers/StyleManager.h"
@@ -56,6 +58,17 @@ void ToolBar::setupFileActions() {
 }
 
 void ToolBar::setupViewActions() {
+    // Attach the registered search action to a visible QWidget so its
+    // ApplicationShortcut is active and the entry is discoverable.
+    if (m_shortcutManager) {
+        if (QAction* searchAction =
+                m_shortcutManager->actionFor(ActionMap::showSearch)) {
+            searchAction->setIcon(QApplication::style()->standardIcon(
+                QStyle::SP_FileDialogContentsView));
+            addAction(searchAction);
+        }
+    }
+
     // Sidebar toggle
     toggleSidebarAction = new QAction("📋", this);
     applyShortcut(toggleSidebarAction, ActionMap::toggleSideBar, "切换侧边栏");

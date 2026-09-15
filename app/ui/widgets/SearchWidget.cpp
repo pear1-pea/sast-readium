@@ -12,6 +12,7 @@ SearchWidget::SearchWidget(QWidget* parent)
       m_document(nullptr),
       m_searchTimer(new QTimer(this)),
       m_optionsVisible(false) {
+    setObjectName(QStringLiteral("searchWidget"));
     setupUI();
     setupConnections();
     setupShortcuts();
@@ -33,6 +34,7 @@ void SearchWidget::setupUI() {
     m_searchLayout = new QHBoxLayout();
 
     m_searchInput = new QLineEdit();
+    m_searchInput->setObjectName(QStringLiteral("searchInput"));
     m_searchInput->setPlaceholderText("搜索文档内容...");
     m_searchInput->setClearButtonEnabled(true);
 

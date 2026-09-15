@@ -299,6 +299,12 @@ void MainWindow::initConnection() {
                         viewer->setAnnotationTool(tool);
                     }
                 });
+        connect(annotationToolbar, &AnnotationToolbar::annotationModeChanged,
+                this, [this](bool enabled) {
+                    if (PDFViewer* viewer = viewWidget->getCurrentViewer()) {
+                        viewer->setAnnotationMode(enabled);
+                    }
+                });
         connect(annotationToolbar, &AnnotationToolbar::colorChanged, this,
                 [this](const QColor& color) {
                     if (PDFViewer* viewer = viewWidget->getCurrentViewer()) {
@@ -350,19 +356,28 @@ void MainWindow::initConnection() {
                     }
                 });
         annotationToolbar->setEnabled(viewWidget->hasDocuments());
+        annotationToolbar->setAnnotationMode(false);
     }
 
-    connect(documentModel, &DocumentModel::currentDocumentChanged, this,
-            [this](int index) {
-                if (sideBar && sideBar->getBookmarkWidget()) {
-                    sideBar->setBookmarkContext(
-                        documentModel->getDocumentFilePath(index),
-                        viewWidget->getCurrentPage());
+    connect(
+        documentModel, &DocumentModel::currentDocumentChanged, this,
+        [this](int index) {
+            if (sideBar && sideBar->getBookmarkWidget()) {
+                sideBar->setBookmarkContext(
+                    documentModel->getDocumentFilePath(index),
+                    viewWidget->getCurrentPage());
+            }
+            if (rightSideBar && rightSideBar->annotationToolbar()) {
+                auto* toolbar = rightSideBar->annotationToolbar();
+                toolbar->setEnabled(index >= 0);
+                if (index >= 0) {
+                    if (PDFViewer* viewer = viewWidget->getCurrentViewer()) {
+                        viewer->setAnnotationTool(toolbar->getCurrentTool());
+                        viewer->setAnnotationMode(toolbar->isAnnotationMode());
+                    }
                 }
-                if (rightSideBar && rightSideBar->annotationToolbar()) {
-                    rightSideBar->annotationToolbar()->setEnabled(index >= 0);
-                }
-            });
+            }
+        });
     connect(documentModel, &DocumentModel::allDocumentsClosed, this, [this]() {
         if (sideBar && sideBar->getBookmarkWidget()) {
             sideBar->setBookmarkContext(QString(), -1);

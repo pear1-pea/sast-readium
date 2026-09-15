@@ -260,7 +260,7 @@ void ViewWidget::onDocumentOpened(int index, const QString& fileName) {
     // 创建新的PDF查看器
     PDFViewer* viewer = createPDFViewer();
     m_viewerFilePaths.insert(viewer, filePath);
-    viewer->setDocument(document);
+    viewer->setDocument(document, filePath);
     viewer->setAnnotationStoragePath(filePath +
                                      QStringLiteral(".sast-annotations.json"));
 

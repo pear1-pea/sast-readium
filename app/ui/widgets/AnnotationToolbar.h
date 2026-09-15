@@ -29,6 +29,8 @@ public:
     // Tool selection
     AnnotationType getCurrentTool() const { return m_currentTool; }
     void setCurrentTool(AnnotationType tool);
+    bool isAnnotationMode() const { return m_annotationMode; }
+    void setAnnotationMode(bool enabled);
 
     // Tool properties
     QColor getCurrentColor() const { return m_currentColor; }
@@ -52,6 +54,7 @@ public:
 
 signals:
     void toolChanged(AnnotationType tool);
+    void annotationModeChanged(bool enabled);
     void colorChanged(const QColor& color);
     void opacityChanged(double opacity);
     void lineWidthChanged(double width);
@@ -80,6 +83,7 @@ private:
     QGroupBox* m_toolGroup;
     QHBoxLayout* m_toolLayout;
     QButtonGroup* m_toolButtonGroup;
+    QPushButton* m_selectBtn;
 
     QPushButton* m_highlightBtn;
     QPushButton* m_noteBtn;
@@ -126,4 +130,5 @@ private:
     double m_currentLineWidth;
     int m_currentFontSize;
     QString m_currentFontFamily;
+    bool m_annotationMode = false;
 };

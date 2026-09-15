@@ -116,6 +116,7 @@ void MenuBar::createViewMenu() {
     viewModeGroup->addAction(gridViewAction);
 
     // 视图控制
+    QAction* searchAction = shortcutAction(ActionMap::showSearch);
     QAction* fullScreenAction = shortcutAction(ActionMap::fullScreen);
 
     QAction* zoomInAction = shortcutAction(ActionMap::zoomIn);
@@ -146,6 +147,8 @@ void MenuBar::createViewMenu() {
     viewMenu->addAction(m_debugPanelToggleAction);
     viewMenu->addAction(m_debugPanelClearAction);
     viewMenu->addAction(m_debugPanelExportAction);
+    viewMenu->addSeparator();
+    viewMenu->addAction(searchAction);
     viewMenu->addSeparator();
     viewMenu->addAction(singlePageAction);
     viewMenu->addAction(continuousScrollAction);
