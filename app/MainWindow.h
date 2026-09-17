@@ -17,7 +17,6 @@
 #include "model/PageModel.h"
 #include "model/RenderModel.h"
 #include "ui/core/MenuBar.h"
-#include "ui/core/RightSideBar.h"
 #include "ui/core/SideBar.h"
 #include "ui/core/StatusBar.h"
 #include "ui/core/ToolBar.h"
@@ -91,7 +90,6 @@ private:
     MenuBar* menuBar;
     ToolBar* toolBar;
     SideBar* sideBar;
-    RightSideBar* rightSideBar;
     StatusBar* statusBar;
     ViewWidget* viewWidget;
 

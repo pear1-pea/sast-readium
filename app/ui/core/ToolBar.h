@@ -8,6 +8,7 @@
 #include <QToolButton>
 #include <QWidgetAction>
 #include "../../controller/tool.hpp"
+#include "../widgets/AnnotationToolbar.h"
 
 class ShortcutManager;
 
@@ -20,6 +21,7 @@ public:
     void setActionsEnabled(bool enabled);
     void setSidebarChecked(bool checked);
     void setViewModeIndex(int mode);
+    AnnotationToolbar* annotationToolbar() const { return m_annotationToolbar; }
 
 signals:
     void actionTriggered(ActionMap action);
@@ -33,6 +35,7 @@ private:
     void setupFileActions();
     void setupViewActions();
     void setupRotationActions();
+    void setupAnnotationActions();
     void setupThemeActions();
     void createSeparator();
     void applyToolBarStyle();
@@ -50,6 +53,8 @@ private:
     // Rotation operations
     QAction* rotateLeftAction;
     QAction* rotateRightAction;
+
+    AnnotationToolbar* m_annotationToolbar;
 
     // Theme operations
     QAction* themeToggleAction;

@@ -135,6 +135,7 @@ void PDFPageWidget::setScaleFactor(double factor) {
     if (factor != currentScaleFactor) {
         currentScaleFactor = factor;
         renderPage();
+        updateSearchResultCoordinates();
         emit scaleChanged(factor);
     }
 }
@@ -157,6 +158,8 @@ void PDFPageWidget::quickScale(double factor) {
 
     setPixmap(scaledPixmap);
     setFixedSize(scaledPixmap.size() / scaledPixmap.devicePixelRatio());
+    updateSearchResultCoordinates();
+    update();
 }
 
 void PDFPageWidget::setRotation(int degrees) {
@@ -164,6 +167,7 @@ void PDFPageWidget::setRotation(int degrees) {
     if (degrees != currentRotation) {
         currentRotation = degrees;
         renderPage();
+        updateSearchResultCoordinates();
     }
 }
 
@@ -186,6 +190,7 @@ void PDFPageWidget::renderPage() {
                 originalScaleFactor = currentScaleFactor;
                 setPixmap(cached);
                 setFixedSize(cached.size() / cached.devicePixelRatio());
+                updateSearchResultCoordinates();
                 return;
             }
         }
@@ -235,6 +240,7 @@ void PDFPageWidget::onRenderTimeout() {
 
         setPixmap(renderedPixmap);
         setFixedSize(renderedPixmap.size() / renderedPixmap.devicePixelRatio());
+        updateSearchResultCoordinates();
 
         if (m_renderCache) {
             PDFRenderCache::CacheKey key{currentPage->index(),
@@ -479,7 +485,6 @@ void PDFPageWidget::drawSearchHighlights(QPainter& painter) {
                                                        : m_normalHighlightColor;
 
         painter.fillRect(result.widgetRect, highlightColor);
-
         if (result.isCurrentResult) {
             painter.setPen(QPen(highlightColor.darker(150), 2));
             painter.drawRect(result.widgetRect);

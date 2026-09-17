@@ -1,5 +1,4 @@
 #include "LayoutManager.h"
-#include "ui/core/RightSideBar.h"
 #include "ui/core/SideBar.h"
 #include "ui/core/ViewWidget.h"
 
@@ -7,12 +6,10 @@
 #include <QSplitter>
 #include <QWidget>
 
-LayoutManager::LayoutManager(SideBar* sideBar, RightSideBar* rightSideBar,
-                             ViewWidget* viewWidget, QWidget* mainViewerParent,
-                             QObject* parent)
+LayoutManager::LayoutManager(SideBar* sideBar, ViewWidget* viewWidget,
+                             QWidget* mainViewerParent, QObject* parent)
     : QObject(parent),
       m_sideBar(sideBar),
-      m_rightSideBar(rightSideBar),
       m_viewWidget(viewWidget),
       m_mainViewerParent(mainViewerParent) {}
 
@@ -28,17 +25,13 @@ QWidget* LayoutManager::createLayout() {
 
     m_splitter->addWidget(m_sideBar);
     m_splitter->addWidget(m_viewWidget);
-    m_splitter->addWidget(m_rightSideBar);
     m_splitter->setCollapsible(0, true);   // Left sidebar collapsible
     m_splitter->setCollapsible(1, false);  // ViewWidget not collapsible
-    m_splitter->setCollapsible(2, true);   // Right sidebar collapsible
     m_splitter->setStretchFactor(1, 1);    // ViewWidget gets stretch priority
 
     // Initial splitter sizes based on sidebar visibility
     int leftWidth = m_sideBar->isVisible() ? m_sideBar->getPreferredWidth() : 0;
-    int rightWidth =
-        m_rightSideBar->isVisible() ? m_rightSideBar->getPreferredWidth() : 0;
-    m_splitter->setSizes({leftWidth, 1000, rightWidth});
+    m_splitter->setSizes({leftWidth, 1000});
 
     mainViewerLayout->addWidget(m_splitter);
 

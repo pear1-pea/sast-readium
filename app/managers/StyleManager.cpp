@@ -108,7 +108,7 @@ QString StyleManager::getApplicationStyleSheet() const {
 
 QString StyleManager::getToolbarStyleSheet() const {
     return QString(R"(
-        QWidget#toolbar {
+        QToolBar#MainToolBar, QWidget#toolbar {
             background-color: %1;
             border-bottom: 1px solid %2;
             padding: %3px;
@@ -141,7 +141,7 @@ QString StyleManager::applyStyleTokens(
 QString StyleManager::createButtonStyle() const {
     return applyStyleTokens(
         QString(R"(
-        QPushButton {
+        QPushButton, QToolButton {
             background-color: @surface@;
             border: 1px solid @border@;
             border-radius: @radius@px;
@@ -149,20 +149,20 @@ QString StyleManager::createButtonStyle() const {
             font-weight: 500;
             padding: 6px 12px;
         }
-        QPushButton:hover {
+        QPushButton:hover, QToolButton:hover {
             background-color: @hover@;
             border-color: @accent@;
         }
-        QPushButton:pressed {
+        QPushButton:pressed, QToolButton:pressed {
             background-color: @pressed@;
             border-color: @accent@;
         }
-        QPushButton:disabled {
+        QPushButton:disabled, QToolButton:disabled {
             background-color: @surface@;
             border-color: @border@;
             color: @textSecondary@;
         }
-        QPushButton:focus {
+        QPushButton:focus, QToolButton:focus {
             border: 2px solid @accent@;
         }
     )"),

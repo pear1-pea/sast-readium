@@ -11,6 +11,39 @@
 #include <QtGlobal>
 #include <cmath>
 
+namespace {
+
+Poppler::Page::SearchFlags searchFlagsFor(const SearchOptions& options) {
+    Poppler::Page::SearchFlags flags = Poppler::Page::NoSearchFlags;
+    if (!options.caseSensitive) {
+        flags |= Poppler::Page::IgnoreCase;
+    }
+    if (options.wholeWords) {
+        flags |= Poppler::Page::WholeWords;
+    }
+    return flags;
+}
+
+QRectF popplerRectToPdfCoordinates(const QRectF& rect, const QSizeF& pageSize) {
+    if (rect.isEmpty() || pageSize.isEmpty()) {
+        return QRectF();
+    }
+    return QRectF(rect.left(), pageSize.height() - rect.bottom(), rect.width(),
+                  rect.height());
+}
+
+QList<QRectF> popplerRectsToPdfCoordinates(const QList<QRectF>& rects,
+                                           const QSizeF& pageSize) {
+    QList<QRectF> pdfRects;
+    pdfRects.reserve(rects.size());
+    for (const QRectF& rect : rects) {
+        pdfRects.append(popplerRectToPdfCoordinates(rect, pageSize));
+    }
+    return pdfRects;
+}
+
+}  // namespace
+
 SearchModel::SearchModel(QObject* parent)
     : QAbstractListModel(parent),
       m_currentResultIndex(-1),
@@ -98,6 +131,7 @@ void SearchModel::startSearch(std::shared_ptr<Poppler::Document> document,
 
     // Start search (synchronous for now)
     performSearch();
+    m_isSearching = false;
     emit searchFinished(m_searchResults.size());
 }
 
@@ -225,6 +259,8 @@ void SearchModel::performSearch() {
     // Update the model with results
     beginResetModel();
     m_searchResults = allResults;
+    m_results = allResults;
+    m_currentResultIndex = m_results.isEmpty() ? -1 : 0;
     endResetModel();
 }
 
@@ -243,7 +279,64 @@ QList<SearchResult> SearchModel::searchInPage(Poppler::Page* page,
         return results;
     }
 
-    QRegularExpression regex = createSearchRegex(query, options);
+    if (!options.useRegex) {
+        return searchPlainTextInPage(page, pageNumber, query, pageText,
+                                     options);
+    }
+
+    return searchRegexInPage(page, pageNumber, pageText, options);
+}
+
+QList<SearchResult> SearchModel::searchPlainTextInPage(
+    Poppler::Page* page, int pageNumber, const QString& query,
+    const QString& pageText, const SearchOptions& options) {
+    QList<SearchResult> results;
+
+    const QList<QRectF> rects = popplerRectsToPdfCoordinates(
+        page->search(query, searchFlagsFor(options)), page->pageSizeF());
+    if (rects.isEmpty()) {
+        return results;
+    }
+
+    // Use page text only for the result list metadata. Poppler's rectangles
+    // are the source of truth for the visual match positions.
+    const QRegularExpression regex = createSearchRegex(query, options);
+    QRegularExpressionMatchIterator iterator = regex.globalMatch(pageText);
+    QList<QRegularExpressionMatch> matches;
+    while (iterator.hasNext()) {
+        matches.append(iterator.next());
+    }
+
+    const bool metadataMatchesGeometry = matches.size() == rects.size();
+    const int resultCount = qMin(options.maxResults, rects.size());
+    for (int i = 0; i < resultCount; ++i) {
+        // Do not attach a guessed text offset when Poppler and Qt disagree on
+        // occurrence count; keep a unique fallback identity for navigation.
+        int startPos = -1 - i;
+        int length = query.size();
+        QString matchedText = query;
+        QString context = query;
+        if (metadataMatchesGeometry) {
+            const QRegularExpressionMatch& match = matches.at(i);
+            startPos = match.capturedStart();
+            length = match.capturedLength();
+            matchedText = match.captured();
+            context = extractContext(pageText, startPos, length);
+        }
+
+        SearchResult result(pageNumber, matchedText, context, rects.at(i),
+                            startPos, length);
+        results.append(result);
+    }
+
+    return results;
+}
+
+QList<SearchResult> SearchModel::searchRegexInPage(
+    Poppler::Page* page, int pageNumber, const QString& pageText,
+    const SearchOptions& options) {
+    QList<SearchResult> results;
+    const QRegularExpression regex = createSearchRegex(m_currentQuery, options);
     QRegularExpressionMatchIterator iterator = regex.globalMatch(pageText);
 
     while (iterator.hasNext() && results.size() < options.maxResults) {
@@ -256,12 +349,9 @@ QList<SearchResult> SearchModel::searchInPage(Poppler::Page* page,
         QString context = extractContext(pageText, startPos, length);
 
         // Get bounding rectangle for the matched text
-        QList<QRectF> rects = page->search(matchedText);
-
-        QRectF boundingRect;
-        if (!rects.isEmpty()) {
-            boundingRect = rects.first();
-        }
+        const QList<QRectF> rects = popplerRectsToPdfCoordinates(
+            page->search(matchedText), page->pageSizeF());
+        const QRectF boundingRect = rects.isEmpty() ? QRectF() : rects.first();
 
         SearchResult result(pageNumber, matchedText, context, boundingRect,
                             startPos, length);
@@ -360,66 +450,44 @@ void SearchResult::transformToWidgetCoordinates(double scaleFactor,
         return;
     }
 
-    // Start with PDF coordinates (in points, origin at bottom-left)
-    QRectF pdfRect = boundingRect;
+    const QSizeF rotatedPageSize =
+        (rotation == 90 || rotation == 270)
+            ? QSizeF(pageSize.height(), pageSize.width())
+            : pageSize;
+    const double scaleX = widgetSize.width() / rotatedPageSize.width();
+    const double scaleY = widgetSize.height() / rotatedPageSize.height();
+    Q_UNUSED(scaleFactor)
+    const double uniformScale = qMin(scaleX, scaleY);
+    const QPointF offset(
+        (widgetSize.width() - rotatedPageSize.width() * uniformScale) / 2.0,
+        (widgetSize.height() - rotatedPageSize.height() * uniformScale) / 2.0);
 
-    // Convert from PDF coordinate system (bottom-left origin) to Qt coordinate
-    // system (top-left origin)
-    QRectF qtRect;
-    qtRect.setLeft(pdfRect.left());
-    qtRect.setTop(pageSize.height() - pdfRect.bottom());
-    qtRect.setWidth(pdfRect.width());
-    qtRect.setHeight(pdfRect.height());
-
-    // Apply rotation transformation
     QTransform transform;
-    QPointF center(pageSize.width() / 2.0, pageSize.height() / 2.0);
-
     switch (rotation) {
         case 90:
-            transform.translate(center.x(), center.y());
+            transform.translate(pageSize.height(), 0.0);
             transform.rotate(90);
-            transform.translate(-center.y(), -center.x());
             break;
         case 180:
-            transform.translate(center.x(), center.y());
+            transform.translate(pageSize.width(), pageSize.height());
             transform.rotate(180);
-            transform.translate(-center.x(), -center.y());
             break;
         case 270:
-            transform.translate(center.x(), center.y());
+            transform.translate(0.0, pageSize.width());
             transform.rotate(270);
-            transform.translate(-center.y(), -center.x());
             break;
         default:
-            // No rotation (0 degrees)
             break;
     }
 
-    // Apply transformation if rotation is needed
+    QRectF qtRect(boundingRect.left(),
+                  pageSize.height() - boundingRect.bottom(),
+                  boundingRect.width(), boundingRect.height());
     if (rotation != 0) {
         qtRect = transform.mapRect(qtRect);
     }
-
-    // Scale to widget coordinates
-    double scaleX = static_cast<double>(widgetSize.width()) / pageSize.width();
-    double scaleY =
-        static_cast<double>(widgetSize.height()) / pageSize.height();
-
-    // Apply uniform scaling (maintain aspect ratio)
-    double uniformScale = qMin(scaleX, scaleY) * scaleFactor;
-
-    widgetRect.setLeft(qtRect.left() * uniformScale);
-    widgetRect.setTop(qtRect.top() * uniformScale);
-    widgetRect.setWidth(qtRect.width() * uniformScale);
-    widgetRect.setHeight(qtRect.height() * uniformScale);
-
-    // Center the result if aspect ratios don't match
-    if (scaleX != scaleY) {
-        double offsetX =
-            (widgetSize.width() - pageSize.width() * uniformScale) / 2.0;
-        double offsetY =
-            (widgetSize.height() - pageSize.height() * uniformScale) / 2.0;
-        widgetRect.translate(offsetX, offsetY);
-    }
+    widgetRect =
+        QRectF(qtRect.left() * uniformScale + offset.x(),
+               qtRect.top() * uniformScale + offset.y(),
+               qtRect.width() * uniformScale, qtRect.height() * uniformScale);
 }

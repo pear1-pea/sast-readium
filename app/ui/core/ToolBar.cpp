@@ -20,6 +20,8 @@ ToolBar::ToolBar(QWidget* parent)
     createSeparator();
     setupRotationActions();
     createSeparator();
+    setupAnnotationActions();
+    createSeparator();
     setupThemeActions();
 
     // Apply initial style
@@ -113,6 +115,11 @@ void ToolBar::setupRotationActions() {
             [this]() { emit actionTriggered(ActionMap::rotateRight); });
 }
 
+void ToolBar::setupAnnotationActions() {
+    m_annotationToolbar = new AnnotationToolbar(this);
+    addWidget(m_annotationToolbar);
+}
+
 void ToolBar::setupThemeActions() {
     // Theme toggle
     themeToggleAction = new QAction("🌙", this);
@@ -168,6 +175,7 @@ void ToolBar::setActionsEnabled(bool enabled) {
 
     rotateLeftAction->setEnabled(enabled);
     rotateRightAction->setEnabled(enabled);
+    m_annotationToolbar->setEnabled(enabled);
 
     // Sidebar and theme toggle always available
     toggleSidebarAction->setEnabled(true);

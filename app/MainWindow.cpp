@@ -175,7 +175,6 @@ void MainWindow::initContent() {
     menuBar = new MenuBar(recentFilesManager, shortcutManager, this);
     toolBar = new ToolBar(this);
     sideBar = new SideBar(this);
-    rightSideBar = new RightSideBar(this);
     statusBar = new StatusBar(this);
     viewWidget = new ViewWidget(documentModel, this);
 
@@ -187,8 +186,7 @@ void MainWindow::initContent() {
     m_contentStack = new QStackedWidget(this);
 
     // 使用 LayoutManager 创建主查看器布局
-    m_layoutManager =
-        new LayoutManager(sideBar, rightSideBar, viewWidget, this, this);
+    m_layoutManager = new LayoutManager(sideBar, viewWidget, this, this);
     QWidget* mainViewerWidget = m_layoutManager->createLayout();
 
     // 添加页面到堆叠组件
@@ -290,9 +288,8 @@ void MainWindow::initConnection() {
     connect(sideBar->getBookmarkWidget(), &BookmarkWidget::navigateToBookmark,
             this, &MainWindow::onBookmarkNavigationRequested);
 
-    if (rightSideBar && rightSideBar->annotationToolbar()) {
-        AnnotationToolbar* annotationToolbar =
-            rightSideBar->annotationToolbar();
+    if (toolBar && toolBar->annotationToolbar()) {
+        AnnotationToolbar* annotationToolbar = toolBar->annotationToolbar();
         connect(annotationToolbar, &AnnotationToolbar::toolChanged, this,
                 [this](AnnotationType tool) {
                     if (PDFViewer* viewer = viewWidget->getCurrentViewer()) {
@@ -367,8 +364,8 @@ void MainWindow::initConnection() {
                     documentModel->getDocumentFilePath(index),
                     viewWidget->getCurrentPage());
             }
-            if (rightSideBar && rightSideBar->annotationToolbar()) {
-                auto* toolbar = rightSideBar->annotationToolbar();
+            if (toolBar && toolBar->annotationToolbar()) {
+                auto* toolbar = toolBar->annotationToolbar();
                 toolbar->setEnabled(index >= 0);
                 if (index >= 0) {
                     if (PDFViewer* viewer = viewWidget->getCurrentViewer()) {
@@ -382,8 +379,8 @@ void MainWindow::initConnection() {
         if (sideBar && sideBar->getBookmarkWidget()) {
             sideBar->setBookmarkContext(QString(), -1);
         }
-        if (rightSideBar && rightSideBar->annotationToolbar()) {
-            rightSideBar->annotationToolbar()->setEnabled(false);
+        if (toolBar && toolBar->annotationToolbar()) {
+            toolBar->annotationToolbar()->setEnabled(false);
         }
     });
     connect(
