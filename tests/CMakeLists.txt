@@ -2,7 +2,7 @@
 
 cmake_minimum_required(VERSION 3.16)
 
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Test Network Concurrent)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Test Network Concurrent Sql)
 find_package(spdlog REQUIRED)
 find_package(PkgConfig REQUIRED)
 
@@ -230,6 +230,16 @@ if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/unit/test_pdf_continuous_image_cache.cpp)
         unit/test_pdf_continuous_image_cache.cpp)
     target_sources(test_pdf_continuous_image_cache PRIVATE
         ../app/ui/continuous/PDFContinuousImageCache.cpp)
+endif()
+
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/unit/test_rag_p0.cpp)
+    create_unit_test(test_rag_p0
+        unit/test_rag_p0.cpp)
+    target_sources(test_rag_p0 PRIVATE
+        ../app/rag/extract/PdfTextExtractor.cpp
+        ../app/rag/extract/PdfChunker.cpp
+        ../app/rag/index/RagIndexStore.cpp)
+    target_link_libraries(test_rag_p0 PRIVATE Qt6::Sql)
 endif()
 
 # ===== Integration Tests =====
