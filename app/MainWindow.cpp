@@ -306,7 +306,9 @@ void MainWindow::initConnection() {
                     }
                     askWidget->setDocumentContext(snapshot.key);
                     askWidget->setIndexState(
-                        snapshot.state, snapshot.chunkCount, snapshot.error);
+                        snapshot.state, snapshot.chunkCount, snapshot.error,
+                        snapshot.embeddingState, snapshot.embeddedChunkCount,
+                        snapshot.embeddingError);
                     askWidget->setBusy(false);
                 });
         connect(askWidget, &Rag::AskPdfWidget::querySubmitted, this,
@@ -370,7 +372,9 @@ void MainWindow::initConnection() {
             m_ragCoordinator->currentSnapshot();
         askWidget->setDocumentContext(snapshot.key);
         askWidget->setIndexState(snapshot.state, snapshot.chunkCount,
-                                 snapshot.error);
+                                 snapshot.error, snapshot.embeddingState,
+                                 snapshot.embeddedChunkCount,
+                                 snapshot.embeddingError);
     }
 
     if (toolBar && toolBar->annotationToolbar()) {

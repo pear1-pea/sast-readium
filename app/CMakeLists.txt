@@ -60,7 +60,7 @@ target_include_directories(
 target_link_libraries(
     app
     PRIVATE
-    Qt::Core Qt::Gui Qt::Widgets Qt::Svg Qt::Concurrent Qt::Sql
+    Qt::Core Qt::Gui Qt::Widgets Qt::Svg Qt::Concurrent Qt::Network Qt::Sql
     PkgConfig::POPPLER_QT6
     spdlog::spdlog
 )

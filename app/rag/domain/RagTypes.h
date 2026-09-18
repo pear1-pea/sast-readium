@@ -125,6 +125,15 @@ enum class RagIndexState {
     Unsupported
 };
 
+enum class RagEmbeddingState {
+    Disabled,
+    Pending,
+    Running,
+    Ready,
+    Failed,
+    Cancelled
+};
+
 struct RagDocumentSnapshot {
     DocumentKey key;
     QString filePath;
@@ -133,6 +142,9 @@ struct RagDocumentSnapshot {
     int stageSequence = 0;
     int chunkCount = 0;
     QString error;
+    RagEmbeddingState embeddingState = RagEmbeddingState::Disabled;
+    int embeddedChunkCount = 0;
+    QString embeddingError;
 
     bool isReady() const { return state == RagIndexState::Ready; }
 };

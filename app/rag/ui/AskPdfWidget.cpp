@@ -105,9 +105,13 @@ void AskPdfWidget::setDocumentContext(const DocumentKey& document) {
 }
 
 void AskPdfWidget::setIndexState(RagIndexState state, int chunkCount,
-                                 const QString& error) {
+                                 const QString& error,
+                                 RagEmbeddingState embeddingState,
+                                 int embeddedChunkCount,
+                                 const QString& embeddingError) {
     m_state = state;
-    m_statusLabel->setText(stateText(state, chunkCount, error));
+    m_statusLabel->setText(stateText(state, chunkCount, error, embeddingState,
+                                     embeddedChunkCount, embeddingError));
     const bool ready = state == RagIndexState::Ready;
     const bool busy = isBusyState(state);
     m_queryEdit->setEnabled(ready);
@@ -150,7 +154,10 @@ void AskPdfWidget::activateItem(QListWidgetItem* item) {
 }
 
 QString AskPdfWidget::stateText(RagIndexState state, int chunkCount,
-                                const QString& error) {
+                                const QString& error,
+                                RagEmbeddingState embeddingState,
+                                int embeddedChunkCount,
+                                const QString& embeddingError) {
     switch (state) {
         case RagIndexState::CheckingCache:
             return QStringLiteral("正在检查索引缓存...");
@@ -161,6 +168,17 @@ QString AskPdfWidget::stateText(RagIndexState state, int chunkCount,
         case RagIndexState::Indexing:
             return QStringLiteral("正在建立搜索索引...");
         case RagIndexState::Ready:
+            if (embeddingState == RagEmbeddingState::Pending ||
+                embeddingState == RagEmbeddingState::Running) {
+                return QStringLiteral("索引就绪，正在准备语义检索 %1/%2")
+                    .arg(embeddedChunkCount)
+                    .arg(chunkCount);
+            }
+            if (embeddingState == RagEmbeddingState::Failed &&
+                !embeddingError.isEmpty()) {
+                return QStringLiteral("索引就绪，语义检索失败：%1")
+                    .arg(embeddingError);
+            }
             return QStringLiteral("索引就绪，%1 个证据片段").arg(chunkCount);
         case RagIndexState::Cancelled:
             return QStringLiteral("索引已取消");

@@ -43,6 +43,12 @@ private:
                      quint64 generation, int stageSequence,
                      RagIndexState state);
     void publish(const QString& filePath);
+    void startEmbedding(const QString& path, const DocumentKey& document,
+                        quint64 generation, const RagCancellationToken& cancel);
+    void updateEmbeddingState(const QString& path, quint64 generation,
+                              RagEmbeddingState state, int embeddedCount,
+                              const QString& error);
+    void invalidateQueries();
     QString pathForIndex(int index) const;
     static QString normalizedPath(const QString& filePath);
     static QString defaultDatabasePath();
@@ -57,6 +63,7 @@ private:
     QString m_currentPath;
     QHash<QString, Entry> m_entries;
     quint64 m_queryGeneration = 0;
+    RagCancellationToken m_queryCancellation;
 };
 
 }  // namespace Rag

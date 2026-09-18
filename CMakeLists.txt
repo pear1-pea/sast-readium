@@ -50,7 +50,7 @@ if(USE_VCPKG_INTERNAL)
     # vcpkg mode - use CONFIG mode for all packages
     find_package(
         Qt6
-        COMPONENTS Core Gui Widgets Svg LinguistTools Concurrent Sql TextToSpeech
+        COMPONENTS Core Gui Widgets Svg LinguistTools Concurrent Network Sql TextToSpeech
         CONFIG
         REQUIRED
     )
@@ -70,7 +70,7 @@ else()
         endif()
 
         # Find Qt6 using system installation
-        find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Svg LinguistTools Concurrent Sql TextToSpeech)
+        find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Svg LinguistTools Concurrent Network Sql TextToSpeech)
 
         # Find spdlog using system installation
         find_package(spdlog REQUIRED)
@@ -86,7 +86,7 @@ else()
         endif()
     else()
         # Generic system package finding
-        find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Svg LinguistTools Concurrent Sql TextToSpeech)
+        find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Svg LinguistTools Concurrent Network Sql TextToSpeech)
         find_package(spdlog REQUIRED)
         find_package(PkgConfig REQUIRED)
         pkg_check_modules(POPPLER_QT6 REQUIRED IMPORTED_TARGET poppler-qt6)

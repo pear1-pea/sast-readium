@@ -1,5 +1,7 @@
 #include "RagIndexStore.h"
 
+#include <QDataStream>
+#include <QIODevice>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -9,6 +11,7 @@
 #include <QSqlQuery>
 #include <QStringList>
 #include <QUuid>
+#include <cmath>
 
 namespace Rag {
 namespace {
@@ -151,7 +154,19 @@ bool RagIndexStore::initializeSchema(QString* error) {
             "section_path,"
             "text,"
             "tokenize='unicode61'"
-            ")")};
+            ")"),
+        QStringLiteral(
+            "CREATE TABLE IF NOT EXISTS chunk_vectors ("
+            "document_hash TEXT NOT NULL, chunk_id TEXT NOT NULL, "
+            "chunk_hash TEXT NOT NULL, model_id TEXT NOT NULL, "
+            "model_version TEXT NOT NULL, dimension INTEGER NOT NULL, "
+            "vector BLOB NOT NULL, "
+            "PRIMARY KEY(chunk_id, model_id, model_version), "
+            "FOREIGN KEY(chunk_id) REFERENCES chunks(chunk_id) ON DELETE "
+            "CASCADE)"),
+        QStringLiteral(
+            "CREATE INDEX IF NOT EXISTS idx_vectors_doc_model "
+            "ON chunk_vectors(document_hash, model_id, model_version)")};
 
     for (const QString& statement : statements) {
         QSqlQuery query(m_database);
@@ -199,6 +214,15 @@ bool RagIndexStore::replaceDocument(const DocumentKey& document,
     };
 
     QSqlQuery deleteOldFts(m_database);
+    QSqlQuery deleteOldVectors(m_database);
+    deleteOldVectors.prepare(QStringLiteral(
+        "DELETE FROM chunk_vectors WHERE document_hash IN ("
+        "SELECT document_hash FROM documents WHERE canonical_path = ? "
+        "AND document_hash <> ?)"));
+    deleteOldVectors.addBindValue(document.canonicalPath);
+    deleteOldVectors.addBindValue(document.contentHash);
+    if (!deleteOldVectors.exec())
+        return rollback(databaseError(deleteOldVectors));
     deleteOldFts.prepare(
         QStringLiteral("DELETE FROM chunks_fts WHERE document_hash IN ("
                        "SELECT document_hash FROM documents "
@@ -231,6 +255,12 @@ bool RagIndexStore::replaceDocument(const DocumentKey& document,
     }
 
     QSqlQuery deleteFts(m_database);
+    QSqlQuery deleteVectors(m_database);
+    deleteVectors.prepare(
+        QStringLiteral("DELETE FROM chunk_vectors WHERE document_hash = ?"));
+    deleteVectors.addBindValue(document.contentHash);
+    if (!deleteVectors.exec())
+        return rollback(databaseError(deleteVectors));
     deleteFts.prepare(
         QStringLiteral("DELETE FROM chunks_fts WHERE document_hash = ?"));
     deleteFts.addBindValue(document.contentHash);
@@ -404,6 +434,240 @@ QVector<RagEvidence> RagIndexStore::search(const DocumentKey& document,
         results.append(std::move(evidence));
     }
     return results;
+}
+
+QVector<RagIndexStore::VectorChunk> RagIndexStore::chunksMissingVectors(
+    const DocumentKey& document, const QString& model, const QString& version,
+    int limit, QString* error) const {
+    setError(error, {});
+    QVector<VectorChunk> chunks;
+    QSqlQuery query(m_database);
+    QString sql = QStringLiteral(
+        "SELECT c.chunk_id, c.chunk_hash, c.text FROM chunks c "
+        "LEFT JOIN chunk_vectors v ON v.chunk_id = c.chunk_id "
+        "AND v.chunk_hash = c.chunk_hash AND v.model_id = ? "
+        "AND v.model_version = ? WHERE c.document_hash = ? "
+        "AND v.chunk_id IS NULL ORDER BY c.page_start, c.char_start");
+    if (limit > 0)
+        sql += QStringLiteral(" LIMIT ?");
+    query.prepare(sql);
+    query.addBindValue(model);
+    query.addBindValue(version);
+    query.addBindValue(document.contentHash);
+    if (limit > 0)
+        query.addBindValue(limit);
+    if (!query.exec()) {
+        setError(error, databaseError(query));
+        return {};
+    }
+    while (query.next()) {
+        chunks.append({query.value(0).toString(),
+                       query.value(1).toString(),
+                       query.value(2).toString(),
+                       {}});
+    }
+    return chunks;
+}
+
+bool RagIndexStore::storeVectors(const DocumentKey& document,
+                                 const QString& model, const QString& version,
+                                 const QVector<VectorChunk>& chunks,
+                                 const RagCancellationToken& cancel,
+                                 QString* error) {
+    setError(error, {});
+    QMutexLocker lock(&writeMutex());
+    if (cancel.isCancelled()) {
+        setError(error, QStringLiteral("Embedding cancelled"));
+        return false;
+    }
+    if (!m_database.transaction()) {
+        setError(error, databaseError(m_database));
+        return false;
+    }
+    if (!chunks.isEmpty()) {
+        const int dimension = chunks.first().vector.size();
+        if (dimension <= 0) {
+            m_database.rollback();
+            setError(error, QStringLiteral("Empty embedding"));
+            return false;
+        }
+        QSqlQuery removeIncompatible(m_database);
+        removeIncompatible.prepare(QStringLiteral(
+            "DELETE FROM chunk_vectors WHERE document_hash = ? "
+            "AND model_id = ? AND model_version = ? AND dimension <> ?"));
+        removeIncompatible.addBindValue(document.contentHash);
+        removeIncompatible.addBindValue(model);
+        removeIncompatible.addBindValue(version);
+        removeIncompatible.addBindValue(dimension);
+        if (!removeIncompatible.exec()) {
+            setError(error, databaseError(removeIncompatible));
+            m_database.rollback();
+            return false;
+        }
+    }
+    QSqlQuery chunkCheck(m_database);
+    chunkCheck.prepare(QStringLiteral(
+        "SELECT 1 FROM chunks WHERE chunk_id = ? AND document_hash = ? "
+        "AND chunk_hash = ? LIMIT 1"));
+    QSqlQuery query(m_database);
+    query.prepare(QStringLiteral(
+        "INSERT OR REPLACE INTO chunk_vectors "
+        "(document_hash, chunk_id, chunk_hash, model_id, model_version, "
+        "dimension, vector) VALUES(?, ?, ?, ?, ?, ?, ?)"));
+    for (const VectorChunk& chunk : chunks) {
+        if (cancel.isCancelled() || chunk.vector.isEmpty() ||
+            chunk.vector.size() != chunks.first().vector.size()) {
+            m_database.rollback();
+            setError(error,
+                     QStringLiteral("Embedding cancelled or empty vector"));
+            return false;
+        }
+        QByteArray bytes;
+        QDataStream stream(&bytes, QIODevice::WriteOnly);
+        stream.setFloatingPointPrecision(QDataStream::SinglePrecision);
+        for (float value : chunk.vector) {
+            if (!std::isfinite(value)) {
+                m_database.rollback();
+                setError(error, QStringLiteral("Non-finite vector"));
+                return false;
+            }
+            stream << value;
+        }
+        chunkCheck.bindValue(0, chunk.chunkId);
+        chunkCheck.bindValue(1, document.contentHash);
+        chunkCheck.bindValue(2, chunk.chunkHash);
+        if (!chunkCheck.exec() || !chunkCheck.next()) {
+            m_database.rollback();
+            setError(error,
+                     chunkCheck.lastError().isValid()
+                         ? databaseError(chunkCheck)
+                         : QStringLiteral(
+                               "Chunk changed before embedding was saved"));
+            return false;
+        }
+        query.bindValue(0, document.contentHash);
+        query.bindValue(1, chunk.chunkId);
+        query.bindValue(2, chunk.chunkHash);
+        query.bindValue(3, model);
+        query.bindValue(4, version);
+        query.bindValue(5, chunk.vector.size());
+        query.bindValue(6, bytes);
+        if (!query.exec()) {
+            m_database.rollback();
+            setError(error, databaseError(query));
+            return false;
+        }
+    }
+    if (cancel.isCancelled()) {
+        m_database.rollback();
+        setError(error, QStringLiteral("Embedding cancelled"));
+        return false;
+    }
+    if (!m_database.commit()) {
+        setError(error, databaseError(m_database));
+        m_database.rollback();
+        return false;
+    }
+    return true;
+}
+
+QVector<RagIndexStore::VectorChunk> RagIndexStore::loadVectors(
+    const DocumentKey& document, const QString& model, const QString& version,
+    QString* error) const {
+    setError(error, {});
+    QVector<VectorChunk> chunks;
+    QSqlQuery query(m_database);
+    query.prepare(QStringLiteral(
+        "SELECT v.chunk_id, v.chunk_hash, v.dimension, v.vector "
+        "FROM chunk_vectors v JOIN chunks c ON c.chunk_id = v.chunk_id "
+        "WHERE c.document_hash = ? AND v.document_hash = ? "
+        "AND v.model_id = ? AND v.model_version = ? AND v.chunk_hash = "
+        "c.chunk_hash"));
+    query.addBindValue(document.contentHash);
+    query.addBindValue(document.contentHash);
+    query.addBindValue(model);
+    query.addBindValue(version);
+    if (!query.exec()) {
+        setError(error, databaseError(query));
+        return {};
+    }
+    while (query.next()) {
+        const int dimension = query.value(2).toInt();
+        const QByteArray bytes = query.value(3).toByteArray();
+        if (dimension <= 0 || qint64(dimension) * 4 != bytes.size())
+            continue;
+        VectorChunk chunk;
+        chunk.chunkId = query.value(0).toString();
+        chunk.chunkHash = query.value(1).toString();
+        QDataStream stream(bytes);
+        stream.setFloatingPointPrecision(QDataStream::SinglePrecision);
+        for (int i = 0; i < dimension; ++i) {
+            float value = 0;
+            stream >> value;
+            if (!std::isfinite(value))
+                break;
+            chunk.vector.append(value);
+        }
+        if (chunk.vector.size() == dimension)
+            chunks.append(std::move(chunk));
+    }
+    return chunks;
+}
+
+bool RagIndexStore::invalidateVectors(const DocumentKey& document,
+                                      const QString& model,
+                                      const QString& version, QString* error) {
+    setError(error, {});
+    QMutexLocker lock(&writeMutex());
+    QSqlQuery query(m_database);
+    query.prepare(
+        QStringLiteral("DELETE FROM chunk_vectors WHERE document_hash = ? "
+                       "AND model_id = ? AND model_version = ?"));
+    query.addBindValue(document.contentHash);
+    query.addBindValue(model);
+    query.addBindValue(version);
+    if (!query.exec()) {
+        setError(error, databaseError(query));
+        return false;
+    }
+    return true;
+}
+
+QVector<RagEvidence> RagIndexStore::evidenceByIds(const DocumentKey& document,
+                                                  const QStringList& ids,
+                                                  QString* error) const {
+    setError(error, {});
+    QVector<RagEvidence> evidence;
+    if (ids.isEmpty())
+        return evidence;
+    QStringList placeholders;
+    for (int i = 0; i < ids.size(); ++i)
+        placeholders.append(QStringLiteral("?"));
+    QSqlQuery query(m_database);
+    query.prepare(QStringLiteral("SELECT chunk_id, document_hash, page_start, "
+                                 "page_end, section_path, "
+                                 "text, locations_json FROM chunks WHERE "
+                                 "document_hash = ? AND chunk_id IN (%1)")
+                      .arg(placeholders.join(QStringLiteral(","))));
+    query.addBindValue(document.contentHash);
+    for (const QString& id : ids)
+        query.addBindValue(id);
+    if (!query.exec()) {
+        setError(error, databaseError(query));
+        return {};
+    }
+    while (query.next()) {
+        RagEvidence item;
+        item.chunkId = query.value(0).toString();
+        item.documentHash = query.value(1).toString();
+        item.pageStart = query.value(2).toInt();
+        item.pageEnd = query.value(3).toInt();
+        item.sectionPath = query.value(4).toString();
+        item.text = query.value(5).toString();
+        item.locations = locationsFromJson(query.value(6).toString());
+        evidence.append(std::move(item));
+    }
+    return evidence;
 }
 
 QString RagIndexStore::ftsQueryFor(const QString& query) {

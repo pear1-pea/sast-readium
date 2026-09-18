@@ -5,11 +5,30 @@ A Qt6-based PDF reader application with comprehensive build support for multiple
 ## Features
 
 - Modern Qt6-based PDF viewer
+- Ask PDF evidence search (FTS5); optional local hybrid embedding search
 - Cross-platform support (Windows, Linux, macOS)
 - Multiple build environments:
   - **vcpkg** for dependency management
   - **MSYS2** for Windows Unix-like development
   - **System packages** for native Linux/macOS builds
+
+### Local embedding search
+
+Ask PDF works offline with lexical search by default. To enable optional hybrid
+retrieval, run Ollama locally with an embedding model and set
+`READIUM_OLLAMA_EMBED_MODEL` and `READIUM_OLLAMA_EMBED_VERSION` before starting
+Readium. Both values are required for vector cache invalidation. For example:
+
+```sh
+ollama pull nomic-embed-text
+READIUM_OLLAMA_EMBED_MODEL=nomic-embed-text READIUM_OLLAMA_EMBED_VERSION=1 ./build/app/app
+```
+
+The app sends text only to `127.0.0.1:11434/api/embed`; it does not start or
+download a model. Set `READIUM_OLLAMA_EMBED_VERSION` to a new value after
+replacing/updating the model to invalidate cached vectors. Embeddings are
+generated in batches after the lexical index is ready; missing vectors or an
+unavailable local server do not prevent lexical search.
 
 ## Build Environments
 

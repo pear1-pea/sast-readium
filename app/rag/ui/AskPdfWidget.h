@@ -20,8 +20,10 @@ public:
     explicit AskPdfWidget(QWidget* parent = nullptr);
 
     void setDocumentContext(const DocumentKey& document);
-    void setIndexState(RagIndexState state, int chunkCount = 0,
-                       const QString& error = {});
+    void setIndexState(
+        RagIndexState state, int chunkCount = 0, const QString& error = {},
+        RagEmbeddingState embeddingState = RagEmbeddingState::Disabled,
+        int embeddedChunkCount = 0, const QString& embeddingError = {});
     void setEvidence(const QVector<RagEvidence>& evidence);
     void setBusy(bool busy);
 
@@ -35,7 +37,10 @@ private:
     void submitQuery();
     void activateItem(QListWidgetItem* item);
     static QString stateText(RagIndexState state, int chunkCount,
-                             const QString& error);
+                             const QString& error,
+                             RagEmbeddingState embeddingState,
+                             int embeddedChunkCount,
+                             const QString& embeddingError);
 
     DocumentKey m_document;
     RagIndexState m_state = RagIndexState::NotIndexed;
