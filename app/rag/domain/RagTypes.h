@@ -125,4 +125,16 @@ enum class RagIndexState {
     Unsupported
 };
 
+struct RagDocumentSnapshot {
+    DocumentKey key;
+    QString filePath;
+    RagIndexState state = RagIndexState::NotIndexed;
+    quint64 generation = 0;
+    int stageSequence = 0;
+    int chunkCount = 0;
+    QString error;
+
+    bool isReady() const { return state == RagIndexState::Ready; }
+};
+
 }  // namespace Rag

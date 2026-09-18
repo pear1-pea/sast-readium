@@ -249,6 +249,17 @@ void PDFContinuousCanvas::clearSearchHighlights() {
     update();
 }
 
+void PDFContinuousCanvas::setEvidenceHighlights(
+    const QVector<Rag::EvidenceHighlightRequest>& highlights) {
+    m_evidenceHighlights = highlights;
+    update();
+}
+
+void PDFContinuousCanvas::clearEvidenceHighlights() {
+    m_evidenceHighlights.clear();
+    update();
+}
+
 void PDFContinuousCanvas::setAnnotations(
     const QHash<int, QList<PDFAnnotation>>& annotationsByPage) {
     m_annotationsByPage = annotationsByPage;
@@ -496,6 +507,7 @@ void PDFContinuousCanvas::paintEvent(QPaintEvent* event) {
                              QStringLiteral("Page %1").arg(i + 1));
         }
         drawSearchHighlights(painter, i, *geometry);
+        drawEvidenceHighlights(painter, i, *geometry);
         drawAnnotationOverlays(painter, i, *geometry);
         drawTextSelection(painter, i, *geometry);
         painter.setPen(QPen(STYLE.borderColor(), 1.0));
@@ -847,6 +859,32 @@ void PDFContinuousCanvas::drawSearchHighlights(
         }
     }
 
+    painter.restore();
+}
+
+void PDFContinuousCanvas::drawEvidenceHighlights(
+    QPainter& painter, int pageIndex, const PDFPageGeometry& geometry) {
+    Q_UNUSED(geometry)
+    painter.save();
+    for (const Rag::EvidenceHighlightRequest& request : m_evidenceHighlights) {
+        if (request.pageIndex != pageIndex) {
+            continue;
+        }
+        for (const QRectF& rect : request.originalTopLeftRects) {
+            const QRectF pageRect =
+                m_coordinateMapper.originalTopLeftRectToPage(pageIndex, rect);
+            const QRectF viewportRect =
+                m_coordinateMapper.pageRectToViewport(pageIndex, pageRect);
+            if (viewportRect.isEmpty()) {
+                continue;
+            }
+            painter.fillRect(viewportRect, request.color);
+            if (request.focus) {
+                painter.setPen(QPen(request.color.darker(160), 2));
+                painter.drawRect(viewportRect);
+            }
+        }
+    }
     painter.restore();
 }
 

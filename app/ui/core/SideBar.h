@@ -12,6 +12,10 @@
 #include "ui/viewer/PDFOutlineWidget.h"
 #include "ui/widgets/BookmarkWidget.h"
 
+namespace Rag {
+class AskPdfWidget;
+}
+
 // 前向声明
 namespace Poppler {
 class Document;
@@ -42,6 +46,7 @@ public:
     void setOutlineModel(PDFOutlineModel* model);
     PDFOutlineWidget* getOutlineWidget() const { return outlineWidget; }
     BookmarkWidget* getBookmarkWidget() const { return bookmarkWidget; }
+    Rag::AskPdfWidget* getAskPdfWidget() const { return askPdfWidget; }
     void setBookmarkContext(const QString& documentPath, int pageNumber);
 
     // 缩略图相关
@@ -75,6 +80,7 @@ private:
     QSettings* settings;
     PDFOutlineWidget* outlineWidget;
     BookmarkWidget* bookmarkWidget;
+    Rag::AskPdfWidget* askPdfWidget;
 
     // 缩略图组件
     ThumbnailListView* thumbnailView;
@@ -98,4 +104,5 @@ private:
     QWidget* createThumbnailsTab();
     QWidget* createOutlineTab();
     QWidget* createBookmarksTab();
+    QWidget* createAskPdfTab();
 };

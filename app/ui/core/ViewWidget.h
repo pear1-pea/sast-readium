@@ -10,6 +10,7 @@
 #include "../../model/PDFOutlineModel.h"
 #include "../viewer/PDFViewer.h"
 #include "../widgets/DocumentTabWidget.h"
+#include "rag/domain/EvidenceHighlightRequest.h"
 
 class ViewWidget : public QWidget {
     Q_OBJECT
@@ -44,6 +45,9 @@ public:
     double getCurrentZoom() const;
     PDFViewMode getCurrentViewMode() const;
     PDFViewer* getCurrentViewer() const;
+    void setEvidenceHighlights(
+        const QVector<Rag::EvidenceHighlightRequest>& highlights);
+    void clearEvidenceHighlights();
 
 protected:
     void setupUI();

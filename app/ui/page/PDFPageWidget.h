@@ -10,6 +10,7 @@
 #include <QTimer>
 #include "../viewer/PDFRenderCache.h"
 #include "model/SearchModel.h"
+#include "rag/domain/EvidenceHighlightRequest.h"
 
 class QMouseEvent;
 class QPaintEvent;
@@ -43,6 +44,9 @@ public:
     void updateHighlightColors(const QColor& normalColor,
                                const QColor& currentColor);
     bool hasSearchResults() const { return !m_searchResults.isEmpty(); }
+    void setEvidenceHighlights(
+        const QVector<Rag::EvidenceHighlightRequest>& highlights);
+    void clearEvidenceHighlights();
     bool copySelectedText();
 
 signals:
@@ -71,6 +75,7 @@ private:
     int m_currentSearchResultIndex;
     QColor m_normalHighlightColor;
     QColor m_currentHighlightColor;
+    QVector<Rag::EvidenceHighlightRequest> m_evidenceHighlights;
     bool m_isSelectingText = false;
     QPointF m_selectionStart;
     QPointF m_selectionEnd;
@@ -83,6 +88,7 @@ private:
 
     // Helper methods for highlighting
     void drawSearchHighlights(QPainter& painter);
+    void drawEvidenceHighlights(QPainter& painter);
     void updateSearchResultCoordinates();
     QString selectedText() const;
     QRectF selectionRectInPageCoordinates() const;

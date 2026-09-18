@@ -667,6 +667,7 @@ void PDFViewer::setDocument(std::shared_ptr<Poppler::Document> doc,
         d->currentPageNumber = 0;
         d->currentRotation = 0;  // 重置旋转
         d->continuousLayoutFingerprintValid = false;
+        clearEvidenceHighlights();
 
         if (d->document) {
             if (d->documentPath.isEmpty()) {
@@ -1610,6 +1611,17 @@ void PDFViewer::onNavigateToSearchResult(int pageNumber, const QRectF& rect) {
 // Search highlighting implementation
 void PDFViewer::setSearchResults(const QList<SearchResult>& results) {
     d->searchController->setResults(results);
+}
+
+void PDFViewer::setEvidenceHighlights(
+    const QVector<Rag::EvidenceHighlightRequest>& highlights) {
+    d->singlePageWidget->setEvidenceHighlights(highlights);
+    d->continuousCanvas->setEvidenceHighlights(highlights);
+}
+
+void PDFViewer::clearEvidenceHighlights() {
+    d->singlePageWidget->clearEvidenceHighlights();
+    d->continuousCanvas->clearEvidenceHighlights();
 }
 
 void PDFViewer::clearSearchHighlights() {

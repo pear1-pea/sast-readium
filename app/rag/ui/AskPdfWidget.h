@@ -1,0 +1,52 @@
+#pragma once
+
+#include <QVector>
+#include <QWidget>
+
+#include "rag/domain/RagTypes.h"
+
+class QLabel;
+class QLineEdit;
+class QListWidget;
+class QListWidgetItem;
+class QToolButton;
+
+namespace Rag {
+
+class AskPdfWidget : public QWidget {
+    Q_OBJECT
+
+public:
+    explicit AskPdfWidget(QWidget* parent = nullptr);
+
+    void setDocumentContext(const DocumentKey& document);
+    void setIndexState(RagIndexState state, int chunkCount = 0,
+                       const QString& error = {});
+    void setEvidence(const QVector<RagEvidence>& evidence);
+    void setBusy(bool busy);
+
+signals:
+    void querySubmitted(const QString& query);
+    void evidenceActivated(const Rag::RagEvidence& evidence);
+    void rebuildIndexRequested();
+    void cancelIndexRequested();
+
+private:
+    void submitQuery();
+    void activateItem(QListWidgetItem* item);
+    static QString stateText(RagIndexState state, int chunkCount,
+                             const QString& error);
+
+    DocumentKey m_document;
+    RagIndexState m_state = RagIndexState::NotIndexed;
+    QVector<RagEvidence> m_evidence;
+    QLabel* m_documentLabel = nullptr;
+    QLabel* m_statusLabel = nullptr;
+    QLineEdit* m_queryEdit = nullptr;
+    QToolButton* m_submitButton = nullptr;
+    QToolButton* m_rebuildButton = nullptr;
+    QToolButton* m_cancelButton = nullptr;
+    QListWidget* m_evidenceList = nullptr;
+};
+
+}  // namespace Rag

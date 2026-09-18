@@ -5,6 +5,7 @@
 #include "model/DocumentModel.h"
 #include "model/PageModel.h"
 #include "model/RenderModel.h"
+#include "rag/controller/RagDocumentCoordinator.h"
 
 AppComponents AppBootstrap::assemble(double dpiX, double dpiY) {
     AppComponents deps;
@@ -20,6 +21,8 @@ AppComponents AppBootstrap::assemble(double dpiX, double dpiY) {
     deps.documentOrchestrator =
         new DocumentOrchestrator(deps.documentModel, deps.pageModel,
                                  deps.renderModel, deps.recentFilesManager);
+    deps.ragDocumentCoordinator = new Rag::RagDocumentCoordinator(
+        deps.documentModel, {}, deps.documentModel);
 
     return deps;
 }

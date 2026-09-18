@@ -15,6 +15,7 @@
 #include "PDFContinuousImageCache.h"
 #include "model/AnnotationModel.h"
 #include "model/SearchModel.h"
+#include "rag/domain/EvidenceHighlightRequest.h"
 
 class PDFContinuousRenderScheduler;
 class QPainter;
@@ -39,6 +40,9 @@ public:
     void requestVisiblePageRenders(qreal devicePixelRatio);
     void setSearchResults(const QHash<int, QList<SearchResult>>& resultsByPage);
     void clearSearchHighlights();
+    void setEvidenceHighlights(
+        const QVector<Rag::EvidenceHighlightRequest>& highlights);
+    void clearEvidenceHighlights();
     void setAnnotations(
         const QHash<int, QList<PDFAnnotation>>& annotationsByPage);
     void clearAnnotationOverlays();
@@ -93,6 +97,8 @@ private:
     QPointF linkPointForHit(const PDFPageHit& hit) const;
     void drawSearchHighlights(QPainter& painter, int pageIndex,
                               const PDFPageGeometry& geometry);
+    void drawEvidenceHighlights(QPainter& painter, int pageIndex,
+                                const PDFPageGeometry& geometry);
     void drawAnnotationOverlays(QPainter& painter, int pageIndex,
                                 const PDFPageGeometry& geometry);
     void drawTextSelection(QPainter& painter, int pageIndex,
@@ -121,6 +127,7 @@ private:
                                std::vector<std::unique_ptr<Poppler::TextBox>>>
         m_pageText;
     QHash<int, QList<SearchResult>> m_searchResultsByPage;
+    QVector<Rag::EvidenceHighlightRequest> m_evidenceHighlights;
     QHash<int, QList<PDFAnnotation>> m_annotationsByPage;
     qreal m_lastDevicePixelRatio = 1.0;
     QPair<int, int> m_lastVisibleRange{-1, -1};

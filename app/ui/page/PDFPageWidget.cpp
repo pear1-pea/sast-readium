@@ -11,6 +11,54 @@
 #include "managers/StyleManager.h"
 #include "utils/LoggingMacros.h"
 
+namespace {
+
+QRectF originalTopLeftRectToWidget(const QRectF& rect, int rotation,
+                                   const QSizeF& pageSize,
+                                   const QSize& widgetSize) {
+    if (rect.isEmpty() || pageSize.isEmpty() || widgetSize.isEmpty()) {
+        return {};
+    }
+
+    const int normalizedRotation = ((rotation % 360) + 360) % 360;
+    const QSizeF rotatedPageSize =
+        (normalizedRotation == 90 || normalizedRotation == 270)
+            ? QSizeF(pageSize.height(), pageSize.width())
+            : pageSize;
+    const qreal uniformScale =
+        qMin(widgetSize.width() / rotatedPageSize.width(),
+             widgetSize.height() / rotatedPageSize.height());
+    const QPointF offset(
+        (widgetSize.width() - rotatedPageSize.width() * uniformScale) / 2.0,
+        (widgetSize.height() - rotatedPageSize.height() * uniformScale) / 2.0);
+
+    QTransform transform;
+    switch (normalizedRotation) {
+        case 90:
+            transform.translate(pageSize.height(), 0.0);
+            transform.rotate(90);
+            break;
+        case 180:
+            transform.translate(pageSize.width(), pageSize.height());
+            transform.rotate(180);
+            break;
+        case 270:
+            transform.translate(0.0, pageSize.width());
+            transform.rotate(270);
+            break;
+        default:
+            break;
+    }
+
+    const QRectF rotated = transform.mapRect(rect);
+    return QRectF(rotated.left() * uniformScale + offset.x(),
+                  rotated.top() * uniformScale + offset.y(),
+                  rotated.width() * uniformScale,
+                  rotated.height() * uniformScale);
+}
+
+}  // namespace
+
 PDFPageWidget::PDFPageWidget(QWidget* parent)
     : QLabel(parent),
       currentPage(nullptr),
@@ -293,6 +341,9 @@ void PDFPageWidget::paintEvent(QPaintEvent* event) {
     if (!m_searchResults.isEmpty()) {
         drawSearchHighlights(painter);
     }
+    if (!m_evidenceHighlights.isEmpty()) {
+        drawEvidenceHighlights(painter);
+    }
 
     if (m_isSelectingText || !selectionRectInPageCoordinates().isEmpty()) {
         painter.setPen(Qt::NoPen);
@@ -434,6 +485,17 @@ void PDFPageWidget::clearSearchHighlights() {
     update();
 }
 
+void PDFPageWidget::setEvidenceHighlights(
+    const QVector<Rag::EvidenceHighlightRequest>& highlights) {
+    m_evidenceHighlights = highlights;
+    update();
+}
+
+void PDFPageWidget::clearEvidenceHighlights() {
+    m_evidenceHighlights.clear();
+    update();
+}
+
 void PDFPageWidget::setCurrentSearchResult(int index) {
     if (index >= 0 && index < m_searchResults.size()) {
         if (m_currentSearchResultIndex >= 0 &&
@@ -491,5 +553,31 @@ void PDFPageWidget::drawSearchHighlights(QPainter& painter) {
         }
     }
 
+    painter.restore();
+}
+
+void PDFPageWidget::drawEvidenceHighlights(QPainter& painter) {
+    if (!currentPage) {
+        return;
+    }
+
+    painter.save();
+    for (const Rag::EvidenceHighlightRequest& request : m_evidenceHighlights) {
+        if (request.pageIndex != currentPage->index()) {
+            continue;
+        }
+        for (const QRectF& rect : request.originalTopLeftRects) {
+            const QRectF widgetRect = originalTopLeftRectToWidget(
+                rect, currentRotation, currentPage->pageSizeF(), size());
+            if (widgetRect.isEmpty()) {
+                continue;
+            }
+            painter.fillRect(widgetRect, request.color);
+            if (request.focus) {
+                painter.setPen(QPen(request.color.darker(160), 2));
+                painter.drawRect(widgetRect);
+            }
+        }
+    }
     painter.restore();
 }

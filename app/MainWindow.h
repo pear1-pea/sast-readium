@@ -16,6 +16,7 @@
 #include "model/DocumentModel.h"
 #include "model/PageModel.h"
 #include "model/RenderModel.h"
+#include "rag/controller/RagDocumentCoordinator.h"
 #include "ui/core/MenuBar.h"
 #include "ui/core/SideBar.h"
 #include "ui/core/StatusBar.h"
@@ -111,6 +112,8 @@ private:
     ShortcutManager* shortcutManager;
 
     ThemeManager* m_themeManager;
+    Rag::RagDocumentCoordinator* m_ragCoordinator;
+    QString m_ragUiDocumentPath;
 
     QPair<QString, int> m_pendingBookmarkNavigation;
 

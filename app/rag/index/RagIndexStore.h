@@ -22,8 +22,11 @@ public:
 
     bool replaceDocument(const DocumentKey& document,
                          const QVector<PdfChunk>& chunks,
-                         QString* error = nullptr);
+                         QString* error = nullptr,
+                         const RagCancellationToken* cancellation = nullptr);
     bool containsDocument(const DocumentKey& document) const;
+    int documentChunkCount(const DocumentKey& document,
+                           QString* error = nullptr) const;
 
     QVector<RagEvidence> search(const DocumentKey& document,
                                 const QString& query, int limit = 10,

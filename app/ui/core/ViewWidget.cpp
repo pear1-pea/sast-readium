@@ -240,6 +240,19 @@ PDFViewer* ViewWidget::getCurrentViewer() const {
     return pdfViewers.at(currentIndex);
 }
 
+void ViewWidget::setEvidenceHighlights(
+    const QVector<Rag::EvidenceHighlightRequest>& highlights) {
+    if (PDFViewer* viewer = getCurrentViewer()) {
+        viewer->setEvidenceHighlights(highlights);
+    }
+}
+
+void ViewWidget::clearEvidenceHighlights() {
+    if (PDFViewer* viewer = getCurrentViewer()) {
+        viewer->clearEvidenceHighlights();
+    }
+}
+
 void ViewWidget::setCurrentZoom(int percentage) {
     int currentIndex = getCurrentDocumentIndex();
     if (currentIndex >= 0 && currentIndex < pdfViewers.size()) {

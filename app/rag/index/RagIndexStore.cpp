@@ -3,6 +3,8 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QMutex>
+#include <QMutexLocker>
 #include <QSqlError>
 #include <QSqlQuery>
 #include <QStringList>
@@ -17,6 +19,11 @@ QString databaseError(const QSqlQuery& query) {
 
 QString databaseError(const QSqlDatabase& database) {
     return database.lastError().text();
+}
+
+QMutex& writeMutex() {
+    static QMutex mutex;
+    return mutex;
 }
 
 bool isCjkCharacter(const QChar character) {
@@ -88,6 +95,12 @@ bool RagIndexStore::open(const QString& databasePath, QString* error) {
         close();
         return false;
     }
+    if (!pragma.exec(QStringLiteral("PRAGMA busy_timeout = 5000"))) {
+        setError(error, databaseError(pragma));
+        close();
+        return false;
+    }
+    QMutexLocker schemaLock(&writeMutex());
     return initializeSchema(error);
 }
 
@@ -152,7 +165,8 @@ bool RagIndexStore::initializeSchema(QString* error) {
 
 bool RagIndexStore::replaceDocument(const DocumentKey& document,
                                     const QVector<PdfChunk>& chunks,
-                                    QString* error) {
+                                    QString* error,
+                                    const RagCancellationToken* cancellation) {
     setError(error, QString());
     if (!isOpen()) {
         setError(error, QStringLiteral("Index store is not open"));
@@ -160,6 +174,16 @@ bool RagIndexStore::replaceDocument(const DocumentKey& document,
     }
     if (document.contentHash.isEmpty()) {
         setError(error, QStringLiteral("Document content hash is empty"));
+        return false;
+    }
+    if (cancellation && cancellation->isCancelled()) {
+        setError(error, QStringLiteral("Indexing cancelled"));
+        return false;
+    }
+
+    QMutexLocker writeLock(&writeMutex());
+    if (cancellation && cancellation->isCancelled()) {
+        setError(error, QStringLiteral("Indexing cancelled"));
         return false;
     }
 
@@ -173,6 +197,38 @@ bool RagIndexStore::replaceDocument(const DocumentKey& document,
         setError(error, message);
         return false;
     };
+
+    QSqlQuery deleteOldFts(m_database);
+    deleteOldFts.prepare(
+        QStringLiteral("DELETE FROM chunks_fts WHERE document_hash IN ("
+                       "SELECT document_hash FROM documents "
+                       "WHERE canonical_path = ? AND document_hash <> ?)"));
+    deleteOldFts.addBindValue(document.canonicalPath);
+    deleteOldFts.addBindValue(document.contentHash);
+    if (!deleteOldFts.exec()) {
+        return rollback(databaseError(deleteOldFts));
+    }
+
+    QSqlQuery deleteOldChunks(m_database);
+    deleteOldChunks.prepare(
+        QStringLiteral("DELETE FROM chunks WHERE document_hash IN ("
+                       "SELECT document_hash FROM documents "
+                       "WHERE canonical_path = ? AND document_hash <> ?)"));
+    deleteOldChunks.addBindValue(document.canonicalPath);
+    deleteOldChunks.addBindValue(document.contentHash);
+    if (!deleteOldChunks.exec()) {
+        return rollback(databaseError(deleteOldChunks));
+    }
+
+    QSqlQuery deleteOldDocuments(m_database);
+    deleteOldDocuments.prepare(
+        QStringLiteral("DELETE FROM documents WHERE canonical_path = ? "
+                       "AND document_hash <> ?"));
+    deleteOldDocuments.addBindValue(document.canonicalPath);
+    deleteOldDocuments.addBindValue(document.contentHash);
+    if (!deleteOldDocuments.exec()) {
+        return rollback(databaseError(deleteOldDocuments));
+    }
 
     QSqlQuery deleteFts(m_database);
     deleteFts.prepare(
@@ -227,6 +283,9 @@ bool RagIndexStore::replaceDocument(const DocumentKey& document,
         "VALUES(?, ?, ?, ?)"));
 
     for (const PdfChunk& chunk : chunks) {
+        if (cancellation && cancellation->isCancelled()) {
+            return rollback(QStringLiteral("Indexing cancelled"));
+        }
         insertChunk.bindValue(0, chunk.id);
         insertChunk.bindValue(1, document.contentHash);
         insertChunk.bindValue(2, chunk.pageStart);
@@ -250,6 +309,9 @@ bool RagIndexStore::replaceDocument(const DocumentKey& document,
         }
     }
 
+    if (cancellation && cancellation->isCancelled()) {
+        return rollback(QStringLiteral("Indexing cancelled"));
+    }
     if (!m_database.commit()) {
         setError(error, databaseError(m_database));
         m_database.rollback();
@@ -267,6 +329,29 @@ bool RagIndexStore::containsDocument(const DocumentKey& document) const {
         "SELECT 1 FROM documents WHERE document_hash = ? LIMIT 1"));
     query.addBindValue(document.contentHash);
     return query.exec() && query.next();
+}
+
+int RagIndexStore::documentChunkCount(const DocumentKey& document,
+                                      QString* error) const {
+    setError(error, QString());
+    if (!isOpen()) {
+        setError(error, QStringLiteral("Index store is not open"));
+        return -1;
+    }
+    if (document.contentHash.isEmpty()) {
+        setError(error, QStringLiteral("Document content hash is empty"));
+        return -1;
+    }
+
+    QSqlQuery query(m_database);
+    query.prepare(
+        QStringLiteral("SELECT COUNT(*) FROM chunks WHERE document_hash = ?"));
+    query.addBindValue(document.contentHash);
+    if (!query.exec() || !query.next()) {
+        setError(error, databaseError(query));
+        return -1;
+    }
+    return query.value(0).toInt();
 }
 
 QVector<RagEvidence> RagIndexStore::search(const DocumentKey& document,

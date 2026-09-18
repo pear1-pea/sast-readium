@@ -12,6 +12,8 @@
 #include "managers/FileTypeIconManager.h"
 #include "managers/StyleManager.h"
 #include "model/RenderModel.h"
+#include "rag/domain/EvidenceHighlightRequest.h"
+#include "rag/ui/AskPdfWidget.h"
 #include "ui/dialogs/DocumentMetadataDialog.h"
 #include "ui/managers/WelcomeScreenManager.h"
 #include "ui/thumbnail/ThumbnailListView.h"
@@ -65,7 +67,8 @@ MainWindow::MainWindow(const AppComponents& deps, QWidget* parent)
       pageModel(deps.pageModel),
       renderModel(deps.renderModel),
       recentFilesManager(deps.recentFilesManager),
-      shortcutManager(&ShortcutManager::instance()) {
+      shortcutManager(&ShortcutManager::instance()),
+      m_ragCoordinator(deps.ragDocumentCoordinator) {
     LOG_DEBUG("MainWindow: Starting initialization...");
 
     initWindow();
@@ -287,6 +290,88 @@ void MainWindow::initConnection() {
             });
     connect(sideBar->getBookmarkWidget(), &BookmarkWidget::navigateToBookmark,
             this, &MainWindow::onBookmarkNavigationRequested);
+
+    if (m_ragCoordinator && sideBar && sideBar->getAskPdfWidget()) {
+        Rag::AskPdfWidget* askWidget = sideBar->getAskPdfWidget();
+        connect(m_ragCoordinator,
+                &Rag::RagDocumentCoordinator::currentDocumentStateChanged, this,
+                [this, askWidget](const Rag::RagDocumentSnapshot& snapshot) {
+                    const bool documentChanged =
+                        snapshot.filePath != m_ragUiDocumentPath;
+                    m_ragUiDocumentPath = snapshot.filePath;
+                    if (viewWidget &&
+                        (documentChanged ||
+                         snapshot.state != Rag::RagIndexState::Ready)) {
+                        viewWidget->clearEvidenceHighlights();
+                    }
+                    askWidget->setDocumentContext(snapshot.key);
+                    askWidget->setIndexState(
+                        snapshot.state, snapshot.chunkCount, snapshot.error);
+                    askWidget->setBusy(false);
+                });
+        connect(askWidget, &Rag::AskPdfWidget::querySubmitted, this,
+                [this, askWidget](const QString& query) {
+                    if (m_ragCoordinator) {
+                        askWidget->setBusy(true);
+                        m_ragCoordinator->queryCurrentDocument(query);
+                    }
+                });
+        connect(askWidget, &Rag::AskPdfWidget::rebuildIndexRequested, this,
+                [this]() {
+                    if (m_ragCoordinator) {
+                        m_ragCoordinator->rebuildCurrentDocument();
+                    }
+                });
+        connect(askWidget, &Rag::AskPdfWidget::cancelIndexRequested, this,
+                [this]() {
+                    if (m_ragCoordinator) {
+                        m_ragCoordinator->cancelCurrentIndexing();
+                    }
+                });
+        connect(m_ragCoordinator, &Rag::RagDocumentCoordinator::evidenceReady,
+                this, [askWidget](const QVector<Rag::RagEvidence>& evidence) {
+                    askWidget->setEvidence(evidence);
+                    askWidget->setBusy(false);
+                });
+        connect(m_ragCoordinator, &Rag::RagDocumentCoordinator::queryFailed,
+                this, [this, askWidget](const QString& error) {
+                    askWidget->setBusy(false);
+                    if (statusBar) {
+                        statusBar->setMessage(error);
+                    }
+                });
+        connect(askWidget, &Rag::AskPdfWidget::evidenceActivated, this,
+                [this](const Rag::RagEvidence& evidence) {
+                    if (!m_ragCoordinator || !viewWidget) {
+                        return;
+                    }
+                    const Rag::RagDocumentSnapshot snapshot =
+                        m_ragCoordinator->currentSnapshot();
+                    if (snapshot.key.contentHash.isEmpty() ||
+                        snapshot.key.contentHash != evidence.documentHash) {
+                        return;
+                    }
+
+                    QVector<Rag::EvidenceHighlightRequest> highlights;
+                    for (const Rag::ChunkPageLocation& location :
+                         evidence.locations) {
+                        Rag::EvidenceHighlightRequest request;
+                        request.pageIndex = location.pageIndex;
+                        request.originalTopLeftRects = location.boundingRects;
+                        request.focus =
+                            location.pageIndex == evidence.pageStart;
+                        highlights.append(std::move(request));
+                    }
+                    viewWidget->setEvidenceHighlights(highlights);
+                    viewWidget->goToPage(evidence.pageStart);
+                });
+
+        const Rag::RagDocumentSnapshot snapshot =
+            m_ragCoordinator->currentSnapshot();
+        askWidget->setDocumentContext(snapshot.key);
+        askWidget->setIndexState(snapshot.state, snapshot.chunkCount,
+                                 snapshot.error);
+    }
 
     if (toolBar && toolBar->annotationToolbar()) {
         AnnotationToolbar* annotationToolbar = toolBar->annotationToolbar();

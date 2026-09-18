@@ -7,6 +7,7 @@
 #include <QList>
 #include <QWidget>
 #include <memory>
+#include "rag/domain/EvidenceHighlightRequest.h"
 
 #include "ZoomTypes.h"
 #include "model/AnnotationModel.h"
@@ -78,6 +79,9 @@ public:
     void setSearchResults(const QList<SearchResult>& results);
     void clearSearchHighlights();
     void highlightCurrentSearchResult(const SearchResult& result);
+    void setEvidenceHighlights(
+        const QVector<Rag::EvidenceHighlightRequest>& highlights);
+    void clearEvidenceHighlights();
 
     // 书签功能
     void addBookmark();
