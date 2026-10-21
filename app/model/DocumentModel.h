@@ -1,6 +1,7 @@
 #pragma once
 
 #include <poppler/qt6/poppler-qt6.h>
+#include <QImage>
 #include <QObject>
 #include <QSet>
 #include <QString>

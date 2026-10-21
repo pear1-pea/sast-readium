@@ -12,6 +12,8 @@
 #include <utility>
 
 #include "model/DocumentModel.h"
+#include "rag/chat/ContextAssembler.h"
+#include "rag/chat/OllamaChatProvider.h"
 #include "rag/embedding/OllamaEmbeddingProvider.h"
 #include "rag/extract/PdfChunker.h"
 #include "rag/extract/PdfTextExtractor.h"
@@ -51,13 +53,14 @@ QThreadPool& embeddingPool() {
 
 }  // namespace
 
-RagDocumentCoordinator::RagDocumentCoordinator(DocumentModel* documentModel,
-                                               QString databasePath,
-                                               QObject* parent)
+RagDocumentCoordinator::RagDocumentCoordinator(
+    DocumentModel* documentModel, QString databasePath, QObject* parent,
+    ChatProviderFactory chatProviderFactory)
     : QObject(parent),
       m_documentModel(documentModel),
       m_databasePath(databasePath.isEmpty() ? defaultDatabasePath()
-                                            : std::move(databasePath)) {
+                                            : std::move(databasePath)),
+      m_chatProviderFactory(std::move(chatProviderFactory)) {
     if (!m_documentModel) {
         return;
     }
@@ -73,6 +76,8 @@ RagDocumentCoordinator::RagDocumentCoordinator(DocumentModel* documentModel,
 }
 
 RagDocumentCoordinator::~RagDocumentCoordinator() {
+    if (m_chatTask)
+        m_chatTask->cancel();
     m_queryCancellation.cancel();
     for (Entry& entry : m_entries) {
         entry.activeJob.cancellation.cancel();
@@ -88,16 +93,18 @@ void RagDocumentCoordinator::queryCurrentDocument(const QString& query,
     invalidateQueries();
     const RagDocumentSnapshot snapshot = currentSnapshot();
     if (!snapshot.isReady()) {
+        emit answerBusyChanged(false);
         emit queryFailed(QStringLiteral("The current document is not indexed"));
         return;
     }
 
     const quint64 queryGeneration = ++m_queryGeneration;
+    emit answerBusyChanged(true);
     m_queryCancellation = {};
     const RagCancellationToken queryCancellation = m_queryCancellation;
     auto* watcher = new QFutureWatcher<QueryJobResult>(this);
     connect(watcher, &QFutureWatcher<QueryJobResult>::finished, this,
-            [this, watcher]() {
+            [this, watcher, query]() {
                 const QueryJobResult result = watcher->result();
                 watcher->deleteLater();
                 const RagDocumentSnapshot snapshot = currentSnapshot();
@@ -107,10 +114,12 @@ void RagDocumentCoordinator::queryCurrentDocument(const QString& query,
                     return;
                 }
                 if (!result.error.isEmpty()) {
+                    emit answerBusyChanged(false);
                     emit queryFailed(result.error);
                     return;
                 }
                 emit evidenceReady(result.evidence);
+                generateAnswer(query, result.evidence);
             });
 
     const QString databasePath = m_databasePath;
@@ -218,6 +227,7 @@ void RagDocumentCoordinator::startIndexing(const QString& filePath,
     entry.snapshot.state = RagIndexState::Extracting;
     entry.snapshot.chunkCount = 0;
     entry.snapshot.error.clear();
+    entry.conversation.clear();
     entry.snapshot.embeddingState = RagEmbeddingState::Disabled;
     entry.snapshot.embeddedChunkCount = 0;
     entry.snapshot.embeddingError.clear();
@@ -471,6 +481,105 @@ void RagDocumentCoordinator::invalidateQueries() {
     ++m_queryGeneration;
     m_queryCancellation.cancel();
     m_queryCancellation = {};
+    if (m_chatTask) {
+        m_chatTask->cancel();
+        m_chatTask->deleteLater();
+        m_chatTask = nullptr;
+    }
+    m_validCitations.clear();
+    emit answerReset();
+    emit answerBusyChanged(false);
+}
+
+void RagDocumentCoordinator::cancelAnswer() { invalidateQueries(); }
+
+std::unique_ptr<ChatProvider> RagDocumentCoordinator::createChatProvider()
+    const {
+    if (m_chatProviderFactory)
+        return m_chatProviderFactory();
+    const QString model =
+        qEnvironmentVariable("READIUM_OLLAMA_CHAT_MODEL").trimmed();
+    if (model.isEmpty())
+        return {};
+    return std::make_unique<OllamaChatProvider>(model);
+}
+
+void RagDocumentCoordinator::generateAnswer(
+    const QString& question, const QVector<RagEvidence>& evidence) {
+    auto provider = createChatProvider();
+    if (!provider) {
+        emit answerBusyChanged(false);
+        return;
+    }
+    const auto snapshot = currentSnapshot();
+    const auto request = ContextAssembler::assemble(
+        question, evidence, m_entries.value(m_currentPath).conversation);
+    if (request.evidence.isEmpty()) {
+        emit answerReady({QStringLiteral("文档中没有足够的检索依据。"), {}});
+        emit answerBusyChanged(false);
+        return;
+    }
+    auto* task = provider->generate(request, this);
+    m_chatTask = task;
+    const quint64 generation = m_queryGeneration;
+    const QString path = m_currentPath;
+    connect(task, &ChatTask::deltaReceived, this,
+            [this, generation](const QString& text) {
+                if (generation == m_queryGeneration)
+                    emit answerDelta(text);
+            });
+    connect(
+        task, &ChatTask::completed, this,
+        [this, task, generation, path, request, snapshot](const QString& text) {
+            task->deleteLater();
+            if (generation != m_queryGeneration)
+                return;
+            m_chatTask = nullptr;
+            auto answer = CitationValidator::validate(text, request.evidence,
+                                                      snapshot.key.contentHash);
+            m_validCitations.clear();
+            for (const auto& citation : answer.citations) {
+                for (const auto& item : request.evidence) {
+                    if (item.chunkId == citation.chunkId &&
+                        item.documentHash == snapshot.key.contentHash) {
+                        m_validCitations.insert(item.chunkId, item);
+                        break;
+                    }
+                }
+            }
+            auto it = m_entries.find(path);
+            if (it != m_entries.end()) {
+                it->conversation.append(request.question.left(2000));
+                it->conversation.append(answer.text.left(4000));
+                while (it->conversation.size() > 6)
+                    it->conversation.removeFirst();
+            }
+            emit answerReady(answer);
+            emit answerBusyChanged(false);
+        });
+    connect(task, &ChatTask::failed, this,
+            [this, task, generation](const QString& error) {
+                task->deleteLater();
+                if (generation != m_queryGeneration)
+                    return;
+                m_chatTask = nullptr;
+                emit answerReset();
+                emit answerFailed(error);
+                emit answerBusyChanged(false);
+            });
+    task->start();
+}
+
+void RagDocumentCoordinator::activateCitation(const QString& chunkId) {
+    const auto it = m_validCitations.constFind(chunkId);
+    if (it == m_validCitations.constEnd())
+        return;
+    const auto snapshot = currentSnapshot();
+    if (snapshot.key.contentHash.isEmpty() ||
+        snapshot.key.contentHash != it->documentHash) {
+        return;
+    }
+    emit citationReady(*it);
 }
 
 QString RagDocumentCoordinator::pathForIndex(int index) const {

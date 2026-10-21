@@ -2,8 +2,13 @@
 
 #include <QHash>
 #include <QObject>
+#include <QPointer>
 #include <QString>
 
+#include <functional>
+#include <memory>
+
+#include "rag/chat/ChatProvider.h"
 #include "rag/domain/RagTypes.h"
 
 class DocumentModel;
@@ -14,9 +19,12 @@ class RagDocumentCoordinator : public QObject {
     Q_OBJECT
 
 public:
-    explicit RagDocumentCoordinator(DocumentModel* documentModel,
-                                    QString databasePath = {},
-                                    QObject* parent = nullptr);
+    using ChatProviderFactory = std::function<std::unique_ptr<ChatProvider>()>;
+
+    explicit RagDocumentCoordinator(
+        DocumentModel* documentModel, QString databasePath = {},
+        QObject* parent = nullptr,
+        ChatProviderFactory chatProviderFactory = {});
     ~RagDocumentCoordinator() override;
 
     RagDocumentSnapshot currentSnapshot() const;
@@ -26,12 +34,20 @@ public slots:
     void queryCurrentDocument(const QString& query, int limit = 10);
     void rebuildCurrentDocument();
     void cancelCurrentIndexing();
+    void cancelAnswer();
+    void activateCitation(const QString& chunkId);
 
 signals:
     void currentDocumentStateChanged(const Rag::RagDocumentSnapshot& snapshot);
     void documentStateChanged(const Rag::RagDocumentSnapshot& snapshot);
     void evidenceReady(const QVector<Rag::RagEvidence>& evidence);
     void queryFailed(const QString& error);
+    void answerReset();
+    void answerDelta(const QString& text);
+    void answerReady(const Rag::RagAnswer& answer);
+    void answerFailed(const QString& error);
+    void answerBusyChanged(bool busy);
+    void citationReady(const Rag::RagEvidence& evidence);
 
 private:
     void onDocumentOpened(int index);
@@ -49,6 +65,9 @@ private:
                               RagEmbeddingState state, int embeddedCount,
                               const QString& error);
     void invalidateQueries();
+    void generateAnswer(const QString& question,
+                        const QVector<RagEvidence>& evidence);
+    std::unique_ptr<ChatProvider> createChatProvider() const;
     QString pathForIndex(int index) const;
     static QString normalizedPath(const QString& filePath);
     static QString defaultDatabasePath();
@@ -56,6 +75,7 @@ private:
     struct Entry {
         RagDocumentSnapshot snapshot;
         RagJobContext activeJob;
+        QStringList conversation;
     };
 
     DocumentModel* m_documentModel = nullptr;
@@ -64,6 +84,9 @@ private:
     QHash<QString, Entry> m_entries;
     quint64 m_queryGeneration = 0;
     RagCancellationToken m_queryCancellation;
+    QPointer<ChatTask> m_chatTask;
+    QHash<QString, RagEvidence> m_validCitations;
+    ChatProviderFactory m_chatProviderFactory;
 };
 
 }  // namespace Rag

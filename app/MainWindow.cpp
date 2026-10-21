@@ -309,7 +309,6 @@ void MainWindow::initConnection() {
                         snapshot.state, snapshot.chunkCount, snapshot.error,
                         snapshot.embeddingState, snapshot.embeddedChunkCount,
                         snapshot.embeddingError);
-                    askWidget->setBusy(false);
                 });
         connect(askWidget, &Rag::AskPdfWidget::querySubmitted, this,
                 [this, askWidget](const QString& query) {
@@ -333,8 +332,25 @@ void MainWindow::initConnection() {
         connect(m_ragCoordinator, &Rag::RagDocumentCoordinator::evidenceReady,
                 this, [askWidget](const QVector<Rag::RagEvidence>& evidence) {
                     askWidget->setEvidence(evidence);
-                    askWidget->setBusy(false);
                 });
+        connect(m_ragCoordinator, &Rag::RagDocumentCoordinator::answerReset,
+                askWidget, &Rag::AskPdfWidget::resetAnswer);
+        connect(m_ragCoordinator, &Rag::RagDocumentCoordinator::answerDelta,
+                askWidget, &Rag::AskPdfWidget::appendAnswer);
+        connect(m_ragCoordinator, &Rag::RagDocumentCoordinator::answerReady,
+                askWidget, &Rag::AskPdfWidget::setAnswer);
+        connect(m_ragCoordinator, &Rag::RagDocumentCoordinator::answerFailed,
+                askWidget, &Rag::AskPdfWidget::setAnswerError);
+        connect(m_ragCoordinator,
+                &Rag::RagDocumentCoordinator::answerBusyChanged, askWidget,
+                &Rag::AskPdfWidget::setBusy);
+        connect(askWidget, &Rag::AskPdfWidget::cancelAnswerRequested,
+                m_ragCoordinator, &Rag::RagDocumentCoordinator::cancelAnswer);
+        connect(askWidget, &Rag::AskPdfWidget::citationActivated,
+                m_ragCoordinator,
+                &Rag::RagDocumentCoordinator::activateCitation);
+        connect(m_ragCoordinator, &Rag::RagDocumentCoordinator::citationReady,
+                askWidget, &Rag::AskPdfWidget::evidenceActivated);
         connect(m_ragCoordinator, &Rag::RagDocumentCoordinator::queryFailed,
                 this, [this, askWidget](const QString& error) {
                     askWidget->setBusy(false);

@@ -3,6 +3,7 @@
 #include <QVector>
 #include <QWidget>
 
+#include "rag/chat/ChatProvider.h"
 #include "rag/domain/RagTypes.h"
 
 class QLabel;
@@ -10,6 +11,7 @@ class QLineEdit;
 class QListWidget;
 class QListWidgetItem;
 class QToolButton;
+class QPlainTextEdit;
 
 namespace Rag {
 
@@ -26,12 +28,18 @@ public:
         int embeddedChunkCount = 0, const QString& embeddingError = {});
     void setEvidence(const QVector<RagEvidence>& evidence);
     void setBusy(bool busy);
+    void resetAnswer();
+    void appendAnswer(const QString& text);
+    void setAnswer(const RagAnswer& answer);
+    void setAnswerError(const QString& error);
 
 signals:
     void querySubmitted(const QString& query);
     void evidenceActivated(const Rag::RagEvidence& evidence);
     void rebuildIndexRequested();
     void cancelIndexRequested();
+    void cancelAnswerRequested();
+    void citationActivated(const QString& chunkId);
 
 private:
     void submitQuery();
@@ -52,6 +60,10 @@ private:
     QToolButton* m_rebuildButton = nullptr;
     QToolButton* m_cancelButton = nullptr;
     QListWidget* m_evidenceList = nullptr;
+    QPlainTextEdit* m_answerEdit = nullptr;
+    QListWidget* m_citationList = nullptr;
+    QToolButton* m_stopButton = nullptr;
+    bool m_busy = false;
 };
 
 }  // namespace Rag

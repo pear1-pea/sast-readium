@@ -259,6 +259,37 @@ if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/unit/test_rag_p2.cpp)
     target_link_libraries(test_rag_p2 PRIVATE Qt6::Sql)
 endif()
 
+create_unit_test(test_rag_p3 unit/test_rag_p3.cpp)
+target_sources(test_rag_p3 PRIVATE
+    ../app/rag/chat/ChatProvider.h
+    ../app/rag/chat/ContextAssembler.cpp
+    ../app/rag/chat/OllamaChatProvider.cpp
+    ../app/rag/ui/AskPdfWidget.cpp
+    ../app/rag/ui/AskPdfWidget.h)
+target_link_libraries(test_rag_p3 PRIVATE Qt6::Network)
+
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/unit/test_rag_coordinator.cpp)
+    create_unit_test(test_rag_coordinator
+        unit/test_rag_coordinator.cpp)
+    target_sources(test_rag_coordinator PRIVATE
+        ../app/model/DocumentModel.cpp
+        ../app/model/AsyncDocumentLoader.cpp
+        ../app/rag/controller/RagDocumentCoordinator.cpp
+        ../app/rag/extract/PdfTextExtractor.cpp
+        ../app/rag/extract/PdfChunker.cpp
+        ../app/rag/index/RagIndexStore.cpp
+        ../app/rag/retrieve/LexicalRetriever.cpp
+        ../app/rag/retrieve/HybridRetriever.cpp
+        ../app/rag/embedding/OllamaEmbeddingProvider.cpp
+        ../app/rag/chat/ChatProvider.h
+        ../app/rag/chat/ContextAssembler.cpp
+        ../app/rag/chat/OllamaChatProvider.cpp
+        ../app/utils/Logger.cpp)
+    target_link_libraries(test_rag_coordinator PRIVATE
+        Qt6::Concurrent Qt6::Network Qt6::Sql spdlog::spdlog)
+    set_tests_properties(test_rag_coordinator PROPERTIES TIMEOUT 90)
+endif()
+
 # ===== Integration Tests =====
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/integration/test_pdf_viewer.cpp)
     create_integration_test(test_pdf_viewer
