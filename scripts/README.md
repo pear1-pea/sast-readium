@@ -124,4 +124,4 @@ Script to test MSYS2 build configuration.
    ./scripts/update-clangd-config.sh --list
    ```
 
-For detailed information, see [docs/CLANGD-SETUP.md](../docs/CLANGD-SETUP.md).
+For detailed information, see [clangd IDE Setup](../docs/setup/clangd-setup.md).

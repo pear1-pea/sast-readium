@@ -30,8 +30,21 @@ replacing/updating the model to invalidate cached vectors. Embeddings are
 generated in batches after the lexical index is ready; missing vectors or an
 unavailable local server do not prevent lexical search.
 
-## Build Environments
+### Ask PDF answers
 
+Set `READIUM_OLLAMA_CHAT_MODEL` to an installed local Ollama chat model before
+starting Readium. Answers stream into the Ask PDF sidebar using the retrieved
+evidence. Validated citations navigate to local PDF text. Without this setting,
+Ask PDF continues to provide evidence search. Chat history is bounded, held only
+in memory per open document, and cleared when its index is rebuilt. Stop, tab
+switching and document closing cancel the active request. No model is downloaded
+automatically. The chat endpoint is `127.0.0.1:11434/api/chat`.
+
+```sh
+READIUM_OLLAMA_CHAT_MODEL=your-installed-model ./build/app/app
+```
+
+## Build Environments
 The project supports **multiple build systems** for maximum flexibility:
 - **CMake** (primary) - Comprehensive build system with extensive configuration
 - **Xmake** (alternative) - Modern Lua-based build system with simpler syntax
@@ -204,9 +217,13 @@ make dev            # Setup development environment
 - [Xmake Build Guide](docs/build-systems/xmake/xmake-build.md) - Modern Lua-based build system instructions (Experimental)
 - [Build System Comparison](docs/build-systems/build-system-comparison.md) - CMake vs xmake feature comparison
 - [clangd Setup Guide](docs/setup/clangd-setup.md) - IDE integration and clangd configuration
-- [clangd Troubleshooting](docs/setup/clangd-troubleshooting.md) - Solutions for common clangd issues
-- [clangd Configuration Options](docs/setup/clangd-config-options.md) - Advanced configuration control
+- [clangd Configuration](docs/clangd-configuration.md) - Qt missing-includes fixes and advanced configuration
+- [Debugging Setup](docs/debugging-setup.md) - Cross-platform VS Code debugging
+- [Logging System](docs/logging-system.md) - spdlog-based logging
+- [Architecture](docs/agent/architecture.md) - Module boundaries and responsibilities
+- [Conventions](docs/agent/conventions.md) - C++/Qt style and logging conventions
 - [Build Troubleshooting](docs/setup/msys2-build.md#troubleshooting) - Common build issues and solutions
+- [AGENTS.md](AGENTS.md) - Agent entry point and docs index
 
 ## Dependencies
 

@@ -114,6 +114,14 @@ nav:
   - Features:
     - Overview: features/index.md
     - Thumbnail System: features/thumbnail-system.md
+  - Development:
+    - Architecture: agent/architecture.md
+    - Conventions: agent/conventions.md
+    - Build: agent/build.md
+    - Testing: agent/testing.md
+    - Debugging Setup: debugging-setup.md
+    - clangd Configuration: clangd-configuration.md
+    - Logging System: logging-system.md
 
 # Extra
 extra:
