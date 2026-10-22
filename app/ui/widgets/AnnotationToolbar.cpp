@@ -332,6 +332,30 @@ void AnnotationToolbar::setEnabled(bool enabled) {
     QWidget::setEnabled(enabled);
 }
 
+void AnnotationToolbar::setUnavailableReason(const QString& reason) {
+    auto applyToButton = [&reason](QToolButton* button) {
+        if (!button) {
+            return;
+        }
+        if (reason.isEmpty()) {
+            const QString normal = button->property("normalToolTip").toString();
+            if (!normal.isEmpty()) {
+                button->setToolTip(normal);
+            }
+            return;
+        }
+        if (button->property("normalToolTip").toString().isEmpty()) {
+            button->setProperty("normalToolTip", button->toolTip());
+        }
+        button->setToolTip(reason);
+    };
+
+    for (QAbstractButton* button : m_toolButtonGroup->buttons()) {
+        applyToButton(qobject_cast<QToolButton*>(button));
+    }
+    applyToButton(m_selectBtn);
+}
+
 void AnnotationToolbar::resetToDefaults() {
     setCurrentTool(AnnotationType::Highlight);
     setAnnotationMode(false);

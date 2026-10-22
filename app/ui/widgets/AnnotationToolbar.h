@@ -50,6 +50,7 @@ public:
 
     // UI state
     void setEnabled(bool enabled);
+    void setUnavailableReason(const QString& reason);
     void resetToDefaults();
 
 signals:
