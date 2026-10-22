@@ -266,9 +266,21 @@ target_sources(test_rag_p3 PRIVATE
     ../app/rag/chat/ChatProvider.h
     ../app/rag/chat/ContextAssembler.cpp
     ../app/rag/chat/OllamaChatProvider.cpp
+    ../app/rag/embedding/OllamaEmbeddingProvider.cpp
+    ../app/rag/ui/AskPdfState.cpp
+    ../app/rag/ui/AskPdfState.h
     ../app/rag/ui/AskPdfWidget.cpp
     ../app/rag/ui/AskPdfWidget.h)
 target_link_libraries(test_rag_p3 PRIVATE Qt6::Network)
+
+create_unit_test(test_rag_evidence_baseline unit/test_rag_evidence_baseline.cpp)
+target_sources(test_rag_evidence_baseline PRIVATE
+    ../app/rag/extract/PdfChunker.cpp
+    ../app/rag/index/RagIndexStore.cpp
+    ../app/rag/retrieve/EvidenceExpander.cpp
+    ../app/rag/retrieve/HybridRetriever.cpp
+    ../app/rag/chat/ContextAssembler.cpp)
+target_link_libraries(test_rag_evidence_baseline PRIVATE Qt6::Sql)
 
 create_unit_test(test_ollama_embedding unit/test_ollama_embedding.cpp)
 target_sources(test_ollama_embedding PRIVATE
@@ -279,14 +291,6 @@ create_unit_test(test_chat_budget unit/test_chat_budget.cpp)
 target_sources(test_chat_budget PRIVATE
     ../app/rag/chat/ContextAssembler.cpp)
 
-create_unit_test(test_rag_evidence_baseline unit/test_rag_evidence_baseline.cpp)
-target_sources(test_rag_evidence_baseline PRIVATE
-    ../app/rag/extract/PdfChunker.cpp
-    ../app/rag/index/RagIndexStore.cpp
-    ../app/rag/retrieve/EvidenceExpander.cpp
-    ../app/rag/retrieve/HybridRetriever.cpp
-    ../app/rag/chat/ContextAssembler.cpp)
-target_link_libraries(test_rag_evidence_baseline PRIVATE Qt6::Sql)
 
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/unit/test_rag_settings.cpp)
     create_unit_test(test_rag_settings
@@ -311,10 +315,12 @@ if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/unit/test_rag_coordinator.cpp)
     target_sources(test_rag_coordinator PRIVATE
         ../app/model/DocumentModel.cpp
         ../app/model/AsyncDocumentLoader.cpp
+        ../app/rag/config/RagSettings.cpp
         ../app/rag/controller/RagDocumentCoordinator.cpp
         ../app/rag/extract/PdfTextExtractor.cpp
         ../app/rag/extract/PdfChunker.cpp
         ../app/rag/index/RagIndexStore.cpp
+        ../app/rag/retrieve/EvidenceExpander.cpp
         ../app/rag/retrieve/LexicalRetriever.cpp
         ../app/rag/retrieve/HybridRetriever.cpp
         ../app/rag/embedding/OllamaEmbeddingProvider.cpp

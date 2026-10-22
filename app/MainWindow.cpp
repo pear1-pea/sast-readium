@@ -1,18 +1,24 @@
 #include "MainWindow.h"
 #include <QAction>
 #include <QApplication>
+#include <QDateTime>
 #include <QDragEnterEvent>
 #include <QDropEvent>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QFutureWatcher>
 #include <QMessageBox>
 #include <QMimeData>
 #include <QStandardPaths>
 #include <QTimer>
+#include <QtConcurrent>
+
+#include <limits>
 #include "managers/FileTypeIconManager.h"
 #include "managers/StyleManager.h"
 #include "model/RenderModel.h"
 #include "rag/domain/EvidenceHighlightRequest.h"
+#include "rag/ui/AskPdfSettingsDialog.h"
 #include "rag/ui/AskPdfWidget.h"
 #include "ui/dialogs/DocumentMetadataDialog.h"
 #include "ui/managers/WelcomeScreenManager.h"
@@ -71,6 +77,7 @@ MainWindow::MainWindow(const AppComponents& deps, QWidget* parent)
       m_ragCoordinator(deps.ragDocumentCoordinator) {
     LOG_DEBUG("MainWindow: Starting initialization...");
 
+    m_thumbnailLoadPool.setMaxThreadCount(1);
     initWindow();
     LOG_DEBUG("MainWindow: Window initialized");
 
@@ -139,7 +146,7 @@ MainWindow::MainWindow(const AppComponents& deps, QWidget* parent)
     LOG_INFO("MainWindow: Initialization completed successfully");
 }
 
-MainWindow::~MainWindow() noexcept {}
+MainWindow::~MainWindow() noexcept { m_thumbnailLoadPool.clear(); }
 
 void MainWindow::openFiles(const QStringList& filePaths) {
     if (m_documentOrchestrator) {
@@ -308,7 +315,7 @@ void MainWindow::initConnection() {
                     askWidget->setIndexState(
                         snapshot.state, snapshot.chunkCount, snapshot.error,
                         snapshot.embeddingState, snapshot.embeddedChunkCount,
-                        snapshot.embeddingError);
+                        snapshot.embeddingError, snapshot.failureReason);
                 });
         connect(askWidget, &Rag::AskPdfWidget::querySubmitted, this,
                 [this, askWidget](const QString& query) {
@@ -328,6 +335,19 @@ void MainWindow::initConnection() {
                     if (m_ragCoordinator) {
                         m_ragCoordinator->cancelCurrentIndexing();
                     }
+                });
+        connect(askWidget, &Rag::AskPdfWidget::clearIndexRequested, this,
+                [this]() {
+                    if (!m_ragCoordinator) {
+                        return;
+                    }
+                    if (QMessageBox::question(
+                            this, tr("清空 Ask PDF 索引"),
+                            tr("确定删除所有文档的本地索引吗？PDF 文件本身不会"
+                               "被修改。")) != QMessageBox::Yes) {
+                        return;
+                    }
+                    m_ragCoordinator->clearAllIndexes();
                 });
         connect(m_ragCoordinator, &Rag::RagDocumentCoordinator::evidenceReady,
                 this, [askWidget](const QVector<Rag::RagEvidence>& evidence) {
@@ -351,13 +371,36 @@ void MainWindow::initConnection() {
                 &Rag::RagDocumentCoordinator::activateCitation);
         connect(m_ragCoordinator, &Rag::RagDocumentCoordinator::citationReady,
                 askWidget, &Rag::AskPdfWidget::evidenceActivated);
+        connect(m_ragCoordinator,
+                &Rag::RagDocumentCoordinator::indexClearingChanged, askWidget,
+                &Rag::AskPdfWidget::setClearing);
+        connect(m_ragCoordinator, &Rag::RagDocumentCoordinator::indexCleared,
+                this, [this]() {
+                    if (statusBar) {
+                        statusBar->setMessage(QStringLiteral("索引已清空"));
+                    }
+                });
+        connect(
+            m_ragCoordinator, &Rag::RagDocumentCoordinator::indexClearFailed,
+            this, [this](const QString& error) {
+                if (statusBar) {
+                    statusBar->setMessage(
+                        QStringLiteral("清空索引失败：%1").arg(error));
+                }
+                QMessageBox::warning(this, tr("清空 Ask PDF 索引失败"), error);
+            });
         connect(m_ragCoordinator, &Rag::RagDocumentCoordinator::queryFailed,
                 this, [this, askWidget](const QString& error) {
                     askWidget->setBusy(false);
+                    askWidget->setQueryError(error);
                     if (statusBar) {
                         statusBar->setMessage(error);
                     }
                 });
+        connect(askWidget, &Rag::AskPdfWidget::retryAnswerRequested,
+                m_ragCoordinator, &Rag::RagDocumentCoordinator::retryAnswer);
+        connect(askWidget, &Rag::AskPdfWidget::retryQueryRequested,
+                m_ragCoordinator, &Rag::RagDocumentCoordinator::retryQuery);
         connect(askWidget, &Rag::AskPdfWidget::evidenceActivated, this,
                 [this](const Rag::RagEvidence& evidence) {
                     if (!m_ragCoordinator || !viewWidget) {
@@ -387,10 +430,41 @@ void MainWindow::initConnection() {
         const Rag::RagDocumentSnapshot snapshot =
             m_ragCoordinator->currentSnapshot();
         askWidget->setDocumentContext(snapshot.key);
-        askWidget->setIndexState(snapshot.state, snapshot.chunkCount,
-                                 snapshot.error, snapshot.embeddingState,
-                                 snapshot.embeddedChunkCount,
-                                 snapshot.embeddingError);
+        askWidget->setIndexState(
+            snapshot.state, snapshot.chunkCount, snapshot.error,
+            snapshot.embeddingState, snapshot.embeddedChunkCount,
+            snapshot.embeddingError, snapshot.failureReason);
+        askWidget->setAnswerEnabled(m_ragCoordinator->settings().chatEnabled());
+        connect(
+            askWidget, &Rag::AskPdfWidget::settingsRequested, this,
+            [this, askWidget]() {
+                if (!m_ragCoordinator) {
+                    return;
+                }
+                Rag::AskPdfSettingsDialog dialog(m_ragCoordinator->settings(),
+                                                 this);
+                connect(
+                    &dialog, &Rag::AskPdfSettingsDialog::settingsApplied, this,
+                    [this, askWidget](const Rag::RagSettings& settings) {
+                        if (!m_ragCoordinator) {
+                            return;
+                        }
+                        const Rag::RagSettings previous =
+                            m_ragCoordinator->settings();
+                        m_ragCoordinator->applySettings(settings);
+                        askWidget->setAnswerEnabled(settings.chatEnabled());
+                        if (statusBar) {
+                            statusBar->setMessage(
+                                previous.chatModel != settings.chatModel
+                                    ? QStringLiteral(
+                                          "Ask PDF 设置已保存，更换 Chat 模型后"
+                                          "对话上下文已清空")
+                                    : QStringLiteral(
+                                          "Ask PDF 本地 AI 设置已保存"));
+                        }
+                    });
+                dialog.exec();
+            });
     }
 
     if (toolBar && toolBar->annotationToolbar()) {
@@ -457,8 +531,8 @@ void MainWindow::initConnection() {
                         viewer->loadAnnotations();
                     }
                 });
-        annotationToolbar->setEnabled(viewWidget->hasDocuments());
         annotationToolbar->setAnnotationMode(false);
+        updateAnnotationToolbarState();
     }
 
     connect(
@@ -471,8 +545,8 @@ void MainWindow::initConnection() {
             }
             if (toolBar && toolBar->annotationToolbar()) {
                 auto* toolbar = toolBar->annotationToolbar();
-                toolbar->setEnabled(index >= 0);
-                if (index >= 0) {
+                updateAnnotationToolbarState();
+                if (index >= 0 && toolbar->isEnabled()) {
                     if (PDFViewer* viewer = viewWidget->getCurrentViewer()) {
                         viewer->setAnnotationTool(toolbar->getCurrentTool());
                         viewer->setAnnotationMode(toolbar->isAnnotationMode());
@@ -484,8 +558,16 @@ void MainWindow::initConnection() {
         if (sideBar && sideBar->getBookmarkWidget()) {
             sideBar->setBookmarkContext(QString(), -1);
         }
+        sideBar->setDocument(nullptr, {});
+        m_thumbnailDocumentCache.clear();
+        m_thumbnailRetries.clear();
+        m_thumbnailLoadsInFlight.clear();
+        m_thumbnailCurrentPath.clear();
+        if (m_welcomeScreenManager) {
+            m_welcomeScreenManager->onAllDocumentsClosed();
+        }
         if (toolBar && toolBar->annotationToolbar()) {
-            toolBar->annotationToolbar()->setEnabled(false);
+            updateAnnotationToolbarState();
         }
     });
     connect(
@@ -551,20 +633,31 @@ void MainWindow::initConnection() {
             [this](int, const QString&) {
                 toolBar->setActionsEnabled(true);
                 updateShortcutActionStates();
+                updateAnnotationToolbarState();
                 if (m_welcomeScreenManager)
                     m_welcomeScreenManager->onDocumentOpened();
             });
-    connect(documentModel, &DocumentModel::documentClosed, this, [this](int) {
-        if (documentModel->isEmpty()) {
-            toolBar->setActionsEnabled(false);
-            if (m_welcomeScreenManager)
-                m_welcomeScreenManager->onAllDocumentsClosed();
-        } else {
-            if (m_welcomeScreenManager)
-                m_welcomeScreenManager->onDocumentClosed();
-        }
-        updateShortcutActionStates();
-    });
+    connect(documentModel, &DocumentModel::documentClosed, this,
+            [this](int index) {
+                const QString closedPath = normalizedDocumentPath(
+                    documentModel->getDocumentFilePath(index));
+                if (!closedPath.isEmpty()) {
+                    m_thumbnailDocumentCache.remove(closedPath);
+                }
+                if (m_thumbnailCurrentPath == closedPath) {
+                    m_thumbnailCurrentPath.clear();
+                }
+                m_thumbnailRetries.remove(closedPath);
+                // documentClosed is emitted before DocumentModel removes the
+                // document, so isEmpty() is false here even for the last tab.
+                // The allDocumentsClosed handler performs the final cleanup.
+                if (documentModel->getDocumentCount() > 1 &&
+                    m_welcomeScreenManager) {
+                    m_welcomeScreenManager->onDocumentClosed();
+                }
+                updateShortcutActionStates();
+                updateAnnotationToolbarState();
+            });
 
     // ViewWidget 状态信号 → 状态栏
     connect(viewWidget, &ViewWidget::currentViewerPageChanged, this,
@@ -610,12 +703,12 @@ void MainWindow::onSideBarVisibilityChanged(bool visible) {
 
 void MainWindow::onCurrentDocumentChangedForOutline(int index) {
     std::shared_ptr<Poppler::Document> viewerDocument;
-    std::shared_ptr<Poppler::Document> thumbnailDocument;
-    QVector<QSize> thumbnailPageSizes;
+    QString filePath;
 
     if (documentModel && index >= 0) {
         viewerDocument = documentModel->getDocument(index);
-        const QString filePath = documentModel->getDocumentFilePath(index);
+        filePath =
+            normalizedDocumentPath(documentModel->getDocumentFilePath(index));
         const bool documentLocked =
             viewerDocument && viewerDocument->isLocked();
         if (documentLocked) {
@@ -627,37 +720,158 @@ void MainWindow::onCurrentDocumentChangedForOutline(int index) {
                 filePath.toStdString());
             statusBar->setMessage(message);
         }
-
-        if (!filePath.isEmpty()) {
-            std::unique_ptr<Poppler::Document> loadedDocument =
-                Poppler::Document::load(filePath);
-            if (loadedDocument && !loadedDocument->isLocked()) {
-                thumbnailDocument = std::shared_ptr<Poppler::Document>(
-                    loadedDocument.release());
-                thumbnailPageSizes.reserve(thumbnailDocument->numPages());
-                for (int pageNumber = 0;
-                     pageNumber < thumbnailDocument->numPages(); ++pageNumber) {
-                    std::unique_ptr<Poppler::Page> page(
-                        thumbnailDocument->page(pageNumber));
-                    thumbnailPageSizes.push_back(
-                        page ? page->pageSizeF().toSize() : QSize());
-                }
-            } else if (!loadedDocument) {
-                LOG_WARNING("MainWindow: Failed to open thumbnail document: {}",
-                            filePath.toStdString());
-            } else {
-                LOG_WARNING(
-                    "MainWindow: Thumbnail document is locked, skipping "
-                    "thumbnail setup: {}",
-                    filePath.toStdString());
-            }
-        }
     }
 
-    // Keep the thumbnail document independent from the viewer document. The
-    // thumbnail model and generator may access Poppler on different threads.
-    sideBar->setDocument(std::move(thumbnailDocument), thumbnailPageSizes);
-    renderModel->setDocument(std::move(viewerDocument));
+    // The viewer document is already loaded and safe to reuse. Thumbnails use
+    // a separate Poppler document because the generator runs on worker
+    // threads.
+    renderModel->setDocument(viewerDocument);
+    m_thumbnailCurrentPath = filePath;
+
+    if (filePath.isEmpty()) {
+        sideBar->setDocument(nullptr, {});
+        return;
+    }
+
+    auto cached = m_thumbnailDocumentCache.find(filePath);
+    if (cached != m_thumbnailDocumentCache.end() &&
+        thumbnailDocumentIsFresh(cached.value(), filePath)) {
+        cached.value().lastAccess = ++m_thumbnailCacheAccessCounter;
+        applyThumbnailDocument(filePath, cached.value());
+        return;
+    }
+    if (cached != m_thumbnailDocumentCache.end()) {
+        m_thumbnailDocumentCache.erase(cached);
+        m_thumbnailRetries.remove(filePath);
+    }
+
+    sideBar->setDocument(nullptr, {});
+    requestThumbnailDocument(filePath);
+}
+
+bool MainWindow::thumbnailDocumentIsFresh(
+    const ThumbnailDocumentCacheEntry& entry, const QString& filePath) const {
+    const QFileInfo info(filePath);
+    return info.exists() && info.isFile() && info.size() == entry.fileSize &&
+           info.lastModified(QTimeZone::UTC).toMSecsSinceEpoch() ==
+               entry.modifiedTimeMs;
+}
+
+void MainWindow::applyThumbnailDocument(
+    const QString& filePath, const ThumbnailDocumentCacheEntry& entry) {
+    if (filePath != m_thumbnailCurrentPath || !entry.document) {
+        return;
+    }
+    sideBar->setDocument(entry.document, entry.pageSizes);
+}
+
+void MainWindow::requestThumbnailDocument(const QString& filePath) {
+    if (filePath.isEmpty() || m_thumbnailLoadsInFlight.contains(filePath)) {
+        return;
+    }
+
+    m_thumbnailLoadsInFlight.insert(filePath);
+    auto* watcher = new QFutureWatcher<ThumbnailDocumentCacheEntry>(this);
+    connect(
+        watcher, &QFutureWatcher<ThumbnailDocumentCacheEntry>::finished, this,
+        [this, watcher, filePath]() {
+            const ThumbnailDocumentCacheEntry entry = watcher->result();
+            watcher->deleteLater();
+            m_thumbnailLoadsInFlight.remove(filePath);
+
+            bool documentStillOpen = false;
+            if (documentModel) {
+                for (int i = 0; i < documentModel->getDocumentCount(); ++i) {
+                    if (normalizedDocumentPath(
+                            documentModel->getDocumentFilePath(i)) ==
+                        filePath) {
+                        documentStillOpen = true;
+                        break;
+                    }
+                }
+            }
+
+            const QFileInfo info(filePath);
+            const bool stale =
+                !info.exists() || !info.isFile() ||
+                info.size() != entry.fileSize ||
+                info.lastModified(QTimeZone::UTC).toMSecsSinceEpoch() !=
+                    entry.modifiedTimeMs;
+            if (stale) {
+                LOG_DEBUG(
+                    "MainWindow: discarded stale thumbnail document for {}",
+                    filePath.toStdString());
+                if (filePath == m_thumbnailCurrentPath && documentStillOpen &&
+                    m_thumbnailRetries.value(filePath) < 2) {
+                    ++m_thumbnailRetries[filePath];
+                    requestThumbnailDocument(filePath);
+                }
+                return;
+            }
+            if (!entry.document) {
+                LOG_WARNING("MainWindow: Failed to load thumbnail document: {}",
+                            filePath.toStdString());
+                return;
+            }
+            if (!documentStillOpen) {
+                return;
+            }
+
+            m_thumbnailRetries.remove(filePath);
+            ThumbnailDocumentCacheEntry cachedEntry = entry;
+            cachedEntry.lastAccess = ++m_thumbnailCacheAccessCounter;
+            m_thumbnailDocumentCache.insert(filePath, cachedEntry);
+            trimThumbnailDocumentCache();
+            applyThumbnailDocument(filePath, cachedEntry);
+        });
+
+    watcher->setFuture(QtConcurrent::run(&m_thumbnailLoadPool, [filePath]() {
+        ThumbnailDocumentCacheEntry entry;
+        const QFileInfo info(filePath);
+        if (!info.exists() || !info.isFile()) {
+            return entry;
+        }
+        entry.fileSize = info.size();
+        entry.modifiedTimeMs =
+            info.lastModified(QTimeZone::UTC).toMSecsSinceEpoch();
+
+        std::unique_ptr<Poppler::Document> document =
+            Poppler::Document::load(filePath);
+        if (!document || document->isLocked()) {
+            return entry;
+        }
+        auto shared = std::shared_ptr<Poppler::Document>(document.release());
+        entry.pageSizes.reserve(shared->numPages());
+        for (int pageNumber = 0; pageNumber < shared->numPages();
+             ++pageNumber) {
+            std::unique_ptr<Poppler::Page> page(shared->page(pageNumber));
+            entry.pageSizes.push_back(page ? page->pageSizeF().toSize()
+                                           : QSize());
+        }
+        entry.document = std::move(shared);
+        return entry;
+    }));
+}
+
+void MainWindow::trimThumbnailDocumentCache() {
+    while (m_thumbnailDocumentCache.size() > kMaxThumbnailDocuments) {
+        QString oldestPath;
+        quint64 oldestAccess = std::numeric_limits<quint64>::max();
+        for (auto it = m_thumbnailDocumentCache.cbegin();
+             it != m_thumbnailDocumentCache.cend(); ++it) {
+            if (it.key() == m_thumbnailCurrentPath) {
+                continue;
+            }
+            if (it->lastAccess < oldestAccess) {
+                oldestAccess = it->lastAccess;
+                oldestPath = it.key();
+            }
+        }
+        if (oldestPath.isEmpty()) {
+            break;
+        }
+        m_thumbnailDocumentCache.remove(oldestPath);
+    }
 }
 
 void MainWindow::onThumbnailPageClicked(int pageNumber) {
@@ -1112,6 +1326,38 @@ void MainWindow::updateViewModeShortcutActions(PDFViewMode mode) {
     if (toolBar) {
         toolBar->setViewModeIndex(static_cast<int>(mode));
     }
+    updateAnnotationToolbarState();
+}
+
+void MainWindow::updateAnnotationToolbarState() {
+    if (!toolBar || !toolBar->annotationToolbar()) {
+        return;
+    }
+
+    AnnotationToolbar* annotationToolbar = toolBar->annotationToolbar();
+    const bool enabled =
+        viewWidget && documentModel && !documentModel->isEmpty() &&
+        viewWidget->hasDocuments() &&
+        viewWidget->getCurrentViewMode() != PDFViewMode::SinglePage;
+    annotationToolbar->setEnabled(enabled);
+    annotationToolbar->setUnavailableReason(
+        enabled ? QString() : QStringLiteral("单页模式不支持批注"));
+
+    if (!enabled) {
+        if (m_annotationToolbarEnabled && statusBar && viewWidget &&
+            documentModel && !documentModel->isEmpty() &&
+            viewWidget->hasDocuments() &&
+            viewWidget->getCurrentViewMode() == PDFViewMode::SinglePage) {
+            statusBar->setMessage(QStringLiteral("单页模式不支持批注"));
+        }
+        // Also turn off the canvas tool state so switching back does not leave
+        // a stale annotation mode active.
+        annotationToolbar->setAnnotationMode(false);
+    } else if (PDFViewer* viewer = viewWidget->getCurrentViewer()) {
+        viewer->setAnnotationTool(annotationToolbar->getCurrentTool());
+        viewer->setAnnotationColor(annotationToolbar->getCurrentColor());
+    }
+    m_annotationToolbarEnabled = enabled;
 }
 
 void MainWindow::openFileDialog() {

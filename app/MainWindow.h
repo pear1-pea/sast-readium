@@ -2,9 +2,16 @@
 
 #include <QMainWindow>
 
+#include <QHash>
 #include <QPair>
+#include <QSet>
+#include <QSize>
 #include <QStackedWidget>
 #include <QStringList>
+#include <QThreadPool>
+#include <QVector>
+
+#include <memory>
 #include "controller/DocumentOrchestrator.h"
 #include "controller/tool.hpp"
 #include "core/AppComponents.h"
@@ -27,6 +34,14 @@
 
 class QDragEnterEvent;
 class QDropEvent;
+
+struct ThumbnailDocumentCacheEntry {
+    std::shared_ptr<Poppler::Document> document;
+    QVector<QSize> pageSizes;
+    qint64 fileSize = 0;
+    qint64 modifiedTimeMs = 0;
+    quint64 lastAccess = 0;
+};
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -78,6 +93,13 @@ private:
     void updateShortcutActionStates();
     void updatePageShortcutActions(int pageNumber, int totalPages);
     void updateViewModeShortcutActions(PDFViewMode mode);
+    void updateAnnotationToolbarState();
+    void requestThumbnailDocument(const QString& filePath);
+    bool thumbnailDocumentIsFresh(const ThumbnailDocumentCacheEntry& entry,
+                                  const QString& filePath) const;
+    void applyThumbnailDocument(const QString& filePath,
+                                const ThumbnailDocumentCacheEntry& entry);
+    void trimThumbnailDocumentCache();
     // Dialog-based file operations (L5 — needs QWidget* parent).
     void openFileDialog();
     void openFolderDialog();
@@ -116,6 +138,15 @@ private:
     QString m_ragUiDocumentPath;
 
     QPair<QString, int> m_pendingBookmarkNavigation;
+
+    QHash<QString, ThumbnailDocumentCacheEntry> m_thumbnailDocumentCache;
+    QSet<QString> m_thumbnailLoadsInFlight;
+    QHash<QString, int> m_thumbnailRetries;
+    QString m_thumbnailCurrentPath;
+    quint64 m_thumbnailCacheAccessCounter = 0;
+    QThreadPool m_thumbnailLoadPool;
+    static constexpr int kMaxThumbnailDocuments = 3;
+    bool m_annotationToolbarEnabled = false;
 
 signals:
     void pdfViewerActionRequested(ActionMap action);

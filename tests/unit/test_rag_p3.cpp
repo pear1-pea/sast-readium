@@ -1,14 +1,27 @@
+#include <QElapsedTimer>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QLabel>
 #include <QListWidget>
+#include <QPushButton>
+#include <QSignalSpy>
 #include <QTcpServer>
 #include <QTcpSocket>
+#include <QToolButton>
 #include <QtTest>
 #include "rag/chat/ContextAssembler.h"
 #include "rag/chat/OllamaChatProvider.h"
+#include "rag/embedding/OllamaEmbeddingProvider.h"
+#include "rag/ui/AskPdfState.h"
 #include "rag/ui/AskPdfWidget.h"
 using namespace Rag;
 class TestRagP3 : public QObject {
     Q_OBJECT
 private slots:
+    void askPdfStateCopy();
+    void askPdfStatePanelActions();
+    void statusAndSettingsButton();
     void citationLabels() {
         AskPdfWidget widget;
         RagAnswer answer;
@@ -50,8 +63,8 @@ private slots:
         item.sectionPath = "section one";
         item.text = QString(200, 'a');
         auto request =
-            ContextAssembler::assemble("question", {item, item}, {}, 100);
-        QVERIFY(request.context.size() <= 100);
+            ContextAssembler::assemble("question", {item, item}, {}, 300);
+        QVERIFY(request.context.size() <= 300);
         QCOMPARE(request.evidence.size(), 1);
         auto answer = CitationValidator::validate(
             "Answer [[cite:chunk_one]] [[cite:fake]] [[cite:chunk_one]]",
@@ -73,6 +86,263 @@ private slots:
                 .conversation,
             (QStringList{"q1", "a1"}));
     }
+
+    void contextKeepsWholeEvidenceAtBudgetBoundary() {
+        RagEvidence item;
+        item.chunkId = "approval";
+        item.documentHash = "doc";
+        item.pageStart = item.pageEnd = 2;
+        item.text =
+            QStringLiteral("填写表单并提交。仅限已经通过审核的申请。🌍");
+        item.locations = {
+            {2, 80, int(item.text.size()), {QRectF(1, 2, 30, 4)}}};
+        const auto full = ContextAssembler::assemble("q", {item}, {});
+        QCOMPARE(full.evidence.size(), 1);
+        const int exactBudget = full.context.size();
+        const auto exact =
+            ContextAssembler::assemble("q", {item}, {}, exactBudget);
+        QCOMPARE(exact.context, full.context);
+        QCOMPARE(exact.evidence.first().text, item.text);
+        QCOMPARE(exact.evidence.first().locations.first().charStart, 80);
+        QCOMPARE(exact.evidence.first().locations.first().charLength,
+                 item.text.size());
+        QCOMPARE(exact.evidence.first().locations.first().boundingRects,
+                 item.locations.first().boundingRects);
+
+        for (int budget : {-1, 0, 1, exactBudget - 1}) {
+            const auto shortRequest =
+                ContextAssembler::assemble("q", {item}, {}, budget);
+            QVERIFY(shortRequest.context.isEmpty());
+            QVERIFY(shortRequest.evidence.isEmpty());
+            QVERIFY(CitationValidator::validate("[[cite:approval]]",
+                                                shortRequest.evidence, "doc")
+                        .citations.isEmpty());
+        }
+    }
+
+    void contextSkipsOversizedBlocksAndContinues() {
+        RagEvidence oversized;
+        oversized.chunkId = "long";
+        oversized.documentHash = "doc";
+        oversized.text = QString(500, 'x') + " Only after approval.";
+        RagEvidence small;
+        small.chunkId = "small";
+        small.documentHash = "doc";
+        small.pageStart = small.pageEnd = 0;
+        small.text = "Approval is required.";
+        RagEvidence longHeader = small;
+        longHeader.chunkId = QString(300, 'h');
+        RagEvidence empty = small;
+        empty.chunkId = "empty";
+        empty.text.clear();
+
+        const auto expected = ContextAssembler::assemble("q", {small}, {});
+        const auto request = ContextAssembler::assemble(
+            "q", {oversized, longHeader, empty, small, small}, {},
+            expected.context.size());
+        QCOMPARE(request.context, expected.context);
+        QCOMPARE(request.evidence.size(), 1);
+        QCOMPARE(request.evidence.first().chunkId, small.chunkId);
+        QCOMPARE(request.evidence.first().text, small.text);
+        const auto answer = CitationValidator::validate(
+            "[[cite:long]] [[cite:small]]", request.evidence, "doc");
+        QCOMPARE(answer.citations.size(), 1);
+        QCOMPARE(answer.citations.first().chunkId, small.chunkId);
+        QCOMPARE(answer.citations.first().snippet, small.text);
+    }
+    void chatRequestCarriesBudgetAndRealPromptTokens() {
+        QTcpServer server;
+        QVERIFY(server.listen(QHostAddress::LocalHost));
+        QByteArray received;
+        connect(&server, &QTcpServer::newConnection, this, [&]() {
+            auto* socket = server.nextPendingConnection();
+            connect(socket, &QTcpSocket::readyRead, socket,
+                    [socket, &received]() {
+                        received += socket->readAll();
+                        if (socket->property("sent").toBool())
+                            return;
+                        const int headerEnd = received.indexOf("\r\n\r\n");
+                        if (headerEnd < 0)
+                            return;
+                        int length = 0;
+                        const auto lines = received.left(headerEnd).split('\n');
+                        for (const auto& line : lines) {
+                            if (line.toLower().startsWith("content-length:"))
+                                length = line.mid(15).trimmed().toInt();
+                        }
+                        if (received.size() < headerEnd + 4 + length)
+                            return;
+                        socket->setProperty("sent", true);
+                        const QByteArray body =
+                            "{\"message\":{\"content\":\"ok\"},\"done\":false,"
+                            "\"prompt_eval_count\":42}\n"
+                            "{\"message\":{\"content\":\"\"},\"done\":true}\n";
+                        socket->write(
+                            "HTTP/1.1 200 OK\r\nContent-Type: "
+                            "application/x-ndjson\r\nContent-Length: " +
+                            QByteArray::number(body.size()) +
+                            "\r\nConnection: close\r\n\r\n" + body);
+                    });
+        });
+
+        ChatRequest request;
+        request.question = QStringLiteral("question");
+        request.context = QStringLiteral("evidence");
+        request.systemPrompt = QStringLiteral("custom system prompt");
+        request.contextWindowTokens = 2048;
+        request.maxOutputTokens = 512;
+        request.tokenSafetyMargin = 64;
+
+        OllamaChatProvider provider("fixture",
+                                    QUrl(QString("http://127.0.0.1:%1/api/chat")
+                                             .arg(server.serverPort())));
+        auto* task = provider.generate(request, this);
+        QSignalSpy done(task, &ChatTask::completed);
+        QSignalSpy tokens(task, &ChatTask::promptEvaluated);
+        task->start();
+        QTRY_COMPARE(done.count(), 1);
+        QCOMPARE(tokens.count(), 1);
+        QCOMPARE(tokens.first().first().toInt(), 42);
+
+        const int headerEnd = received.indexOf("\r\n\r\n");
+        QVERIFY(headerEnd > 0);
+        int length = 0;
+        const auto lines = received.left(headerEnd).split('\n');
+        for (const auto& line : lines) {
+            if (line.toLower().startsWith("content-length:"))
+                length = line.mid(15).trimmed().toInt();
+        }
+        const auto body =
+            QJsonDocument::fromJson(received.mid(headerEnd + 4, length))
+                .object();
+        const auto options = body.value("options").toObject();
+        QCOMPARE(options.value("num_ctx").toInt(), 2048);
+        QCOMPARE(options.value("num_predict").toInt(), 512);
+        const auto messages = body.value("messages").toArray();
+        QCOMPARE(messages.first().toObject().value("content").toString(),
+                 request.systemPrompt);
+        QCOMPARE(messages.last().toObject().value("content").toString(),
+                 request.question + "\nEvidence:\n" + request.context);
+        delete task;
+    }
+
+    void chatRejectsRequestOverBudget() {
+        OllamaChatProvider provider("fixture");
+        ChatRequest request;
+        request.maxOutputTokens = 4096;
+        auto* task = provider.generate(request, this);
+        QSignalSpy failed(task, &ChatTask::failed);
+        QSignalSpy done(task, &ChatTask::completed);
+        task->start();
+        QCOMPARE(failed.count(), 1);
+        QCOMPARE(done.count(), 0);
+        QVERIFY(!failed.first().first().toString().isEmpty());
+        delete task;
+    }
+
+    void idleTimeoutAfterFirstLine() {
+        QTcpServer server;
+        QVERIFY(server.listen(QHostAddress::LocalHost));
+        connect(&server, &QTcpServer::newConnection, this, [&]() {
+            auto* socket = server.nextPendingConnection();
+            connect(socket, &QTcpSocket::readyRead, socket, [socket]() {
+                socket->readAll();
+                if (socket->property("sent").toBool())
+                    return;
+                socket->setProperty("sent", true);
+                const QByteArray body =
+                    "{\"message\":{\"content\":\"partial\"},\"done\":false}\n";
+                socket->write(
+                    "HTTP/1.1 200 OK\r\nContent-Type: "
+                    "application/x-ndjson\r\nContent-Length: 100\r\n"
+                    "Connection: keep-alive\r\n\r\n" +
+                    body);
+            });
+        });
+
+        OllamaChatProvider provider("fixture",
+                                    QUrl(QString("http://127.0.0.1:%1/api/chat")
+                                             .arg(server.serverPort())),
+                                    500, 100);
+        auto* task = provider.generate({}, this);
+        QSignalSpy failed(task, &ChatTask::failed);
+        QSignalSpy done(task, &ChatTask::completed);
+        task->start();
+        QTRY_COMPARE_WITH_TIMEOUT(failed.count(), 1, 3000);
+        QCOMPARE(done.count(), 0);
+        delete task;
+    }
+
+    void slowStreamWithSmallIdleGapsCompletes() {
+        QTcpServer server;
+        QVERIFY(server.listen(QHostAddress::LocalHost));
+        connect(&server, &QTcpServer::newConnection, this, [&]() {
+            auto* socket = server.nextPendingConnection();
+            connect(socket, &QTcpSocket::readyRead, socket, [socket]() {
+                socket->readAll();
+                if (socket->property("sent").toBool())
+                    return;
+                socket->setProperty("sent", true);
+                const QByteArray body =
+                    "{\"message\":{\"content\":\"a\"},\"done\":false}\n"
+                    "{\"message\":{\"content\":\"b\"},\"done\":false}\n"
+                    "{\"message\":{\"content\":\"c\"},\"done\":false}\n"
+                    "{\"message\":{\"content\":\"d\"},\"done\":true}\n";
+                socket->write(
+                    "HTTP/1.1 200 OK\r\nContent-Type: "
+                    "application/x-ndjson\r\nContent-Length: " +
+                    QByteArray::number(body.size()) +
+                    "\r\nConnection: keep-alive\r\n\r\n" +
+                    body.left(body.indexOf('\n') + 1));
+                for (int i = 1; i < 4; ++i) {
+                    QTimer::singleShot(100 * i, socket, [socket, body, i]() {
+                        int start = 0;
+                        for (int line = 0; line < i; ++line)
+                            start = body.indexOf('\n', start) + 1;
+                        const int end = body.indexOf('\n', start) + 1;
+                        socket->write(body.mid(start, end - start));
+                    });
+                }
+            });
+        });
+
+        OllamaChatProvider provider("fixture",
+                                    QUrl(QString("http://127.0.0.1:%1/api/chat")
+                                             .arg(server.serverPort())),
+                                    500, 250);
+        auto* task = provider.generate({}, this);
+        QSignalSpy failed(task, &ChatTask::failed);
+        QSignalSpy done(task, &ChatTask::completed);
+        task->start();
+        QTRY_COMPARE_WITH_TIMEOUT(done.count(), 1, 4000);
+        QCOMPARE(failed.count(), 0);
+        QCOMPARE(done.first().first().toString(), QString("abcd"));
+        delete task;
+    }
+
+    void embeddingRequestRespectsConfiguredTimeout() {
+        QTcpServer server;
+        QVERIFY(server.listen(QHostAddress::LocalHost));
+        connect(&server, &QTcpServer::newConnection, this, [&]() {
+            auto* socket = server.nextPendingConnection();
+            // Accept the request but never answer.
+            connect(socket, &QTcpSocket::readyRead, socket,
+                    [socket]() { socket->readAll(); });
+        });
+
+        OllamaEmbeddingProvider provider("fixture", "v1", 100);
+        RagCancellationToken cancel;
+        QString error;
+        QElapsedTimer timer;
+        timer.start();
+        const auto vectors =
+            provider.embed({QStringLiteral("text")}, cancel, &error);
+        QVERIFY(vectors.isEmpty());
+        QVERIFY(!error.isEmpty());
+        QVERIFY2(timer.elapsed() < 3000,
+                 qPrintable(QString::number(timer.elapsed())));
+    }
+
     void fragmentedStream() {
         QTcpServer server;
         QVERIFY(server.listen(QHostAddress::LocalHost));
@@ -173,5 +443,159 @@ private slots:
         delete task;
     }
 };
+
+void TestRagP3::askPdfStateCopy() {
+    AskPdfViewInput input;
+    input.hasDocument = true;
+    input.indexState = RagIndexState::Ready;
+    input.embeddingState = RagEmbeddingState::Ready;
+    input.answerEnabled = true;
+
+    QCOMPARE(askPdfViewState(input), AskPdfViewState::ReadyIdle);
+
+    input.answerEnabled = false;
+    auto view = askPdfStateView(input);
+    QCOMPARE(view.state, AskPdfViewState::EvidenceOnly);
+    QVERIFY(view.title.contains(QStringLiteral("未启用回答生成")));
+    QCOMPARE(view.primaryText, QStringLiteral("配置本地模型"));
+    QCOMPARE(view.primaryAction, AskPdfStateAction::OpenSettings);
+
+    input.answerEnabled = true;
+    input.hasSearched = true;
+    view = askPdfStateView(input);
+    QCOMPARE(view.state, AskPdfViewState::NoEvidence);
+    QVERIFY(view.title.contains(QStringLiteral("没有找到足够相关的证据")));
+    QCOMPARE(view.primaryAction, AskPdfStateAction::FocusQuery);
+
+    input.hasSearched = false;
+    input.embeddingState = RagEmbeddingState::Disabled;
+    view = askPdfStateView(input);
+    QCOMPARE(view.state, AskPdfViewState::SemanticUnavailable);
+    QVERIFY(view.title.contains(QStringLiteral("语义检索不可用")));
+
+    input.embeddingState = RagEmbeddingState::Ready;
+    input.queryFailed = true;
+    input.queryError = QStringLiteral("boom");
+    view = askPdfStateView(input);
+    QCOMPARE(view.state, AskPdfViewState::QueryFailed);
+    QCOMPARE(view.detail, QStringLiteral("boom"));
+    QCOMPARE(view.primaryAction, AskPdfStateAction::RetryQuery);
+
+    input.queryFailed = false;
+    input.answerFailed = true;
+    input.answerError = QStringLiteral("chat failed");
+    view = askPdfStateView(input);
+    QCOMPARE(view.state, AskPdfViewState::AnswerFailed);
+    QCOMPARE(view.primaryAction, AskPdfStateAction::RetryAnswer);
+    QCOMPARE(view.secondaryAction, AskPdfStateAction::OpenSettings);
+
+    input.answerFailed = false;
+    input.hasDocument = false;
+    QCOMPARE(askPdfViewState(input), AskPdfViewState::NoDocument);
+
+    input.hasDocument = true;
+    input.indexState = RagIndexState::Failed;
+    input.failureReason = RagIndexFailureReason::Encrypted;
+    view = askPdfStateView(input);
+    QCOMPARE(view.state, AskPdfViewState::IndexFailed);
+    QVERIFY(view.title.contains(QStringLiteral("加密")));
+    QCOMPARE(view.primaryAction, AskPdfStateAction::RebuildIndex);
+
+    input.failureReason = RagIndexFailureReason::Database;
+    view = askPdfStateView(input);
+    QVERIFY(view.title.contains(QStringLiteral("本地索引")));
+    QCOMPARE(view.secondaryAction, AskPdfStateAction::ClearIndex);
+
+    input.indexState = RagIndexState::Unsupported;
+    input.failureReason = RagIndexFailureReason::ScannedImage;
+    view = askPdfStateView(input);
+    QCOMPARE(view.state, AskPdfViewState::IndexUnsupported);
+    QVERIFY(view.title.contains(QStringLiteral("扫描版")));
+    QVERIFY(view.primaryText.isEmpty());
+
+    input.indexState = RagIndexState::Ready;
+    input.busy = true;
+    QCOMPARE(askPdfViewState(input), AskPdfViewState::Searching);
+}
+
+void TestRagP3::askPdfStatePanelActions() {
+    AskPdfWidget widget;
+    DocumentKey document;
+    document.canonicalPath = QStringLiteral("/tmp/example.pdf");
+    document.contentHash = QStringLiteral("hash");
+    widget.setDocumentContext(document);
+    widget.setIndexState(RagIndexState::Ready, 3, {}, RagEmbeddingState::Ready,
+                         3, {});
+
+    auto* panel =
+        widget.findChild<QWidget*>(QStringLiteral("askPdfStatePanel"));
+    auto* title = widget.findChild<QLabel*>(QStringLiteral("askPdfStateTitle"));
+    auto* primary =
+        widget.findChild<QPushButton*>(QStringLiteral("askPdfStatePrimary"));
+    QVERIFY(panel);
+    QVERIFY(title);
+    QVERIFY(primary);
+    QVERIFY(!panel->isVisibleTo(&widget));
+
+    QSignalSpy settingsSpy(&widget, &AskPdfWidget::settingsRequested);
+    widget.setAnswerEnabled(false);
+    QVERIFY(panel->isVisibleTo(&widget));
+    QVERIFY(title->text().contains(QStringLiteral("未启用回答生成")));
+    QCOMPARE(primary->text(), QStringLiteral("配置本地模型"));
+    primary->click();
+    QCOMPARE(settingsSpy.count(), 1);
+
+    widget.setAnswerEnabled(true);
+    widget.setEvidence({});
+    QVERIFY(title->text().contains(QStringLiteral("没有找到足够相关的证据")));
+    QCOMPARE(primary->text(), QStringLiteral("换个问法"));
+
+    QSignalSpy querySpy(&widget, &AskPdfWidget::retryQueryRequested);
+    widget.setQueryError(QStringLiteral("boom"));
+    QVERIFY(title->text().contains(QStringLiteral("检索失败")));
+    QCOMPARE(primary->text(), QStringLiteral("重试"));
+    primary->click();
+    QCOMPARE(querySpy.count(), 1);
+
+    QSignalSpy answerSpy(&widget, &AskPdfWidget::retryAnswerRequested);
+    RagEvidence evidence;
+    evidence.chunkId = QStringLiteral("chunk");
+    evidence.documentHash = QStringLiteral("hash");
+    evidence.pageStart = 0;
+    evidence.text = QStringLiteral("evidence");
+    widget.setEvidence({evidence});
+    widget.setAnswerError(QStringLiteral("chat failed"));
+    QVERIFY(title->text().contains(QStringLiteral("回答生成失败")));
+    primary->click();
+    QCOMPARE(answerSpy.count(), 1);
+}
+
+void TestRagP3::statusAndSettingsButton() {
+    AskPdfWidget widget;
+    auto* status = widget.findChild<QLabel*>(QStringLiteral("askPdfStatus"));
+    auto* settings =
+        widget.findChild<QToolButton*>(QStringLiteral("askPdfSettings"));
+    QVERIFY(status);
+    QVERIFY(settings);
+
+    QSignalSpy settingsSpy(&widget, &AskPdfWidget::settingsRequested);
+    settings->click();
+    QCOMPARE(settingsSpy.count(), 1);
+
+    widget.setAnswerEnabled(true);
+    widget.setIndexState(RagIndexState::Ready, 5, {},
+                         RagEmbeddingState::Disabled, 0, {});
+    QVERIFY(status->text().contains(QStringLiteral("语义检索关闭")));
+    QVERIFY(status->text().contains(QStringLiteral("5 个文本块")));
+    QVERIFY(!status->text().contains(QStringLiteral("回答已关闭")));
+
+    widget.setIndexState(RagIndexState::Ready, 5, {},
+                         RagEmbeddingState::Running, 2, {});
+    QVERIFY(status->text().contains(QStringLiteral("2/5")));
+
+    widget.setAnswerEnabled(false);
+    QVERIFY(status->text().contains(QStringLiteral("回答已关闭")));
+}
+
 QTEST_MAIN(TestRagP3)
 #include "test_rag_p3.moc"
