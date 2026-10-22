@@ -1,0 +1,166 @@
+# Ask PDF
+
+Ask PDF adds document evidence search, optional local semantic retrieval, and
+optional local answer generation to the reader. Lexical search works without any
+external service.
+
+## Data flow
+
+```text
+PDF -> text extraction -> chunks -> SQLite FTS5 index
+                                  -> optional Ollama embeddings
+query -> lexical + optional vector retrieval -> evidence list
+      -> optional Ollama chat -> validated citations -> page highlight
+```
+
+The PDF text is extracted on a worker thread. The renderer and the indexer use
+separate Poppler documents so indexing and page rendering do not share mutable
+Poppler state.
+
+## Local services
+
+Both integrations are local-only and disabled by default. Configure them with
+the gear button in the Ask PDF sidebar:
+
+| Service | Endpoint | Configuration |
+| --- | --- | --- |
+| Embeddings | `<endpoint>/api/embed` | Embedding model (hidden version) |
+| Chat | `<endpoint>/api/chat` | Chat model + "AI 回答" toggle |
+
+The endpoint defaults to `http://127.0.0.1:11434` and must point at the loopback
+interface (`127.0.0.1`, `localhost`, or `::1`); remote hosts, user-info, query
+strings, and fragments are rejected so PDF text never leaves the machine.
+Settings are stored in the application settings under `rag/ollama/*`; the
+environment variables
+`READIUM_OLLAMA_EMBED_MODEL`, `READIUM_OLLAMA_EMBED_VERSION` and
+`READIUM_OLLAMA_CHAT_MODEL` are only used to seed the values on first launch.
+The migrated result is written back, including empty values, so later
+environment changes cannot silently override the dialog.
+
+"Test connection" checks the service and model list first, then performs the
+embedding and chat checks one after another so two cold models are not loaded at
+the same time. A successful test only means the service and model are usable at
+that moment; it does not mean the current document has vectors. Requests are
+asynchronous, cancellable, and their results are ignored after the address or
+model changes. The model dropdown lists every model returned by `/api/tags`
+without filtering by capability; choosing the wrong model is reported by the
+per-capability check, and filtering with `/api/show` is left for a later
+iteration.
+
+Readium never starts or downloads an Ollama model. If embeddings are unavailable,
+the lexical path remains usable. If answers are disabled, Ask PDF still returns
+evidence and page navigation, and semantic retrieval keeps working when vectors
+are ready. Changing the chat model clears the in-memory conversation for open
+documents; toggling answers off and on does not.
+
+## Empty and error states
+
+Ask PDF shows an inline state block above the answer/evidence area. The state is
+derived from the index state, the failure reason, whether a search has run, and
+whether answer generation is enabled:
+
+| Situation | Message | Actions |
+| --- | --- | --- |
+| No document | 打开 PDF 后即可搜索证据。 | – |
+| Answer generation disabled | 未启用回答生成。当前仅显示本地证据。 | 配置本地模型 |
+| No relevant evidence | 没有找到足够相关的证据。尝试换一种问法或重建索引。 | 换个问法 / 重建索引 |
+| Semantic retrieval unavailable | 语义检索不可用，当前使用关键词检索。 | 检查本地模型 |
+| Encrypted PDF | PDF 已加密，无法提取文本。 | 重试 |
+| Corrupt PDF | PDF 无法解析，文件可能已损坏。 | 重试 |
+| Scanned/image-only PDF | 当前 PDF 没有可提取文本，可能是扫描版。 | – |
+| Index database error | 本地索引不可用或已损坏。 | 重建索引 / 清除索引 |
+| Retrieval failed | 检索失败。 | 重试 |
+| Answer generation failed | 回答生成失败。 | 重试 / 检查本地模型 |
+
+Failure reasons are typed (`RagIndexFailureReason`), not matched from error
+strings. When a search returns no evidence, answer generation is skipped so the
+empty state is not mixed with a chat error. "Retry" for answers reuses the last
+evidence without running a new search; use "换个问法" to search again.
+
+## Vector identity and model changes
+
+Vectors are keyed by `(document_hash, chunk_id, chunk_hash, model_id,
+model_version)`. Changing the embedding model therefore starts from the target
+model's namespace: only its missing vectors are generated, and switching back to
+a model with complete vectors reuses them without recomputing. Text is not
+re-extracted.
+
+- A model chosen in the UI stores the hidden version `1`. A version migrated
+  from `READIUM_OLLAMA_EMBED_VERSION` is preserved, and a migration without a
+  version keeps embedding disabled (the old behaviour).
+- The endpoint is intentionally not part of the vector identity. The same model
+  name and version served from another endpoint reuses existing vectors.
+- Changing the weight behind an unchanged Ollama tag (`latest` re-pulled) is not
+  detected. Retrieval quality may drift until the tag or endpoint changes; this
+  is a known limitation, not a bug.
+
+## Persistence and privacy
+
+The index is stored at:
+
+```text
+<QStandardPaths::AppDataLocation>/rag/rag-index.sqlite
+```
+
+It contains the extracted PDF text, chunk metadata, and optional embedding
+vectors. The `rag` directory is created owner-only (`0700`) and a newly created
+database file is set to owner read/write (`0600`) on platforms that support POSIX
+permissions. On Windows these calls only affect the read-only bit; access control
+comes from the user profile ACL.
+
+The index persists after a tab is closed. A document is not automatically removed
+from the index when its tab closes, because keeping the cache avoids rebuilding
+after reopening the same file. Use **Ask PDF → clear index** to delete all local
+index data. The clear operation uses SQLite `secure_delete` before deleting rows
+and runs `VACUUM` afterwards to reclaim file space. Clearing the index does not
+modify the PDF files themselves.
+
+SQLite must be built with FTS5 enabled (SQLite 3.9+); see the build
+documentation for the supported baseline.
+
+## Extraction status
+
+- Text PDFs are indexed normally.
+- Scanned/image-only PDFs are reported as unsupported until OCR is added.
+- Encrypted or unreadable PDFs enter the failed state but keep their file
+  identity so the user can retry after fixing the file.
+
+## Planned improvements
+
+See the [chunking and evidence completeness TODO](ask-pdf-todo.md) for priorities,
+dependencies, and acceptance criteria.
+
+The context assembler sends whole evidence blocks only. Blocks that do not fit
+the remaining budget are skipped; smaller later blocks can still be included.
+Citation metadata therefore refers to the full text actually assembled. Evidence
+is selected first, then recent complete history turns are added only if they
+fit, and the output reservation is subtracted before either.
+
+Before assembly, retrieval expands each hit with its immediate reading-order
+neighbours (same or one adjacent page, bounded text size) and merges overlapping
+or touching source ranges. The merged block keeps the highest-ranked chunk id,
+so citations and page highlights still resolve, and the duplicated overlap text
+is sent once.
+
+The budget covers the system prompt, question, history, evidence and output
+reservation. It is estimated from UTF-8 bytes plus per-message overhead: a
+conservative upper bound rather than a model tokenizer, so a request that fits
+the estimate also fits the declared window. The request sets `num_ctx` to that
+window and `num_predict` to the output reservation, so the service limit no
+longer depends on an Ollama version default. Each answer reports
+`prompt_eval_count`, which is logged against the estimate; it is the real
+tokenizer count and the signal for tightening the bound.
+
+Each indexed document records its chunking strategy
+(`target/max/overlap/sentence-aware`). Reopening a document whose stored policy
+differs rebuilds its chunks, FTS rows and vectors instead of mixing strategies.
+Page section paths come from the PDF outline when one exists; they are used for
+reranking only, never sent as evidence.
+
+New embedding requests set `truncate: false`. Service errors retain the HTTP
+status and Ollama diagnostic; failed embedding jobs leave lexical search usable.
+Previously cached vectors are unchanged. Rebuild the document index to regenerate
+them with truncation disabled.
+
+See the [initial evaluation record](ask-pdf-evaluation.md) for the synthetic
+evidence benchmark, its reproduction command, and remaining limitations.

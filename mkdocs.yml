@@ -113,6 +113,7 @@ nav:
     - clangd IDE Setup: setup/clangd-setup.md
   - Features:
     - Overview: features/index.md
+    - Ask PDF: features/ask-pdf.md
     - Thumbnail System: features/thumbnail-system.md
   - Development:
     - Architecture: agent/architecture.md

@@ -15,30 +15,40 @@ A Qt6-based PDF reader application with comprehensive build support for multiple
 ### Local embedding search
 
 Ask PDF works offline with lexical search by default. To enable optional hybrid
-retrieval, run Ollama locally with an embedding model and set
-`READIUM_OLLAMA_EMBED_MODEL` and `READIUM_OLLAMA_EMBED_VERSION` before starting
-Readium. Both values are required for vector cache invalidation. For example:
+retrieval, run Ollama locally with an embedding model, then open the gear button
+in the Ask PDF sidebar and choose an Embedding model. The environment variables
+below are only used to seed the settings the first time; after that the saved
+values win. For example:
 
 ```sh
 ollama pull nomic-embed-text
 READIUM_OLLAMA_EMBED_MODEL=nomic-embed-text READIUM_OLLAMA_EMBED_VERSION=1 ./build/app/app
 ```
 
-The app sends text only to `127.0.0.1:11434/api/embed`; it does not start or
-download a model. Set `READIUM_OLLAMA_EMBED_VERSION` to a new value after
-replacing/updating the model to invalidate cached vectors. Embeddings are
-generated in batches after the lexical index is ready; missing vectors or an
-unavailable local server do not prevent lexical search.
+The app sends text only to the configured loopback endpoint (default
+`127.0.0.1:11434`); remote hosts are rejected. It does not start or download a
+model. Settings migrated
+from the environment keep the configured version, while a model chosen in the
+UI uses the hidden version `1`. Replacing/updating a model under the same Ollama
+tag is not detected; pick a different tag or change the endpoint if you need a
+fresh vector space. Embeddings are generated in batches after the lexical index
+is ready; missing vectors or an unavailable local server do not prevent lexical
+search.
 
 ### Ask PDF answers
 
-Set `READIUM_OLLAMA_CHAT_MODEL` to an installed local Ollama chat model before
-starting Readium. Answers stream into the Ask PDF sidebar using the retrieved
-evidence. Validated citations navigate to local PDF text. Without this setting,
-Ask PDF continues to provide evidence search. Chat history is bounded, held only
-in memory per open document, and cleared when its index is rebuilt. Stop, tab
-switching and document closing cancel the active request. No model is downloaded
-automatically. The chat endpoint is `127.0.0.1:11434/api/chat`.
+Choose a Chat model and enable "AI 回答" in the Ask PDF settings, or seed the
+settings with `READIUM_OLLAMA_CHAT_MODEL` before the first launch. Answers stream
+into the Ask PDF sidebar using the retrieved evidence. Validated citations
+navigate to local PDF text. With answers disabled, Ask PDF continues to provide
+evidence search and, when embeddings are ready, semantic retrieval. Chat history
+is bounded, held only in memory per open document, and cleared when its index is
+rebuilt or the Chat model changes. Stop, tab switching, document closing and
+configuration changes cancel the active request without dropping already
+displayed citations. No model is
+downloaded automatically. Extracted text and embeddings are stored locally in
+the Ask PDF index; use the clear-index button in the Ask PDF sidebar to remove
+them. See [Ask PDF](docs/features/ask-pdf.md) for details.
 
 ```sh
 READIUM_OLLAMA_CHAT_MODEL=your-installed-model ./build/app/app

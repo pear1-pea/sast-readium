@@ -26,6 +26,13 @@ presets in `CMakePresets.json`.
 | Cross / ARM64 | `Release-Linux-ARM64`, `Release-Windows-ARM64` |
 | vcpkg variants | append `-vcpkg` to the Unix/MSYS2 presets |
 
+## SQLite requirements
+
+Ask PDF uses the Qt SQL SQLite driver (system SQLite on macOS/Linux package
+builds). The SQLite build must include FTS5 (available since SQLite 3.9); an
+index cannot be created otherwise. The implementation avoids SQLite UPSERT
+syntax, so SQLite 3.24 is not required.
+
 ## Environment notes
 
 - MSYS2: prefer system packages; set `FORCE_VCPKG=ON` to force vcpkg.
