@@ -268,6 +268,23 @@ target_sources(test_rag_p3 PRIVATE
     ../app/rag/ui/AskPdfWidget.h)
 target_link_libraries(test_rag_p3 PRIVATE Qt6::Network)
 
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/unit/test_rag_settings.cpp)
+    create_unit_test(test_rag_settings
+        unit/test_rag_settings.cpp)
+    target_sources(test_rag_settings PRIVATE
+        ../app/rag/config/RagSettings.cpp)
+    target_link_libraries(test_rag_settings PRIVATE Qt6::Network)
+endif()
+
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/unit/test_ollama_probe.cpp)
+    create_unit_test(test_ollama_probe
+        unit/test_ollama_probe.cpp)
+    target_sources(test_ollama_probe PRIVATE
+        ../app/rag/config/RagSettings.cpp
+        ../app/rag/probe/OllamaProbe.cpp)
+    target_link_libraries(test_ollama_probe PRIVATE Qt6::Network)
+endif()
+
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/unit/test_rag_coordinator.cpp)
     create_unit_test(test_rag_coordinator
         unit/test_rag_coordinator.cpp)

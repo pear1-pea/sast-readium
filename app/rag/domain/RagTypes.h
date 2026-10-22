@@ -71,6 +71,7 @@ struct PdfTextBox {
 struct PdfPageText {
     int pageIndex = -1;
     QString plainText;
+    QString sectionPath;
     QSizeF pageSize;
     QVector<PdfTextBox> textBoxes;
     bool extractionSucceeded = false;
@@ -134,15 +135,43 @@ enum class RagEmbeddingState {
     Cancelled
 };
 
+enum class RagIndexFailureReason {
+    None,
+    FileMissing,
+    FileUnreadable,
+    Encrypted,
+    Corrupt,
+    NoPages,
+    ScannedImage,
+    Database,
+    Unknown
+};
+
+struct RagEmbeddingIdentity {
+    QString model;
+    QString version;
+
+    bool isEmpty() const { return model.isEmpty() || version.isEmpty(); }
+
+    bool operator==(const RagEmbeddingIdentity& other) const {
+        return model == other.model && version == other.version;
+    }
+    bool operator!=(const RagEmbeddingIdentity& other) const {
+        return !(*this == other);
+    }
+};
+
 struct RagDocumentSnapshot {
     DocumentKey key;
     QString filePath;
     RagIndexState state = RagIndexState::NotIndexed;
+    RagIndexFailureReason failureReason = RagIndexFailureReason::None;
     quint64 generation = 0;
     int stageSequence = 0;
     int chunkCount = 0;
     QString error;
     RagEmbeddingState embeddingState = RagEmbeddingState::Disabled;
+    RagEmbeddingIdentity embeddingIdentity;
     int embeddedChunkCount = 0;
     QString embeddingError;
 

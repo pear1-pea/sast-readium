@@ -2,10 +2,12 @@
 
 #include <QFileInfo>
 #include <QHBoxLayout>
+#include <QIcon>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
 #include <QPlainTextEdit>
+#include <QPushButton>
 #include <QStyle>
 #include <QToolButton>
 #include <QVBoxLayout>
@@ -66,8 +68,21 @@ AskPdfWidget::AskPdfWidget(QWidget* parent) : QWidget(parent) {
 
     auto* statusRow = new QHBoxLayout();
     m_statusLabel = new QLabel(this);
+    m_statusLabel->setObjectName(QStringLiteral("askPdfStatus"));
     m_statusLabel->setWordWrap(true);
     statusRow->addWidget(m_statusLabel, 1);
+
+    m_settingsButton = new QToolButton(this);
+    m_settingsButton->setObjectName(QStringLiteral("askPdfSettings"));
+    const QIcon settingsIcon = QIcon::fromTheme(QStringLiteral("settings"));
+    if (settingsIcon.isNull()) {
+        m_settingsButton->setText(QStringLiteral("⚙"));
+    } else {
+        m_settingsButton->setIcon(settingsIcon);
+    }
+    m_settingsButton->setToolTip(QStringLiteral("本地 AI 设置"));
+    m_settingsButton->setAutoRaise(true);
+    statusRow->addWidget(m_settingsButton);
 
     m_rebuildButton = new QToolButton(this);
     m_rebuildButton->setIcon(style()->standardIcon(QStyle::SP_BrowserReload));
@@ -79,6 +94,11 @@ AskPdfWidget::AskPdfWidget(QWidget* parent) : QWidget(parent) {
         style()->standardIcon(QStyle::SP_DialogCancelButton));
     m_cancelButton->setToolTip(QStringLiteral("取消索引"));
     statusRow->addWidget(m_cancelButton);
+
+    m_clearButton = new QToolButton(this);
+    m_clearButton->setIcon(style()->standardIcon(QStyle::SP_TrashIcon));
+    m_clearButton->setToolTip(QStringLiteral("清空 Ask PDF 索引"));
+    statusRow->addWidget(m_clearButton);
 
     auto* queryRow = new QHBoxLayout();
     m_queryEdit = new QLineEdit(this);
@@ -95,6 +115,39 @@ AskPdfWidget::AskPdfWidget(QWidget* parent) : QWidget(parent) {
     m_stopButton->setToolTip(QStringLiteral("停止回答"));
     m_stopButton->hide();
     queryRow->addWidget(m_stopButton);
+
+    m_statePanel = new QWidget(this);
+    m_statePanel->setObjectName(QStringLiteral("askPdfStatePanel"));
+    auto* stateLayout = new QVBoxLayout(m_statePanel);
+    stateLayout->setContentsMargins(0, 0, 0, 0);
+    stateLayout->setSpacing(4);
+
+    m_stateTitle = new QLabel(m_statePanel);
+    m_stateTitle->setObjectName(QStringLiteral("askPdfStateTitle"));
+    m_stateTitle->setWordWrap(true);
+    QFont titleFont = m_stateTitle->font();
+    titleFont.setBold(true);
+    m_stateTitle->setFont(titleFont);
+
+    m_stateDetail = new QLabel(m_statePanel);
+    m_stateDetail->setObjectName(QStringLiteral("askPdfStateDetail"));
+    m_stateDetail->setWordWrap(true);
+    m_stateDetail->setEnabled(false);
+
+    auto* stateActions = new QHBoxLayout();
+    stateActions->setContentsMargins(0, 0, 0, 0);
+    m_statePrimary = new QPushButton(m_statePanel);
+    m_statePrimary->setObjectName(QStringLiteral("askPdfStatePrimary"));
+    m_stateSecondary = new QPushButton(m_statePanel);
+    m_stateSecondary->setObjectName(QStringLiteral("askPdfStateSecondary"));
+    stateActions->addWidget(m_statePrimary);
+    stateActions->addWidget(m_stateSecondary);
+    stateActions->addStretch(1);
+
+    stateLayout->addWidget(m_stateTitle);
+    stateLayout->addWidget(m_stateDetail);
+    stateLayout->addLayout(stateActions);
+    m_statePanel->hide();
 
     m_answerEdit = new QPlainTextEdit(this);
     m_answerEdit->setReadOnly(true);
@@ -115,6 +168,7 @@ AskPdfWidget::AskPdfWidget(QWidget* parent) : QWidget(parent) {
     layout->addWidget(m_documentLabel);
     layout->addLayout(statusRow);
     layout->addLayout(queryRow);
+    layout->addWidget(m_statePanel);
     layout->addWidget(m_answerEdit);
     layout->addWidget(m_citationList);
     layout->addWidget(m_evidenceList, 1);
@@ -127,8 +181,16 @@ AskPdfWidget::AskPdfWidget(QWidget* parent) : QWidget(parent) {
             &AskPdfWidget::rebuildIndexRequested);
     connect(m_cancelButton, &QToolButton::clicked, this,
             &AskPdfWidget::cancelIndexRequested);
+    connect(m_clearButton, &QToolButton::clicked, this,
+            &AskPdfWidget::clearIndexRequested);
+    connect(m_settingsButton, &QToolButton::clicked, this,
+            &AskPdfWidget::settingsRequested);
     connect(m_stopButton, &QToolButton::clicked, this,
             &AskPdfWidget::cancelAnswerRequested);
+    connect(m_statePrimary, &QPushButton::clicked, this,
+            [this]() { runStateAction(m_primaryAction); });
+    connect(m_stateSecondary, &QPushButton::clicked, this,
+            [this]() { runStateAction(m_secondaryAction); });
     connect(m_citationList, &QListWidget::itemClicked, this,
             [this](QListWidgetItem* item) {
                 emit citationActivated(item->data(Qt::UserRole).toString());
@@ -154,8 +216,14 @@ void AskPdfWidget::setDocumentContext(const DocumentKey& document) {
     m_documentLabel->setText(fileName.isEmpty() ? QStringLiteral("未打开 PDF")
                                                 : fileName);
     if (changed) {
-        setEvidence({});
+        clearEvidence();
         resetAnswer();
+        m_hasSearched = false;
+        m_queryFailed = false;
+        m_answerFailed = false;
+        m_queryError.clear();
+        m_answerError.clear();
+        refreshEmptyState();
     }
 }
 
@@ -163,20 +231,75 @@ void AskPdfWidget::setIndexState(RagIndexState state, int chunkCount,
                                  const QString& error,
                                  RagEmbeddingState embeddingState,
                                  int embeddedChunkCount,
-                                 const QString& embeddingError) {
+                                 const QString& embeddingError,
+                                 RagIndexFailureReason failureReason) {
     m_state = state;
-    m_statusLabel->setText(stateText(state, chunkCount, error, embeddingState,
-                                     embeddedChunkCount, embeddingError));
-    const bool ready = state == RagIndexState::Ready;
-    const bool busy = isBusyState(state);
-    m_queryEdit->setEnabled(ready && !m_busy);
-    m_submitButton->setEnabled(ready && !m_busy);
-    m_rebuildButton->setEnabled(!m_document.canonicalPath.isEmpty() && !busy);
-    m_cancelButton->setVisible(busy);
+    m_failureReason = failureReason;
+    m_chunkCount = chunkCount;
+    m_indexError = error;
+    m_embeddingState = embeddingState;
+    m_embeddedChunkCount = embeddedChunkCount;
+    m_embeddingError = embeddingError;
+    if (state != RagIndexState::Ready) {
+        clearEvidence();
+        m_hasSearched = false;
+        m_queryFailed = false;
+        m_answerFailed = false;
+        m_queryError.clear();
+        m_answerError.clear();
+    }
+    refreshStatusText();
+    refreshEmptyState();
+    updateControlStates();
+}
+
+void AskPdfWidget::setAnswerEnabled(bool enabled) {
+    if (m_answerEnabled == enabled) {
+        return;
+    }
+    m_answerEnabled = enabled;
+    refreshStatusText();
+    refreshEmptyState();
+}
+
+void AskPdfWidget::refreshStatusText() {
+    if (m_clearing) {
+        m_statusLabel->setText(QStringLiteral("正在清空索引..."));
+        return;
+    }
+    m_statusLabel->setText(stateText(m_state, m_chunkCount, m_indexError,
+                                     m_embeddingState, m_embeddedChunkCount,
+                                     m_embeddingError, m_answerEnabled));
+}
+
+void AskPdfWidget::updateControlStates() {
+    const bool ready = m_state == RagIndexState::Ready;
+    const bool indexing = isBusyState(m_state);
+    const bool canQuery = ready && !m_busy && !m_clearing;
+
+    m_queryEdit->setEnabled(canQuery);
+    m_submitButton->setEnabled(canQuery);
+    m_rebuildButton->setEnabled(!m_clearing && !indexing &&
+                                !m_document.canonicalPath.isEmpty());
+    m_clearButton->setEnabled(!m_clearing);
+    m_cancelButton->setVisible(indexing && !m_clearing);
+}
+
+void AskPdfWidget::setClearing(bool clearing) {
+    if (m_clearing == clearing) {
+        return;
+    }
+    m_clearing = clearing;
+    refreshStatusText();
+    refreshEmptyState();
+    updateControlStates();
 }
 
 void AskPdfWidget::setEvidence(const QVector<RagEvidence>& evidence) {
     m_evidence = evidence;
+    m_hasSearched = true;
+    m_queryFailed = false;
+    m_queryError.clear();
     m_evidenceList->clear();
     for (const RagEvidence& item : m_evidence) {
         auto* listItem = new QListWidgetItem(evidenceLabel(item));
@@ -184,13 +307,14 @@ void AskPdfWidget::setEvidence(const QVector<RagEvidence>& evidence) {
         listItem->setToolTip(item.text);
         m_evidenceList->addItem(listItem);
     }
+    refreshEmptyState();
 }
 
 void AskPdfWidget::setBusy(bool busy) {
     m_busy = busy;
     m_stopButton->setVisible(busy);
-    m_queryEdit->setEnabled(!busy && m_state == RagIndexState::Ready);
-    m_submitButton->setEnabled(!busy && m_state == RagIndexState::Ready);
+    refreshEmptyState();
+    updateControlStates();
 }
 
 void AskPdfWidget::resetAnswer() {
@@ -198,8 +322,12 @@ void AskPdfWidget::resetAnswer() {
     m_answerEdit->hide();
     m_citationList->clear();
     m_citationList->hide();
+    m_answerFailed = false;
+    m_answerError.clear();
+    refreshEmptyState();
 }
 void AskPdfWidget::appendAnswer(const QString& text) {
+    m_answerFailed = false;
     m_answerEdit->show();
     auto cursor = m_answerEdit->textCursor();
     cursor.movePosition(QTextCursor::End);
@@ -207,6 +335,8 @@ void AskPdfWidget::appendAnswer(const QString& text) {
     m_answerEdit->setTextCursor(cursor);
 }
 void AskPdfWidget::setAnswer(const RagAnswer& answer) {
+    m_answerFailed = false;
+    m_answerError.clear();
     m_answerEdit->setPlainText(answer.text);
     m_answerEdit->show();
     m_citationList->clear();
@@ -217,17 +347,112 @@ void AskPdfWidget::setAnswer(const RagAnswer& answer) {
         m_citationList->addItem(item);
     }
     m_citationList->setVisible(!answer.citations.isEmpty());
+    refreshEmptyState();
 }
 void AskPdfWidget::setAnswerError(const QString& error) {
     resetAnswer();
-    m_answerEdit->setPlainText(QStringLiteral("回答生成失败：%1").arg(error));
-    m_answerEdit->show();
+    m_queryFailed = false;
+    m_queryError.clear();
+    m_answerFailed = true;
+    m_answerError = error;
+    refreshEmptyState();
+}
+
+void AskPdfWidget::setQueryError(const QString& error) {
+    m_hasSearched = true;
+    m_queryFailed = true;
+    m_queryError = error;
+    m_answerFailed = false;
+    m_answerError.clear();
+    clearEvidence();
+    refreshEmptyState();
+}
+
+void AskPdfWidget::clearEvidence() {
+    m_evidence.clear();
+    m_evidenceList->clear();
 }
 
 void AskPdfWidget::submitQuery() {
     const QString query = m_queryEdit->text().trimmed();
     if (!query.isEmpty() && m_state == RagIndexState::Ready) {
+        m_hasSearched = true;
+        m_queryFailed = false;
+        m_answerFailed = false;
+        m_queryError.clear();
+        m_answerError.clear();
+        clearEvidence();
+        refreshEmptyState();
         emit querySubmitted(query);
+    }
+}
+
+void AskPdfWidget::refreshEmptyState() {
+    if (!m_statePanel) {
+        return;
+    }
+    if (m_clearing) {
+        m_statePanel->hide();
+        return;
+    }
+
+    AskPdfViewInput input;
+    input.hasDocument = !m_document.canonicalPath.isEmpty();
+    input.indexState = m_state;
+    input.failureReason = m_failureReason;
+    input.embeddingState = m_embeddingState;
+    input.busy = m_busy;
+    input.hasSearched = m_hasSearched;
+    input.hasEvidence = !m_evidence.isEmpty();
+    input.answerEnabled = m_answerEnabled;
+    input.queryFailed = m_queryFailed;
+    input.answerFailed = m_answerFailed;
+    input.queryError = m_queryError;
+    input.answerError = m_answerError;
+    input.indexError = m_indexError;
+
+    const AskPdfStateView view = askPdfStateView(input);
+    if (!view.visible) {
+        m_statePanel->hide();
+        return;
+    }
+
+    m_stateTitle->setText(view.title);
+    m_stateDetail->setText(view.detail);
+    m_stateDetail->setVisible(!view.detail.isEmpty());
+    m_primaryAction = view.primaryAction;
+    m_secondaryAction = view.secondaryAction;
+    m_statePrimary->setText(view.primaryText);
+    m_statePrimary->setVisible(!view.primaryText.isEmpty());
+    m_stateSecondary->setText(view.secondaryText);
+    m_stateSecondary->setVisible(!view.secondaryText.isEmpty());
+    m_statePanel->show();
+}
+
+void AskPdfWidget::runStateAction(AskPdfStateAction action) {
+    switch (action) {
+        case AskPdfStateAction::OpenSettings:
+            emit settingsRequested();
+            break;
+        case AskPdfStateAction::RebuildIndex:
+            emit rebuildIndexRequested();
+            break;
+        case AskPdfStateAction::FocusQuery:
+            m_queryEdit->setFocus();
+            m_queryEdit->selectAll();
+            break;
+        case AskPdfStateAction::RetryAnswer:
+            emit retryAnswerRequested();
+            break;
+        case AskPdfStateAction::RetryQuery:
+            emit retryQueryRequested();
+            break;
+        case AskPdfStateAction::ClearIndex:
+            emit clearIndexRequested();
+            break;
+        case AskPdfStateAction::None:
+        default:
+            break;
     }
 }
 
@@ -245,7 +470,8 @@ QString AskPdfWidget::stateText(RagIndexState state, int chunkCount,
                                 const QString& error,
                                 RagEmbeddingState embeddingState,
                                 int embeddedChunkCount,
-                                const QString& embeddingError) {
+                                const QString& embeddingError,
+                                bool answerEnabled) {
     switch (state) {
         case RagIndexState::CheckingCache:
             return QStringLiteral("正在检查索引缓存...");
@@ -255,26 +481,46 @@ QString AskPdfWidget::stateText(RagIndexState state, int chunkCount,
             return QStringLiteral("正在切分文本...");
         case RagIndexState::Indexing:
             return QStringLiteral("正在建立搜索索引...");
-        case RagIndexState::Ready:
-            if (embeddingState == RagEmbeddingState::Pending ||
-                embeddingState == RagEmbeddingState::Running) {
-                return QStringLiteral("索引就绪，正在准备语义检索 %1/%2")
-                    .arg(embeddedChunkCount)
-                    .arg(chunkCount);
+        case RagIndexState::Ready: {
+            QString semantic;
+            switch (embeddingState) {
+                case RagEmbeddingState::Pending:
+                case RagEmbeddingState::Running:
+                    semantic = QStringLiteral("语义检索准备中 %1/%2")
+                                   .arg(embeddedChunkCount)
+                                   .arg(chunkCount);
+                    break;
+                case RagEmbeddingState::Ready:
+                    semantic = QStringLiteral("语义检索就绪");
+                    break;
+                case RagEmbeddingState::Failed:
+                    semantic = embeddingError.isEmpty()
+                                   ? QStringLiteral("语义检索失败")
+                                   : QStringLiteral("语义检索失败：%1")
+                                         .arg(embeddingError);
+                    break;
+                case RagEmbeddingState::Cancelled:
+                    semantic = QStringLiteral("语义检索已取消");
+                    break;
+                case RagEmbeddingState::Disabled:
+                default:
+                    semantic = QStringLiteral("语义检索关闭");
+                    break;
             }
-            if (embeddingState == RagEmbeddingState::Failed &&
-                !embeddingError.isEmpty()) {
-                return QStringLiteral("索引就绪，语义检索失败：%1")
-                    .arg(embeddingError);
+            QString text = QStringLiteral("索引就绪（%1 个文本块） · %2")
+                               .arg(chunkCount)
+                               .arg(semantic);
+            if (!answerEnabled) {
+                text += QStringLiteral(" · 回答已关闭");
             }
-            return QStringLiteral("索引就绪，%1 个证据片段").arg(chunkCount);
+            return text;
+        }
         case RagIndexState::Cancelled:
             return QStringLiteral("索引已取消");
         case RagIndexState::Failed:
-            return error.isEmpty() ? QStringLiteral("索引失败") : error;
+            return QStringLiteral("索引失败");
         case RagIndexState::Unsupported:
-            return error.isEmpty() ? QStringLiteral("当前 PDF 无可提取文本")
-                                   : error;
+            return QStringLiteral("当前 PDF 无可提取文本");
         case RagIndexState::NotIndexed:
         default:
             return QStringLiteral("等待建立索引");
