@@ -49,6 +49,17 @@ QVector<RagEvidence> HybridRetriever::retrieve(
     RagIndexStore store;
     if (!store.open(m_databasePath, error))
         return {};
+    return retrieve(store, document, query, limit, provider, cancel, error);
+}
+
+QVector<RagEvidence> HybridRetriever::retrieve(
+    RagIndexStore& store, const DocumentKey& document, const QString& query,
+    int limit, EmbeddingProvider* provider, const RagCancellationToken& cancel,
+    QString* error) const {
+    if (error)
+        error->clear();
+    if (limit <= 0 || query.trimmed().isEmpty())
+        return {};
     const int pool = qMax(10, qMin(200, limit * 4));
     QVector<RagEvidence> lexical = store.search(document, query, pool, error);
     if (error && !error->isEmpty())

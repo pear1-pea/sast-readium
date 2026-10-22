@@ -256,6 +256,7 @@ if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/unit/test_rag_p2.cpp)
     create_unit_test(test_rag_p2 unit/test_rag_p2.cpp)
     target_sources(test_rag_p2 PRIVATE
         ../app/rag/index/RagIndexStore.cpp
+        ../app/rag/retrieve/EvidenceExpander.cpp
         ../app/rag/retrieve/HybridRetriever.cpp)
     target_link_libraries(test_rag_p2 PRIVATE Qt6::Sql)
 endif()

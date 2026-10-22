@@ -13,6 +13,12 @@ public:
                                   EmbeddingProvider* provider,
                                   const RagCancellationToken& cancel,
                                   QString* error = nullptr) const;
+    QVector<RagEvidence> retrieve(RagIndexStore& store,
+                                  const DocumentKey& document,
+                                  const QString& query, int limit,
+                                  EmbeddingProvider* provider,
+                                  const RagCancellationToken& cancel,
+                                  QString* error = nullptr) const;
 
 private:
     QString m_databasePath;

@@ -4,6 +4,7 @@
 
 #include <cmath>
 
+#include "rag/retrieve/EvidenceExpander.h"
 #include "rag/retrieve/HybridRetriever.h"
 
 using namespace Rag;
@@ -29,6 +30,19 @@ public:
     }
 };
 
+class FailingEmbedding : public EmbeddingProvider {
+public:
+    QString modelId() const override { return QStringLiteral("fixture-model"); }
+    QString modelVersion() const override { return QStringLiteral("v1"); }
+    QVector<QVector<float>> embed(const QStringList&,
+                                  const RagCancellationToken&,
+                                  QString* error) override {
+        if (error)
+            *error = QStringLiteral("embedding unavailable");
+        return {};
+    }
+};
+
 PdfChunk chunk(const DocumentKey& document, const QString& id,
                const QString& text, int page) {
     PdfChunk item;
@@ -41,12 +55,25 @@ PdfChunk chunk(const DocumentKey& document, const QString& id,
     return item;
 }
 
+PdfChunk rangedChunk(const DocumentKey& document, const QString& id,
+                     const QString& text, int page, int charStart) {
+    PdfChunk item = chunk(document, id, text, page);
+    item.charStart = charStart;
+    item.charLength = int(text.size());
+    item.locations = {
+        {page, charStart, int(text.size()), {QRectF(10, 20, 30, 10)}}};
+    return item;
+}
+
 }  // namespace
 
 class TestRagP2 : public QObject {
     Q_OBJECT
 private slots:
     void testVectorCacheAndHybridRetrieval();
+    void testExpansionJoinsCrossPagePremise();
+    void testExpansionTrimsSamePageOverlap();
+    void testExpansionRespectsCharacterLimit();
 };
 
 void TestRagP2::testVectorCacheAndHybridRetrieval() {
@@ -115,6 +142,12 @@ void TestRagP2::testVectorCacheAndHybridRetrieval() {
                                        nullptr, cancel, &error);
     QVERIFY2(error.isEmpty(), qPrintable(error));
     QCOMPARE(fallback.first().chunkId, lexical.id);
+
+    FailingEmbedding failing;
+    auto degraded = retriever.retrieve(doc, QStringLiteral("keyword"), 5,
+                                       &failing, cancel, &error);
+    QVERIFY2(error.isEmpty(), qPrintable(error));
+    QCOMPARE(degraded.first().chunkId, lexical.id);
     QElapsedTimer timer;
     timer.start();
     int hits = 0;
@@ -149,6 +182,117 @@ void TestRagP2::testVectorCacheAndHybridRetrieval() {
                               &error)
                  .size(),
              0);
+}
+
+void TestRagP2::testExpansionJoinsCrossPagePremise() {
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    RagIndexStore store;
+    QString error;
+    QVERIFY2(store.open(dir.filePath(QStringLiteral("expand.sqlite")), &error),
+             qPrintable(error));
+    DocumentKey doc;
+    doc.canonicalPath = QStringLiteral("source.pdf");
+    doc.contentHash = QStringLiteral("expand-hash");
+    doc.pageCount = 2;
+    const QString premise =
+        QStringLiteral("The following procedure applies only after approval.");
+    const QString step =
+        QStringLiteral("Submission portal: upload the form and press Send.");
+    QVERIFY2(store.replaceDocument(
+                 doc,
+                 {rangedChunk(doc, QStringLiteral("premise"), premise, 0, 0),
+                  rangedChunk(doc, QStringLiteral("step"), step, 1, 0)},
+                 &error),
+             qPrintable(error));
+
+    auto anchors = store.evidenceByIds(doc, {QStringLiteral("step")}, &error);
+    QCOMPARE(anchors.size(), 1);
+    RagEvidence anchor = anchors.first();
+    anchor.rank = 0;
+    const auto expanded =
+        EvidenceExpander::expand({anchor}, store, doc, {}, &error);
+    QVERIFY2(error.isEmpty(), qPrintable(error));
+    QCOMPARE(expanded.size(), 1);
+    const RagEvidence& merged = expanded.first();
+    // The citation keeps the retrieved chunk id while the range covers both
+    // pages, so the page highlight and the premise stay together.
+    QCOMPARE(merged.chunkId, QStringLiteral("step"));
+    QCOMPARE(merged.pageStart, 0);
+    QCOMPARE(merged.pageEnd, 1);
+    QVERIFY(merged.text.contains(premise));
+    QVERIFY(merged.text.contains(step));
+    QCOMPARE(merged.locations.size(), 2);
+}
+
+void TestRagP2::testExpansionTrimsSamePageOverlap() {
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    RagIndexStore store;
+    QString error;
+    QVERIFY2(store.open(dir.filePath(QStringLiteral("overlap.sqlite")), &error),
+             qPrintable(error));
+    DocumentKey doc;
+    doc.canonicalPath = QStringLiteral("overlap.pdf");
+    doc.contentHash = QStringLiteral("overlap-hash");
+    doc.pageCount = 1;
+    const QString first = QStringLiteral("a").repeated(100);
+    const QString secondText =
+        QStringLiteral("a").repeated(20) + QStringLiteral("b").repeated(80);
+    QVERIFY2(
+        store.replaceDocument(
+            doc,
+            {rangedChunk(doc, QStringLiteral("first"), first, 0, 0),
+             rangedChunk(doc, QStringLiteral("second"), secondText, 0, 80)},
+            &error),
+        qPrintable(error));
+
+    auto anchors = store.evidenceByIds(doc, {QStringLiteral("second")}, &error);
+    QCOMPARE(anchors.size(), 1);
+    RagEvidence anchor = anchors.first();
+    anchor.rank = 0;
+    const auto expanded =
+        EvidenceExpander::expand({anchor}, store, doc, {}, &error);
+    QVERIFY2(error.isEmpty(), qPrintable(error));
+    QCOMPARE(expanded.size(), 1);
+    const RagEvidence& merged = expanded.first();
+    // 20 characters of chunk overlap are sent once, not duplicated.
+    QCOMPARE(merged.text, first + QLatin1Char('\n') + secondText.mid(20));
+    QCOMPARE(merged.locations.size(), 1);
+    QCOMPARE(merged.locations.first().charStart, 0);
+    QCOMPARE(merged.locations.first().charLength, 180);
+}
+
+void TestRagP2::testExpansionRespectsCharacterLimit() {
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    RagIndexStore store;
+    QString error;
+    QVERIFY2(store.open(dir.filePath(QStringLiteral("limit.sqlite")), &error),
+             qPrintable(error));
+    DocumentKey doc;
+    doc.canonicalPath = QStringLiteral("limit.pdf");
+    doc.contentHash = QStringLiteral("limit-hash");
+    doc.pageCount = 2;
+    const QString step = QStringLiteral("Only after approval.");
+    QVERIFY2(store.replaceDocument(
+                 doc,
+                 {rangedChunk(doc, QStringLiteral("premise"),
+                              QStringLiteral("Long unrelated premise."), 0, 0),
+                  rangedChunk(doc, QStringLiteral("step"), step, 1, 0)},
+                 &error),
+             qPrintable(error));
+    auto anchors = store.evidenceByIds(doc, {QStringLiteral("step")}, &error);
+    QCOMPARE(anchors.size(), 1);
+    RagEvidence anchor = anchors.first();
+    anchor.rank = 0;
+    EvidenceExpansion tight;
+    tight.maxCharacters = int(step.size());
+    const auto expanded =
+        EvidenceExpander::expand({anchor}, store, doc, tight, &error);
+    QVERIFY2(error.isEmpty(), qPrintable(error));
+    QCOMPARE(expanded.size(), 1);
+    QCOMPARE(expanded.first().text, step);
 }
 
 QTEST_MAIN(TestRagP2)
