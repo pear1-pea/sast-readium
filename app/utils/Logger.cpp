@@ -64,10 +64,15 @@ void Logger::initialize(const LoggerConfig& config) {
     }
 }
 
-QString Logger::resolveLogFilePath(const QString& logFileName) const {
+QString Logger::resolveLogFilePath(const QString& logFileName) {
     const QFileInfo logFileInfo(logFileName);
 
-    if (logFileInfo.isAbsolute() || !logFileInfo.path().isEmpty()) {
+    // QFileInfo::path() returns "." for a bare file name, so it cannot be
+    // used to distinguish a name from a path. fileName() differs from the
+    // input when the input contains a directory component (including a
+    // Windows drive prefix).
+    const bool isBareFileName = logFileInfo.fileName() == logFileName;
+    if (!isBareFileName) {
         QDir().mkpath(logFileInfo.absolutePath());
         return logFileName;
     }

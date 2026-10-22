@@ -1,6 +1,8 @@
 #include <QtTest/QtTest>
 
+#include <QDir>
 #include <QFileInfo>
+#include <QStandardPaths>
 #include <QTemporaryDir>
 
 #include "../../app/utils/Logger.h"
@@ -10,6 +12,7 @@ class TestLogger : public QObject {
 
 private slots:
     void absoluteLogFilePathIsNotPrefixedWithDefaultLogDir();
+    void bareLogFileNameUsesAppDataLogDirectory();
 };
 
 void TestLogger::absoluteLogFilePathIsNotPrefixedWithDefaultLogDir() {
@@ -31,6 +34,18 @@ void TestLogger::absoluteLogFilePathIsNotPrefixedWithDefaultLogDir() {
     logger.getSpdlogLogger()->flush();
 
     QVERIFY2(QFileInfo::exists(logFilePath), qPrintable(logFilePath));
+}
+
+void TestLogger::bareLogFileNameUsesAppDataLogDirectory() {
+    QStandardPaths::setTestModeEnabled(true);
+
+    const QString resolved =
+        Logger::resolveLogFilePath(QStringLiteral("unit-test.log"));
+    const QString expected =
+        QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) +
+        QStringLiteral("/logs/unit-test.log");
+
+    QCOMPARE(QDir::cleanPath(resolved), QDir::cleanPath(expected));
 }
 
 QTEST_MAIN(TestLogger)
