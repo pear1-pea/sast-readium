@@ -246,6 +246,7 @@ if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/unit/test_rag_p1.cpp)
     create_unit_test(test_rag_p1
         unit/test_rag_p1.cpp)
     target_sources(test_rag_p1 PRIVATE
+        ../app/rag/extract/PdfChunker.cpp
         ../app/rag/index/RagIndexStore.cpp
         ../app/rag/retrieve/LexicalRetriever.cpp)
     target_link_libraries(test_rag_p1 PRIVATE Qt6::Concurrent Qt6::Sql)

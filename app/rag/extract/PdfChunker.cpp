@@ -56,6 +56,33 @@ int splitBoundary(const QString& text, int start, int desiredEnd) {
     return desiredEnd;
 }
 
+bool isSentenceEnd(QChar character) {
+    return character == QChar('.') || character == QChar('!') ||
+           character == QChar('?') || character == QChar(0x3002) ||
+           character == QChar(0xFF01) || character == QChar(0xFF1F) ||
+           character == QChar('\n');
+}
+
+/**
+ * Move a chunk start back to the nearest sentence boundary so the overlap ends
+ * with complete sentences. The lookback is bounded so one very long sentence
+ * cannot push the chunk far beyond its configured size.
+ */
+int sentenceAwareStart(const QString& text, int candidate, int lowerBound) {
+    constexpr int kMaxLookback = 240;
+    const int limit = qMax(lowerBound, candidate - kMaxLookback);
+    for (int i = candidate; i > limit; --i) {
+        if (!isSentenceEnd(text.at(i - 1)))
+            continue;
+        int start = i;
+        while (start < candidate && text.at(start).isSpace()) {
+            ++start;
+        }
+        return start;
+    }
+    return candidate;
+}
+
 QVector<TextRange> splitRange(const QString& text, const TextRange& range,
                               const PdfChunkerOptions& options) {
     QVector<TextRange> result;
@@ -75,7 +102,11 @@ QVector<TextRange> splitRange(const QString& text, const TextRange& range,
         if (end == range.end) {
             break;
         }
-        start = qMax(start + 1, end - overlap);
+        int next = qMax(start + 1, end - overlap);
+        if (options.sentenceAwareOverlap && overlap > 0) {
+            next = sentenceAwareStart(text, next, start + 1);
+        }
+        start = next;
     }
     return result;
 }
@@ -142,7 +173,7 @@ QVector<PdfChunk> PdfChunker::chunk(const QVector<PdfPageText>& pages,
     const PdfChunkerOptions normalizedOptions{
         qMax(1, options.targetCharacters),
         qMax(qMax(1, options.targetCharacters), options.maxCharacters),
-        qMax(0, options.overlapCharacters)};
+        qMax(0, options.overlapCharacters), options.sentenceAwareOverlap};
 
     for (const PdfPageText& page : pages) {
         if (context.isCancelled()) {
@@ -175,6 +206,7 @@ QVector<PdfChunk> PdfChunker::chunk(const QVector<PdfPageText>& pages,
             chunk.document = document;
             chunk.pageStart = page.pageIndex;
             chunk.pageEnd = page.pageIndex;
+            chunk.sectionPath = page.sectionPath;
             chunk.text = text;
             chunk.charStart = trimmed.start;
             chunk.charLength = trimmed.end - trimmed.start;
@@ -190,6 +222,17 @@ QVector<PdfChunk> PdfChunker::chunk(const QVector<PdfPageText>& pages,
         }
     }
     return chunks;
+}
+
+QString PdfChunker::policyId(const PdfChunkerOptions& options) {
+    // Bump the prefix when the splitting algorithm changes without an option
+    // change, so previously indexed documents are rebuilt.
+    return QStringLiteral(
+               "pdfchunker:v1:target=%1:max=%2:overlap=%3:sentences=%4")
+        .arg(options.targetCharacters)
+        .arg(options.maxCharacters)
+        .arg(options.overlapCharacters)
+        .arg(options.sentenceAwareOverlap ? 1 : 0);
 }
 
 }  // namespace Rag

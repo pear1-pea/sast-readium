@@ -78,6 +78,22 @@ PdfPageText makePage(int pageIndex, const QString& text) {
     return page;
 }
 
+PdfChunk makeChunk(const DocumentKey& document, const QString& id,
+                   const QString& text, int pageIndex = 0) {
+    PdfChunk chunk;
+    chunk.id = id;
+    chunk.document = document;
+    chunk.pageStart = pageIndex;
+    chunk.pageEnd = pageIndex;
+    chunk.text = text;
+    chunk.chunkHash = id + QStringLiteral("-hash");
+    chunk.locations = {{pageIndex,
+                        0,
+                        static_cast<int>(text.size()),
+                        {QRectF(10, 20, 100, 12)}}};
+    return chunk;
+}
+
 }  // namespace
 
 class TestRagP0 : public QObject {
@@ -87,7 +103,14 @@ private slots:
     void testPdfTextExtraction();
     void testExtractionCancellation();
     void testChunkingPreservesLocations();
+    void testChunkerCoversTextAtEveryConfiguration();
+    void testSentenceAwareOverlapStartsCompleteSentences();
+    void testChunkerPropagatesSectionPath();
     void testFtsIndexAndEvidenceRoundTrip();
+    void testNaturalLanguageQueries();
+    void testCjkStopwordsDoNotSplitWords();
+    void testBm25ScoresAreMonotonic();
+    void testExtractionFailurePreservesFileIdentity();
 };
 
 void TestRagP0::testPdfTextExtraction() {
@@ -162,6 +185,141 @@ void TestRagP0::testChunkingPreservesLocations() {
     }
 }
 
+void TestRagP0::testChunkerCoversTextAtEveryConfiguration() {
+    QString text;
+    for (int i = 0; i < 12; ++i) {
+        text +=
+            QStringLiteral(
+                "Sentence %1 states a complete condition with enough words.")
+                .arg(i);
+        text += QLatin1Char('\n');
+    }
+    text += QStringLiteral(
+        "\nOverlong paragraph without blank lines carries an exception "
+        "that must stay searchable. ");
+    text += text.right(120);
+    const QString nextText = QStringLiteral("Next page premise.");
+    const PdfPageText page = makePage(2, text);
+    const PdfPageText next = makePage(3, nextText);
+
+    DocumentKey document;
+    document.canonicalPath = QStringLiteral("/tmp/rag-p0-coverage.pdf");
+    document.contentHash = QStringLiteral("coverage-hash");
+    document.pageCount = 4;
+
+    RagJobContext context;
+    const QVector<QPair<QString, PdfChunkerOptions>> configurations{
+        {QStringLiteral("default"), {800, 1200, 120, false}},
+        {QStringLiteral("no-overlap"), {800, 1200, 0, false}},
+        {QStringLiteral("sentence"), {800, 1200, 120, true}},
+        {QStringLiteral("smaller"), {180, 260, 120, false}}};
+    QSet<QString> policies;
+    for (const auto& configuration : configurations) {
+        const auto& options = configuration.second;
+        const QVector<PdfChunk> chunks =
+            PdfChunker::chunk({page, next}, document, context, options);
+        QVERIFY(!chunks.isEmpty());
+        policies.insert(PdfChunker::policyId(options));
+
+        QSet<int> covered;
+        bool nextPageCovered = false;
+        for (const PdfChunk& chunk : chunks) {
+            // Boundaries never cross pages.
+            QCOMPARE(chunk.pageStart, chunk.pageEnd);
+            QVERIFY(chunk.text.size() <= options.maxCharacters);
+            const QString& source = chunk.pageStart == 2 ? text : nextText;
+            QCOMPARE(chunk.text, source.mid(chunk.charStart, chunk.charLength));
+            for (const auto& location : chunk.locations) {
+                QCOMPARE(location.pageIndex, chunk.pageStart);
+                QCOMPARE(location.charStart, chunk.charStart);
+                QCOMPARE(location.charLength, chunk.charLength);
+            }
+            if (chunk.pageStart == 2) {
+                for (int i = chunk.charStart;
+                     i < chunk.charStart + chunk.charLength; ++i) {
+                    covered.insert(i);
+                }
+            } else {
+                nextPageCovered = true;
+            }
+        }
+        for (int i = 0; i < text.size(); ++i) {
+            if (!text.at(i).isSpace())
+                QVERIFY2(covered.contains(i), qPrintable(configuration.first));
+        }
+        QVERIFY(nextPageCovered);
+    }
+    // Every strategy has its own identity, so changing one invalidates old
+    // chunks instead of mixing strategies in a single index.
+    QCOMPARE(policies.size(), configurations.size());
+}
+
+void TestRagP0::testSentenceAwareOverlapStartsCompleteSentences() {
+    QString text;
+    for (int i = 0; i < 20; ++i) {
+        text +=
+            QStringLiteral("Sentence number %1 has exactly enough words here.")
+                .arg(i);
+        text += QLatin1Char(' ');
+    }
+    const PdfPageText page = makePage(0, text);
+    DocumentKey document;
+    document.canonicalPath = QStringLiteral("/tmp/rag-p0-sentences.pdf");
+    document.contentHash = QStringLiteral("sentence-hash");
+    document.pageCount = 1;
+    RagJobContext context;
+
+    PdfChunkerOptions options;
+    options.targetCharacters = 80;
+    options.maxCharacters = 120;
+    options.overlapCharacters = 60;
+
+    const QVector<PdfChunk> plain =
+        PdfChunker::chunk({page}, document, context, options);
+    options.sentenceAwareOverlap = true;
+    const QVector<PdfChunk> aware =
+        PdfChunker::chunk({page}, document, context, options);
+    QVERIFY(aware.size() >= 3);
+
+    auto startsAfterSentence = [&text](const PdfChunk& chunk) {
+        int index = chunk.charStart - 1;
+        while (index >= 0 && text.at(index).isSpace())
+            --index;
+        return index < 0 || text.at(index) == QChar('.');
+    };
+    bool plainCutMidSentence = false;
+    for (const PdfChunk& chunk : plain)
+        plainCutMidSentence =
+            plainCutMidSentence || !startsAfterSentence(chunk);
+    QVERIFY(plainCutMidSentence);
+    for (const PdfChunk& chunk : aware)
+        QVERIFY2(startsAfterSentence(chunk), qPrintable(chunk.text.left(40)));
+
+    // A condition that straddles a cut is still present verbatim in one chunk.
+    const QString premise =
+        QStringLiteral("Sentence number 5 has exactly enough words here.");
+    bool premiseIntact = false;
+    for (const PdfChunk& chunk : aware)
+        premiseIntact = premiseIntact || chunk.text.contains(premise);
+    QVERIFY(premiseIntact);
+}
+
+void TestRagP0::testChunkerPropagatesSectionPath() {
+    PdfPageText page =
+        makePage(1, QStringLiteral("Body text under a heading."));
+    page.sectionPath = QStringLiteral("Chapter 2 › Risks");
+    DocumentKey document;
+    document.canonicalPath = QStringLiteral("/tmp/rag-p0-outline.pdf");
+    document.contentHash = QStringLiteral("outline-hash");
+    document.pageCount = 2;
+
+    const QVector<PdfChunk> chunks =
+        PdfChunker::chunk({page}, document, RagJobContext{});
+    QVERIFY(!chunks.isEmpty());
+    for (const PdfChunk& chunk : chunks)
+        QCOMPARE(chunk.sectionPath, page.sectionPath);
+}
+
 void TestRagP0::testFtsIndexAndEvidenceRoundTrip() {
     RagIndexStore store;
     QString error;
@@ -234,6 +392,131 @@ void TestRagP0::testFtsIndexAndEvidenceRoundTrip() {
         store.search(document, QStringLiteral(""), 5, &error);
     QVERIFY(emptyResults.isEmpty());
     QCOMPARE(error, QString());
+}
+
+void TestRagP0::testNaturalLanguageQueries() {
+    RagIndexStore store;
+    QString error;
+    QVERIFY2(store.open(QString(), &error), qPrintable(error));
+
+    DocumentKey document;
+    document.canonicalPath = QStringLiteral("/tmp/rag-natural.pdf");
+    document.contentHash = QStringLiteral("rag-natural-document");
+    document.pageCount = 3;
+
+    const PdfChunk english = makeChunk(
+        document, QStringLiteral("english"),
+        QStringLiteral(
+            "Alpha evidence describes the main conclusion of document one."),
+        0);
+    const PdfChunk chinese =
+        makeChunk(document, QStringLiteral("chinese"),
+                  QStringLiteral("本文的主要结论是索引可以提升检索质量。"), 1);
+    const PdfChunk noise =
+        makeChunk(document, QStringLiteral("noise"),
+                  QStringLiteral("Completely unrelated weather notes."), 2);
+
+    QVERIFY2(store.replaceDocument(document, {english, chinese, noise}, &error),
+             qPrintable(error));
+
+    const QVector<RagEvidence> englishResults = store.search(
+        document, QStringLiteral("What evidence is in document one?"), 5,
+        &error);
+    QVERIFY2(error.isEmpty(), qPrintable(error));
+    QVERIFY(!englishResults.isEmpty());
+    QCOMPARE(englishResults.first().chunkId, english.id);
+
+    const QVector<RagEvidence> chineseResults = store.search(
+        document, QStringLiteral("这篇文档的主要结论是什么"), 5, &error);
+    QVERIFY2(error.isEmpty(), qPrintable(error));
+    QVERIFY(!chineseResults.isEmpty());
+    QCOMPARE(chineseResults.first().chunkId, chinese.id);
+}
+
+void TestRagP0::testCjkStopwordsDoNotSplitWords() {
+    RagIndexStore store;
+    QString error;
+    QVERIFY2(store.open(QString(), &error), qPrintable(error));
+
+    DocumentKey document;
+    document.canonicalPath = QStringLiteral("/tmp/rag-cjk-stopwords.pdf");
+    document.contentHash = QStringLiteral("rag-cjk-stopwords-document");
+    document.pageCount = 1;
+    const PdfChunk chunk = makeChunk(document, QStringLiteral("question"),
+                                     QStringLiteral("问题需要单独成词处理"), 0);
+
+    QVERIFY2(store.replaceDocument(document, {chunk}, &error),
+             qPrintable(error));
+    const auto results =
+        store.search(document, QStringLiteral("这个问题的答案"), 5, &error);
+    QVERIFY2(error.isEmpty(), qPrintable(error));
+    QVERIFY(!results.isEmpty());
+    QCOMPARE(results.first().chunkId, chunk.id);
+}
+
+void TestRagP0::testBm25ScoresAreMonotonic() {
+    RagIndexStore store;
+    QString error;
+    QVERIFY2(store.open(QString(), &error), qPrintable(error));
+
+    DocumentKey document;
+    document.canonicalPath = QStringLiteral("/tmp/rag-bm25.pdf");
+    document.contentHash = QStringLiteral("rag-bm25-document");
+    document.pageCount = 2;
+
+    const PdfChunk stronger = makeChunk(
+        document, QStringLiteral("stronger"),
+        QStringLiteral("alpha evidence conclusion evidence details"), 0);
+    const PdfChunk weaker =
+        makeChunk(document, QStringLiteral("weaker"),
+                  QStringLiteral("alpha only unrelated notes"), 1);
+
+    QVERIFY2(store.replaceDocument(document, {stronger, weaker}, &error),
+             qPrintable(error));
+
+    const QVector<RagEvidence> results =
+        store.search(document, QStringLiteral("alpha evidence"), 5, &error);
+    QVERIFY2(error.isEmpty(), qPrintable(error));
+    QCOMPARE(results.size(), 2);
+    QCOMPARE(results.first().chunkId, stronger.id);
+
+    double strongerScore = -1.0;
+    double weakerScore = -1.0;
+    for (const RagEvidence& item : results) {
+        if (item.chunkId == stronger.id)
+            strongerScore = item.lexicalScore;
+        if (item.chunkId == weaker.id)
+            weakerScore = item.lexicalScore;
+    }
+    QVERIFY(strongerScore > weakerScore);
+    QVERIFY(strongerScore < 1.0);
+    QVERIFY(weakerScore >= 0.0);
+}
+
+void TestRagP0::testExtractionFailurePreservesFileIdentity() {
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString path = directory.filePath(QStringLiteral("broken.pdf"));
+    QFile file(path);
+    QVERIFY(file.open(QIODevice::WriteOnly));
+    QVERIFY(file.write("this is not a pdf") > 0);
+    file.close();
+
+    RagJobContext context;
+    context.jobId = QStringLiteral("broken-pdf");
+    const PdfTextExtractionResult result =
+        PdfTextExtractor::extractFile(path, context);
+
+    QVERIFY(!result.success);
+    QCOMPARE(result.reason, RagIndexFailureReason::Corrupt);
+    QVERIFY(!result.document.canonicalPath.isEmpty());
+    QVERIFY(!result.document.contentHash.isEmpty());
+    QVERIFY(!result.error.isEmpty());
+
+    const PdfTextExtractionResult missing = PdfTextExtractor::extractFile(
+        directory.filePath("missing.pdf"), context);
+    QVERIFY(!missing.success);
+    QCOMPARE(missing.reason, RagIndexFailureReason::FileMissing);
 }
 
 QTEST_MAIN(TestRagP0)

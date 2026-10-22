@@ -1,12 +1,16 @@
 #include "RagIndexStore.h"
 
+#include <QChar>
 #include <QDataStream>
+#include <QDebug>
+#include <QFile>
 #include <QIODevice>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QMutex>
 #include <QMutexLocker>
+#include <QSet>
 #include <QSqlError>
 #include <QSqlQuery>
 #include <QStringList>
@@ -15,6 +19,8 @@
 
 namespace Rag {
 namespace {
+
+constexpr int kSchemaVersion = 2;
 
 QString databaseError(const QSqlQuery& query) {
     return query.lastError().text();
@@ -69,6 +75,151 @@ QString ftsTextFor(const QString& text) {
     return ftsTokensFor(text).join(QChar(' '));
 }
 
+bool isEnglishStopword(const QString& token) {
+    static const QSet<QString> stopwords = {
+        QStringLiteral("a"),      QStringLiteral("an"),
+        QStringLiteral("and"),    QStringLiteral("are"),
+        QStringLiteral("as"),     QStringLiteral("at"),
+        QStringLiteral("be"),     QStringLiteral("been"),
+        QStringLiteral("but"),    QStringLiteral("by"),
+        QStringLiteral("can"),    QStringLiteral("could"),
+        QStringLiteral("did"),    QStringLiteral("do"),
+        QStringLiteral("does"),   QStringLiteral("for"),
+        QStringLiteral("from"),   QStringLiteral("has"),
+        QStringLiteral("have"),   QStringLiteral("he"),
+        QStringLiteral("her"),    QStringLiteral("his"),
+        QStringLiteral("how"),    QStringLiteral("i"),
+        QStringLiteral("if"),     QStringLiteral("in"),
+        QStringLiteral("is"),     QStringLiteral("it"),
+        QStringLiteral("its"),    QStringLiteral("may"),
+        QStringLiteral("me"),     QStringLiteral("might"),
+        QStringLiteral("my"),     QStringLiteral("of"),
+        QStringLiteral("on"),     QStringLiteral("or"),
+        QStringLiteral("our"),    QStringLiteral("she"),
+        QStringLiteral("should"), QStringLiteral("than"),
+        QStringLiteral("that"),   QStringLiteral("the"),
+        QStringLiteral("their"),  QStringLiteral("them"),
+        QStringLiteral("then"),   QStringLiteral("there"),
+        QStringLiteral("these"),  QStringLiteral("they"),
+        QStringLiteral("this"),   QStringLiteral("those"),
+        QStringLiteral("to"),     QStringLiteral("was"),
+        QStringLiteral("we"),     QStringLiteral("were"),
+        QStringLiteral("what"),   QStringLiteral("when"),
+        QStringLiteral("where"),  QStringLiteral("which"),
+        QStringLiteral("who"),    QStringLiteral("why"),
+        QStringLiteral("will"),   QStringLiteral("with"),
+        QStringLiteral("would"),  QStringLiteral("you"),
+        QStringLiteral("your")};
+    return stopwords.contains(token.toLower());
+}
+
+bool isCjkStopword(const QChar character) {
+    static const QSet<QChar> stopwords = {
+        QChar(0x7684),  // 的
+        QChar(0x662F),  // 是
+        QChar(0x4EC0),  // 什
+        QChar(0x4E48),  // 么
+        QChar(0x8FD9),  // 这
+        QChar(0x90A3),  // 那
+        QChar(0x5417),  // 吗
+        QChar(0x5462),  // 呢
+        QChar(0x4E86),  // 了
+        QChar(0x4E0E),  // 与
+        QChar(0x8BF7)   // 请
+    };
+    return stopwords.contains(character);
+}
+
+QString quoteFtsTerm(const QString& term) {
+    QString escaped = term;
+    escaped.replace(QChar('"'), QStringLiteral("\"\""));
+    return QStringLiteral("\"%1\"").arg(escaped);
+}
+
+void appendTerm(QStringList* terms, QSet<QString>* seen, const QString& term) {
+    if (term.isEmpty() || seen->contains(term)) {
+        return;
+    }
+    seen->insert(term);
+    terms->append(term);
+}
+
+QStringList queryTermsFor(const QString& query) {
+    QStringList terms;
+    QSet<QString> seen;
+    QString cjkRun;
+    QString englishToken;
+    QVector<QString> cjkRuns;
+
+    auto flushCjkRun = [&cjkRuns, &cjkRun]() {
+        if (!cjkRun.isEmpty()) {
+            cjkRuns.append(cjkRun);
+            cjkRun.clear();
+        }
+    };
+
+    auto flushEnglish = [&terms, &seen, &englishToken]() {
+        if (englishToken.isEmpty()) {
+            return;
+        }
+        if (!isEnglishStopword(englishToken)) {
+            appendTerm(&terms, &seen, englishToken.toLower());
+        }
+        englishToken.clear();
+    };
+
+    for (const QChar character : query) {
+        if (isCjkCharacter(character)) {
+            flushEnglish();
+            if (isCjkStopword(character)) {
+                flushCjkRun();
+            } else {
+                cjkRun.append(character);
+            }
+            continue;
+        }
+
+        flushCjkRun();
+        if (character.isLetterOrNumber() || character == QChar('_')) {
+            englishToken.append(character);
+        } else {
+            flushEnglish();
+        }
+    }
+    flushCjkRun();
+    flushEnglish();
+
+    bool hasCjkBigram = false;
+    for (const QString& run : cjkRuns) {
+        if (run.size() >= 2) {
+            hasCjkBigram = true;
+            break;
+        }
+    }
+    for (const QString& run : cjkRuns) {
+        if (run.size() >= 2) {
+            // FTS5 phrases match adjacent tokens. Indexing stores CJK text
+            // one character per token, so adjacent-character phrases avoid
+            // the "every chunk matches" problem of OR-ing single characters.
+            for (int i = 0; i + 1 < run.size(); ++i) {
+                appendTerm(
+                    &terms, &seen,
+                    QStringLiteral("%1 %2").arg(run.at(i)).arg(run.at(i + 1)));
+            }
+        } else if (!hasCjkBigram) {
+            appendTerm(&terms, &seen, run);
+        }
+    }
+
+    if (terms.isEmpty()) {
+        // A query consisting only of stopwords still needs a useful fallback.
+        for (const QString& token : ftsTokensFor(query)) {
+            appendTerm(&terms, &seen, token);
+        }
+    }
+    return terms;
+}
+
 }  // namespace
 
 RagIndexStore::RagIndexStore() = default;
@@ -84,6 +235,23 @@ bool RagIndexStore::open(const QString& databasePath, QString* error) {
             .arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
     m_database =
         QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), m_connectionName);
+    if (!databasePath.isEmpty()) {
+        // Create the database with owner-only permissions before SQLite writes
+        // anything into it. This avoids a window where the file is readable by
+        // other local users.
+        QFile file(databasePath);
+        if (!file.exists()) {
+            if (!file.open(QIODevice::WriteOnly)) {
+                setError(error, QStringLiteral("Cannot create index database"));
+                close();
+                return false;
+            }
+            file.close();
+            file.setPermissions(QFileDevice::ReadOwner |
+                                QFileDevice::WriteOwner);
+        }
+    }
+
     m_database.setDatabaseName(
         databasePath.isEmpty() ? QStringLiteral(":memory:") : databasePath);
     if (!m_database.open()) {
@@ -93,18 +261,28 @@ bool RagIndexStore::open(const QString& databasePath, QString* error) {
     }
 
     QSqlQuery pragma(m_database);
-    if (!pragma.exec(QStringLiteral("PRAGMA foreign_keys = ON"))) {
-        setError(error, databaseError(pragma));
-        close();
-        return false;
-    }
     if (!pragma.exec(QStringLiteral("PRAGMA busy_timeout = 5000"))) {
         setError(error, databaseError(pragma));
         close();
         return false;
     }
-    QMutexLocker schemaLock(&writeMutex());
-    return initializeSchema(error);
+    // Migrations rebuild tables, so foreign keys must be disabled until the
+    // schema is at the expected version.
+    if (!pragma.exec(QStringLiteral("PRAGMA foreign_keys = OFF"))) {
+        setError(error, databaseError(pragma));
+        close();
+        return false;
+    }
+    if (!initializeSchema(error)) {
+        close();
+        return false;
+    }
+    if (!pragma.exec(QStringLiteral("PRAGMA foreign_keys = ON"))) {
+        setError(error, databaseError(pragma));
+        close();
+        return false;
+    }
+    return true;
 }
 
 void RagIndexStore::close() {
@@ -124,15 +302,25 @@ bool RagIndexStore::isOpen() const {
     return m_database.isValid() && m_database.isOpen();
 }
 
-bool RagIndexStore::initializeSchema(QString* error) {
+bool RagIndexStore::createSchema(QString* error) {
     const QStringList statements = {
         QStringLiteral("CREATE TABLE IF NOT EXISTS documents ("
                        "document_hash TEXT PRIMARY KEY,"
-                       "canonical_path TEXT NOT NULL,"
                        "file_size INTEGER NOT NULL,"
                        "modified_time TEXT NOT NULL,"
-                       "page_count INTEGER NOT NULL"
+                       "page_count INTEGER NOT NULL,"
+                       "chunker_policy TEXT NOT NULL DEFAULT ''"
                        ")"),
+        QStringLiteral(
+            "CREATE TABLE IF NOT EXISTS document_paths ("
+            "document_hash TEXT NOT NULL,"
+            "canonical_path TEXT NOT NULL,"
+            "PRIMARY KEY(document_hash, canonical_path),"
+            "FOREIGN KEY(document_hash) REFERENCES documents(document_hash) "
+            "ON DELETE CASCADE"
+            ")"),
+        QStringLiteral("CREATE INDEX IF NOT EXISTS idx_document_paths_path "
+                       "ON document_paths(canonical_path)"),
         QStringLiteral(
             "CREATE TABLE IF NOT EXISTS chunks ("
             "chunk_id TEXT PRIMARY KEY,"
@@ -178,8 +366,227 @@ bool RagIndexStore::initializeSchema(QString* error) {
     return true;
 }
 
+bool RagIndexStore::migrateSchemaFromVersionZero(QString* error) {
+    if (!m_database.transaction()) {
+        setError(error, databaseError(m_database));
+        return false;
+    }
+
+    auto rollback = [this, error](const QString& message) {
+        m_database.rollback();
+        setError(error, message);
+        return false;
+    };
+
+    QSqlQuery createNew(m_database);
+    if (!createNew.exec(QStringLiteral("CREATE TABLE documents_new ("
+                                       "document_hash TEXT PRIMARY KEY,"
+                                       "file_size INTEGER NOT NULL,"
+                                       "modified_time TEXT NOT NULL,"
+                                       "page_count INTEGER NOT NULL"
+                                       ")"))) {
+        return rollback(databaseError(createNew));
+    }
+
+    QSqlQuery copyDocuments(m_database);
+    if (!copyDocuments.exec(QStringLiteral(
+            "INSERT INTO documents_new(document_hash, file_size, "
+            "modified_time, page_count) "
+            "SELECT document_hash, file_size, modified_time, page_count "
+            "FROM documents"))) {
+        return rollback(databaseError(copyDocuments));
+    }
+    copyDocuments.finish();
+
+    QSqlQuery createPaths(m_database);
+    if (!createPaths.exec(QStringLiteral(
+            "CREATE TABLE IF NOT EXISTS document_paths ("
+            "document_hash TEXT NOT NULL,"
+            "canonical_path TEXT NOT NULL,"
+            "PRIMARY KEY(document_hash, canonical_path),"
+            "FOREIGN KEY(document_hash) REFERENCES documents(document_hash) "
+            "ON DELETE CASCADE"
+            ")"))) {
+        return rollback(databaseError(createPaths));
+    }
+
+    QSqlQuery copyPaths(m_database);
+    if (!copyPaths.exec(QStringLiteral(
+            "INSERT OR IGNORE INTO document_paths(document_hash, "
+            "canonical_path) SELECT document_hash, canonical_path "
+            "FROM documents"))) {
+        return rollback(databaseError(copyPaths));
+    }
+    copyPaths.finish();
+
+    QSqlQuery dropOld(m_database);
+    if (!dropOld.exec(QStringLiteral("DROP TABLE documents"))) {
+        return rollback(databaseError(dropOld));
+    }
+
+    QSqlQuery renameNew(m_database);
+    if (!renameNew.exec(
+            QStringLiteral("ALTER TABLE documents_new RENAME TO documents"))) {
+        return rollback(databaseError(renameNew));
+    }
+
+    if (!m_database.commit()) {
+        setError(error, databaseError(m_database));
+        m_database.rollback();
+        return false;
+    }
+    return true;
+}
+
+bool RagIndexStore::initializeSchema(QString* error) {
+    auto readVersion = [this]() {
+        QSqlQuery query(m_database);
+        int version = 0;
+        if (query.exec(QStringLiteral("PRAGMA user_version")) && query.next()) {
+            version = query.value(0).toInt();
+        }
+        query.finish();
+        return version;
+    };
+
+    int version = readVersion();
+    if (version > kSchemaVersion) {
+        setError(error, QStringLiteral("Unsupported index schema version"));
+        return false;
+    }
+    // Fast path: an up-to-date database must not take the global write lock
+    // or repeat CREATE/PRAGMA work on every query.
+    if (version == kSchemaVersion) {
+        return true;
+    }
+
+    QMutexLocker schemaLock(&writeMutex());
+    version = readVersion();
+    if (version > kSchemaVersion) {
+        setError(error, QStringLiteral("Unsupported index schema version"));
+        return false;
+    }
+    if (version == kSchemaVersion) {
+        return true;
+    }
+
+    QSqlQuery tableQuery(m_database);
+    tableQuery.prepare(QStringLiteral(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?"));
+    tableQuery.addBindValue(QStringLiteral("documents"));
+    if (!tableQuery.exec()) {
+        setError(error, databaseError(tableQuery));
+        return false;
+    }
+    const bool hasDocuments = tableQuery.next();
+    tableQuery.finish();
+
+    if (!hasDocuments) {
+        if (!createSchema(error)) {
+            return false;
+        }
+    } else {
+        QSqlQuery columnsQuery(m_database);
+        if (!columnsQuery.exec(
+                QStringLiteral("PRAGMA table_info(documents)"))) {
+            setError(error, databaseError(columnsQuery));
+            return false;
+        }
+        bool hasLegacyCanonicalPath = false;
+        while (columnsQuery.next()) {
+            if (columnsQuery.value(1).toString() ==
+                QStringLiteral("canonical_path")) {
+                hasLegacyCanonicalPath = true;
+                break;
+            }
+        }
+        columnsQuery.finish();
+        if (hasLegacyCanonicalPath) {
+            if (!migrateSchemaFromVersionZero(error)) {
+                return false;
+            }
+        }
+        if (!createSchema(error)) {
+            return false;
+        }
+    }
+
+    if (!ensureChunkerPolicyColumn(error)) {
+        return false;
+    }
+
+    QSqlQuery setVersion(m_database);
+    if (!setVersion.exec(
+            QStringLiteral("PRAGMA user_version = %1").arg(kSchemaVersion))) {
+        setError(error, databaseError(setVersion));
+        return false;
+    }
+    return true;
+}
+
+bool RagIndexStore::deleteContentForHash(const QString& documentHash,
+                                         QString* error) {
+    const QStringList statements = {
+        QStringLiteral("DELETE FROM chunk_vectors WHERE document_hash = ?"),
+        QStringLiteral("DELETE FROM chunks_fts WHERE document_hash = ?"),
+        QStringLiteral("DELETE FROM chunks WHERE document_hash = ?"),
+        QStringLiteral("DELETE FROM document_paths WHERE document_hash = ?"),
+        QStringLiteral("DELETE FROM documents WHERE document_hash = ?")};
+    for (const QString& sql : statements) {
+        QSqlQuery query(m_database);
+        query.prepare(sql);
+        query.addBindValue(documentHash);
+        if (!query.exec()) {
+            setError(error, databaseError(query));
+            return false;
+        }
+    }
+    return true;
+}
+
+bool RagIndexStore::ensureChunkerPolicyColumn(QString* error) {
+    QSqlQuery columns(m_database);
+    if (!columns.exec(QStringLiteral("PRAGMA table_info(documents)"))) {
+        setError(error, databaseError(columns));
+        return false;
+    }
+    bool hasColumn = false;
+    while (columns.next()) {
+        if (columns.value(1).toString() == QStringLiteral("chunker_policy")) {
+            hasColumn = true;
+            break;
+        }
+    }
+    columns.finish();
+    if (hasColumn) {
+        return true;
+    }
+    // Version 1 databases predate the policy column. Indexes written before the
+    // column existed cannot prove which strategy produced their chunks, so the
+    // empty default never matches and the document is rebuilt once.
+    QSqlQuery alter(m_database);
+    if (!alter.exec(QStringLiteral(
+            "ALTER TABLE documents ADD COLUMN chunker_policy TEXT NOT NULL "
+            "DEFAULT ''"))) {
+        setError(error, databaseError(alter));
+        return false;
+    }
+    return true;
+}
+
 bool RagIndexStore::replaceDocument(const DocumentKey& document,
                                     const QVector<PdfChunk>& chunks,
+                                    QString* error,
+                                    const RagCancellationToken* cancellation) {
+    // An explicit empty string, not a null QString: the column is NOT NULL and
+    // Qt binds a null QString as SQL NULL.
+    return replaceDocument(document, chunks, QStringLiteral(""), error,
+                           cancellation);
+}
+
+bool RagIndexStore::replaceDocument(const DocumentKey& document,
+                                    const QVector<PdfChunk>& chunks,
+                                    const QString& chunkerPolicy,
                                     QString* error,
                                     const RagCancellationToken* cancellation) {
     setError(error, QString());
@@ -189,6 +596,10 @@ bool RagIndexStore::replaceDocument(const DocumentKey& document,
     }
     if (document.contentHash.isEmpty()) {
         setError(error, QStringLiteral("Document content hash is empty"));
+        return false;
+    }
+    if (document.canonicalPath.isEmpty()) {
+        setError(error, QStringLiteral("Document canonical path is empty"));
         return false;
     }
     if (cancellation && cancellation->isCancelled()) {
@@ -213,92 +624,106 @@ bool RagIndexStore::replaceDocument(const DocumentKey& document,
         return false;
     };
 
-    QSqlQuery deleteOldFts(m_database);
-    QSqlQuery deleteOldVectors(m_database);
-    deleteOldVectors.prepare(QStringLiteral(
-        "DELETE FROM chunk_vectors WHERE document_hash IN ("
-        "SELECT document_hash FROM documents WHERE canonical_path = ? "
-        "AND document_hash <> ?)"));
-    deleteOldVectors.addBindValue(document.canonicalPath);
-    deleteOldVectors.addBindValue(document.contentHash);
-    if (!deleteOldVectors.exec())
-        return rollback(databaseError(deleteOldVectors));
-    deleteOldFts.prepare(
-        QStringLiteral("DELETE FROM chunks_fts WHERE document_hash IN ("
-                       "SELECT document_hash FROM documents "
-                       "WHERE canonical_path = ? AND document_hash <> ?)"));
-    deleteOldFts.addBindValue(document.canonicalPath);
-    deleteOldFts.addBindValue(document.contentHash);
-    if (!deleteOldFts.exec()) {
-        return rollback(databaseError(deleteOldFts));
+    QStringList oldHashes;
+    {
+        QSqlQuery query(m_database);
+        query.prepare(
+            QStringLiteral("SELECT document_hash FROM document_paths WHERE "
+                           "canonical_path = ?"));
+        query.addBindValue(document.canonicalPath);
+        if (!query.exec()) {
+            return rollback(databaseError(query));
+        }
+        while (query.next()) {
+            oldHashes.append(query.value(0).toString());
+        }
+        query.finish();
     }
 
-    QSqlQuery deleteOldChunks(m_database);
-    deleteOldChunks.prepare(
-        QStringLiteral("DELETE FROM chunks WHERE document_hash IN ("
-                       "SELECT document_hash FROM documents "
-                       "WHERE canonical_path = ? AND document_hash <> ?)"));
-    deleteOldChunks.addBindValue(document.canonicalPath);
-    deleteOldChunks.addBindValue(document.contentHash);
-    if (!deleteOldChunks.exec()) {
-        return rollback(databaseError(deleteOldChunks));
+    for (const QString& oldHash : oldHashes) {
+        if (oldHash == document.contentHash) {
+            continue;
+        }
+        QSqlQuery removePath(m_database);
+        removePath.prepare(
+            QStringLiteral("DELETE FROM document_paths WHERE document_hash = ? "
+                           "AND canonical_path = ?"));
+        removePath.addBindValue(oldHash);
+        removePath.addBindValue(document.canonicalPath);
+        if (!removePath.exec()) {
+            return rollback(databaseError(removePath));
+        }
+
+        QSqlQuery remainingPaths(m_database);
+        remainingPaths.prepare(QStringLiteral(
+            "SELECT COUNT(*) FROM document_paths WHERE document_hash = ?"));
+        remainingPaths.addBindValue(oldHash);
+        if (!remainingPaths.exec() || !remainingPaths.next()) {
+            return rollback(databaseError(remainingPaths));
+        }
+        const int remainingPathCount = remainingPaths.value(0).toInt();
+        remainingPaths.finish();
+        if (remainingPathCount == 0 && !deleteContentForHash(oldHash, error)) {
+            return rollback(error ? *error
+                                  : QStringLiteral("Cannot delete old index"));
+        }
     }
 
-    QSqlQuery deleteOldDocuments(m_database);
-    deleteOldDocuments.prepare(
-        QStringLiteral("DELETE FROM documents WHERE canonical_path = ? "
-                       "AND document_hash <> ?"));
-    deleteOldDocuments.addBindValue(document.canonicalPath);
-    deleteOldDocuments.addBindValue(document.contentHash);
-    if (!deleteOldDocuments.exec()) {
-        return rollback(databaseError(deleteOldDocuments));
+    // Replace the content for the new hash while preserving mappings for
+    // other paths that point at the same content.
+    const QStringList clearStatements = {
+        QStringLiteral("DELETE FROM chunk_vectors WHERE document_hash = ?"),
+        QStringLiteral("DELETE FROM chunks_fts WHERE document_hash = ?"),
+        QStringLiteral("DELETE FROM chunks WHERE document_hash = ?")};
+    for (const QString& sql : clearStatements) {
+        QSqlQuery query(m_database);
+        query.prepare(sql);
+        query.addBindValue(document.contentHash);
+        if (!query.exec()) {
+            return rollback(databaseError(query));
+        }
     }
 
-    QSqlQuery deleteFts(m_database);
-    QSqlQuery deleteVectors(m_database);
-    deleteVectors.prepare(
-        QStringLiteral("DELETE FROM chunk_vectors WHERE document_hash = ?"));
-    deleteVectors.addBindValue(document.contentHash);
-    if (!deleteVectors.exec())
-        return rollback(databaseError(deleteVectors));
-    deleteFts.prepare(
-        QStringLiteral("DELETE FROM chunks_fts WHERE document_hash = ?"));
-    deleteFts.addBindValue(document.contentHash);
-    if (!deleteFts.exec()) {
-        return rollback(databaseError(deleteFts));
-    }
-
-    QSqlQuery deleteChunks(m_database);
-    deleteChunks.prepare(
-        QStringLiteral("DELETE FROM chunks WHERE document_hash = ?"));
-    deleteChunks.addBindValue(document.contentHash);
-    if (!deleteChunks.exec()) {
-        return rollback(databaseError(deleteChunks));
-    }
-
-    QSqlQuery deleteDocument(m_database);
-    deleteDocument.prepare(
-        QStringLiteral("DELETE FROM documents WHERE document_hash = ?"));
-    deleteDocument.addBindValue(document.contentHash);
-    if (!deleteDocument.exec()) {
-        return rollback(databaseError(deleteDocument));
-    }
-
-    QSqlQuery insertDocument(m_database);
-    insertDocument.prepare(QStringLiteral(
-        "INSERT INTO documents(document_hash, canonical_path, file_size, "
-        "modified_time, page_count) VALUES(?, ?, ?, ?, ?)"));
-    insertDocument.addBindValue(document.contentHash);
-    insertDocument.addBindValue(document.canonicalPath);
-    insertDocument.addBindValue(document.fileSize);
     const QString modifiedTime =
         document.modifiedTime.isValid()
             ? document.modifiedTime.toString(Qt::ISODate)
             : QStringLiteral("");
+
+    QSqlQuery insertDocument(m_database);
+    insertDocument.prepare(QStringLiteral(
+        "INSERT OR IGNORE INTO documents(document_hash, file_size, "
+        "modified_time, page_count, chunker_policy) VALUES(?, ?, ?, ?, ?)"));
+    insertDocument.addBindValue(document.contentHash);
+    insertDocument.addBindValue(document.fileSize);
     insertDocument.addBindValue(modifiedTime);
     insertDocument.addBindValue(document.pageCount);
+    insertDocument.addBindValue(chunkerPolicy);
     if (!insertDocument.exec()) {
         return rollback(databaseError(insertDocument));
+    }
+
+    QSqlQuery updateDocument(m_database);
+    updateDocument.prepare(
+        QStringLiteral("UPDATE documents SET file_size = ?, modified_time = ?, "
+                       "page_count = ?, chunker_policy = ? "
+                       "WHERE document_hash = ?"));
+    updateDocument.addBindValue(document.fileSize);
+    updateDocument.addBindValue(modifiedTime);
+    updateDocument.addBindValue(document.pageCount);
+    updateDocument.addBindValue(chunkerPolicy);
+    updateDocument.addBindValue(document.contentHash);
+    if (!updateDocument.exec()) {
+        return rollback(databaseError(updateDocument));
+    }
+
+    QSqlQuery insertPath(m_database);
+    insertPath.prepare(QStringLiteral(
+        "INSERT OR IGNORE INTO document_paths(document_hash, canonical_path) "
+        "VALUES(?, ?)"));
+    insertPath.addBindValue(document.contentHash);
+    insertPath.addBindValue(document.canonicalPath);
+    if (!insertPath.exec()) {
+        return rollback(databaseError(insertPath));
     }
 
     QSqlQuery insertChunk(m_database);
@@ -350,15 +775,145 @@ bool RagIndexStore::replaceDocument(const DocumentKey& document,
     return true;
 }
 
-bool RagIndexStore::containsDocument(const DocumentKey& document) const {
-    if (!isOpen() || document.contentHash.isEmpty()) {
+bool RagIndexStore::registerDocumentPath(const DocumentKey& document,
+                                         QString* error) {
+    setError(error, QString());
+    if (!isOpen()) {
+        setError(error, QStringLiteral("Index store is not open"));
+        return false;
+    }
+    if (document.contentHash.isEmpty() || document.canonicalPath.isEmpty()) {
+        setError(error, QStringLiteral("Document identity is incomplete"));
+        return false;
+    }
+
+    QMutexLocker writeLock(&writeMutex());
+    QSqlQuery query(m_database);
+    query.prepare(QStringLiteral(
+        "INSERT OR IGNORE INTO document_paths(document_hash, canonical_path) "
+        "VALUES(?, ?)"));
+    query.addBindValue(document.contentHash);
+    query.addBindValue(document.canonicalPath);
+    if (!query.exec()) {
+        setError(error, databaseError(query));
+        return false;
+    }
+    return true;
+}
+
+bool RagIndexStore::clearAll(QString* error) {
+    setError(error, QString());
+    if (!isOpen()) {
+        setError(error, QStringLiteral("Index store is not open"));
+        return false;
+    }
+
+    QMutexLocker writeLock(&writeMutex());
+
+    QSqlQuery secureDelete(m_database);
+    if (!secureDelete.exec(QStringLiteral("PRAGMA secure_delete = ON"))) {
+        setError(error, databaseError(secureDelete));
+        return false;
+    }
+
+    if (!m_database.transaction()) {
+        setError(error, databaseError(m_database));
+        QSqlQuery disableSecureDelete(m_database);
+        disableSecureDelete.exec(QStringLiteral("PRAGMA secure_delete = OFF"));
+        return false;
+    }
+
+    const QStringList statements = {
+        QStringLiteral("DELETE FROM chunk_vectors"),
+        QStringLiteral("DELETE FROM chunks_fts"),
+        QStringLiteral("DELETE FROM chunks"),
+        QStringLiteral("DELETE FROM document_paths"),
+        QStringLiteral("DELETE FROM documents")};
+    for (const QString& sql : statements) {
+        QSqlQuery query(m_database);
+        if (!query.exec(sql)) {
+            m_database.rollback();
+            QSqlQuery disableSecureDelete(m_database);
+            disableSecureDelete.exec(
+                QStringLiteral("PRAGMA secure_delete = OFF"));
+            setError(error, databaseError(query));
+            return false;
+        }
+    }
+    if (!m_database.commit()) {
+        setError(error, databaseError(m_database));
+        m_database.rollback();
+        QSqlQuery disableSecureDelete(m_database);
+        disableSecureDelete.exec(QStringLiteral("PRAGMA secure_delete = OFF"));
+        return false;
+    }
+
+    // VACUUM must run outside a transaction. Content is already zeroed by
+    // secure_delete, so a busy VACUUM is only a warning.
+    QSqlQuery vacuum(m_database);
+    if (!vacuum.exec(QStringLiteral("VACUUM"))) {
+        qWarning() << "RAG: VACUUM after clear failed:"
+                   << databaseError(vacuum);
+    }
+    QSqlQuery disableSecureDelete(m_database);
+    if (!disableSecureDelete.exec(
+            QStringLiteral("PRAGMA secure_delete = OFF"))) {
+        qWarning() << "RAG: cannot disable secure_delete:"
+                   << databaseError(disableSecureDelete);
+    }
+    return true;
+}
+
+bool RagIndexStore::containsDocument(const DocumentKey& document,
+                                     QString* error) const {
+    setError(error, QString());
+    if (!isOpen()) {
+        setError(error, QStringLiteral("Index store is not open"));
+        return false;
+    }
+    if (document.contentHash.isEmpty()) {
+        setError(error, QStringLiteral("Document content hash is empty"));
         return false;
     }
     QSqlQuery query(m_database);
     query.prepare(QStringLiteral(
-        "SELECT 1 FROM documents WHERE document_hash = ? LIMIT 1"));
+        "SELECT 1 FROM documents d "
+        "JOIN document_paths p ON p.document_hash = d.document_hash "
+        "WHERE d.document_hash = ? LIMIT 1"));
     query.addBindValue(document.contentHash);
-    return query.exec() && query.next();
+    if (!query.exec()) {
+        setError(error, databaseError(query));
+        return false;
+    }
+    return query.next();
+}
+
+bool RagIndexStore::documentMatchesChunkerPolicy(const DocumentKey& document,
+                                                 const QString& policy,
+                                                 QString* error) const {
+    setError(error, QString());
+    if (!isOpen()) {
+        setError(error, QStringLiteral("Index store is not open"));
+        return false;
+    }
+    if (document.contentHash.isEmpty()) {
+        setError(error, QStringLiteral("Document content hash is empty"));
+        return false;
+    }
+    QSqlQuery query(m_database);
+    query.prepare(QStringLiteral(
+        "SELECT chunker_policy FROM documents d "
+        "JOIN document_paths p ON p.document_hash = d.document_hash "
+        "WHERE d.document_hash = ? LIMIT 1"));
+    query.addBindValue(document.contentHash);
+    if (!query.exec()) {
+        setError(error, databaseError(query));
+        return false;
+    }
+    if (!query.next()) {
+        return false;
+    }
+    return query.value(0).toString() == policy;
 }
 
 int RagIndexStore::documentChunkCount(const DocumentKey& document,
@@ -427,8 +982,10 @@ QVector<RagEvidence> RagIndexStore::search(const DocumentKey& document,
         evidence.sectionPath = query.value(4).toString();
         evidence.text = query.value(5).toString();
         evidence.locations = locationsFromJson(query.value(6).toString());
-        const double bm25Score = query.value(7).toDouble();
-        evidence.lexicalScore = 1.0 / (1.0 + qMax(0.0, bm25Score));
+        // SQLite FTS5 returns a negative bm25 value where more negative is
+        // more relevant. Convert it to a monotonic score in [0, 1).
+        const double relevance = qMax(0.0, -query.value(7).toDouble());
+        evidence.lexicalScore = relevance / (1.0 + relevance);
         evidence.finalScore = evidence.lexicalScore;
         evidence.rank = rank++;
         results.append(std::move(evidence));
@@ -670,16 +1227,78 @@ QVector<RagEvidence> RagIndexStore::evidenceByIds(const DocumentKey& document,
     return evidence;
 }
 
+QVector<RagEvidence> RagIndexStore::adjacentChunks(const DocumentKey& document,
+                                                   const RagEvidence& anchor,
+                                                   int radius,
+                                                   QString* error) const {
+    setError(error, {});
+    QVector<RagEvidence> result;
+    if (radius <= 0 || anchor.chunkId.isEmpty()) {
+        return result;
+    }
+    const int page = anchor.pageStart;
+    const int charStart =
+        anchor.locations.isEmpty() ? 0 : anchor.locations.first().charStart;
+
+    auto read = [this, &document](QSqlQuery& query, QVector<RagEvidence>& out) {
+        while (query.next()) {
+            RagEvidence item;
+            item.chunkId = query.value(0).toString();
+            item.documentHash = document.contentHash;
+            item.pageStart = query.value(1).toInt();
+            item.pageEnd = query.value(2).toInt();
+            item.sectionPath = query.value(3).toString();
+            item.text = query.value(4).toString();
+            item.locations = locationsFromJson(query.value(5).toString());
+            out.append(std::move(item));
+        }
+    };
+
+    QSqlQuery previous(m_database);
+    previous.prepare(QStringLiteral(
+        "SELECT chunk_id, page_start, page_end, section_path, text, "
+        "locations_json, char_start FROM chunks WHERE document_hash = ? "
+        "AND (page_start < ? OR (page_start = ? AND char_start < ?)) "
+        "ORDER BY page_start DESC, char_start DESC LIMIT ?"));
+    previous.addBindValue(document.contentHash);
+    previous.addBindValue(page);
+    previous.addBindValue(page);
+    previous.addBindValue(charStart);
+    previous.addBindValue(radius);
+    if (!previous.exec()) {
+        setError(error, databaseError(previous));
+        return {};
+    }
+    QVector<RagEvidence> before;
+    read(previous, before);
+    for (int i = before.size() - 1; i >= 0; --i)
+        result.append(before.at(i));
+
+    QSqlQuery next(m_database);
+    next.prepare(QStringLiteral(
+        "SELECT chunk_id, page_start, page_end, section_path, text, "
+        "locations_json, char_start FROM chunks WHERE document_hash = ? "
+        "AND (page_start > ? OR (page_start = ? AND char_start > ?)) "
+        "ORDER BY page_start ASC, char_start ASC LIMIT ?"));
+    next.addBindValue(document.contentHash);
+    next.addBindValue(page);
+    next.addBindValue(page);
+    next.addBindValue(charStart);
+    next.addBindValue(radius);
+    if (!next.exec()) {
+        setError(error, databaseError(next));
+        return {};
+    }
+    read(next, result);
+    return result;
+}
+
 QString RagIndexStore::ftsQueryFor(const QString& query) {
     QStringList quotedTerms;
-    for (const QString& rawTerm : ftsTokensFor(query)) {
-        QString term = rawTerm.trimmed();
-        if (!term.isEmpty()) {
-            quotedTerms.append(QStringLiteral("\"%1\"").arg(
-                term.replace(QStringLiteral("\""), QStringLiteral("\"\""))));
-        }
+    for (const QString& term : queryTermsFor(query)) {
+        quotedTerms.append(quoteFtsTerm(term));
     }
-    return quotedTerms.join(QStringLiteral(" AND "));
+    return quotedTerms.join(QStringLiteral(" OR "));
 }
 
 QString RagIndexStore::locationsToJson(

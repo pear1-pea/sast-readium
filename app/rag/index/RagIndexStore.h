@@ -30,7 +30,20 @@ public:
                          const QVector<PdfChunk>& chunks,
                          QString* error = nullptr,
                          const RagCancellationToken* cancellation = nullptr);
-    bool containsDocument(const DocumentKey& document) const;
+    /** As above, recording the chunking strategy that produced the chunks. */
+    bool replaceDocument(const DocumentKey& document,
+                         const QVector<PdfChunk>& chunks,
+                         const QString& chunkerPolicy, QString* error = nullptr,
+                         const RagCancellationToken* cancellation = nullptr);
+    bool registerDocumentPath(const DocumentKey& document,
+                              QString* error = nullptr);
+    bool clearAll(QString* error = nullptr);
+    bool containsDocument(const DocumentKey& document,
+                          QString* error = nullptr) const;
+    /** True when the stored index was built with exactly this policy. */
+    bool documentMatchesChunkerPolicy(const DocumentKey& document,
+                                      const QString& policy,
+                                      QString* error = nullptr) const;
     int documentChunkCount(const DocumentKey& document,
                            QString* error = nullptr) const;
 
@@ -55,9 +68,20 @@ public:
     QVector<RagEvidence> evidenceByIds(const DocumentKey& document,
                                        const QStringList& ids,
                                        QString* error = nullptr) const;
+    /**
+     * Up to `radius` chunks before and after `anchor` in reading order
+     * (page, character offset), excluding the anchor itself.
+     */
+    QVector<RagEvidence> adjacentChunks(const DocumentKey& document,
+                                        const RagEvidence& anchor, int radius,
+                                        QString* error = nullptr) const;
 
 private:
     bool initializeSchema(QString* error);
+    bool createSchema(QString* error);
+    bool migrateSchemaFromVersionZero(QString* error);
+    bool ensureChunkerPolicyColumn(QString* error);
+    bool deleteContentForHash(const QString& documentHash, QString* error);
     static QString ftsQueryFor(const QString& query);
     static QString locationsToJson(const QVector<ChunkPageLocation>& locations);
     static QVector<ChunkPageLocation> locationsFromJson(const QString& json);

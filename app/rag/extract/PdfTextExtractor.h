@@ -7,6 +7,7 @@ namespace Rag {
 struct PdfTextExtractionResult {
     bool success = false;
     bool hasText = false;
+    RagIndexFailureReason reason = RagIndexFailureReason::None;
     QString error;
     DocumentKey document;
     QVector<PdfPageText> pages;
