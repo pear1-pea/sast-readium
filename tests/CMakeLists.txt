@@ -279,6 +279,15 @@ create_unit_test(test_chat_budget unit/test_chat_budget.cpp)
 target_sources(test_chat_budget PRIVATE
     ../app/rag/chat/ContextAssembler.cpp)
 
+create_unit_test(test_rag_evidence_baseline unit/test_rag_evidence_baseline.cpp)
+target_sources(test_rag_evidence_baseline PRIVATE
+    ../app/rag/extract/PdfChunker.cpp
+    ../app/rag/index/RagIndexStore.cpp
+    ../app/rag/retrieve/EvidenceExpander.cpp
+    ../app/rag/retrieve/HybridRetriever.cpp
+    ../app/rag/chat/ContextAssembler.cpp)
+target_link_libraries(test_rag_evidence_baseline PRIVATE Qt6::Sql)
+
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/unit/test_rag_settings.cpp)
     create_unit_test(test_rag_settings
         unit/test_rag_settings.cpp)
