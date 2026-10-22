@@ -275,6 +275,10 @@ target_sources(test_ollama_embedding PRIVATE
     ../app/rag/embedding/OllamaEmbeddingProvider.cpp)
 target_link_libraries(test_ollama_embedding PRIVATE Qt6::Network)
 
+create_unit_test(test_chat_budget unit/test_chat_budget.cpp)
+target_sources(test_chat_budget PRIVATE
+    ../app/rag/chat/ContextAssembler.cpp)
+
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/unit/test_rag_settings.cpp)
     create_unit_test(test_rag_settings
         unit/test_rag_settings.cpp)
