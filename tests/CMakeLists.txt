@@ -318,7 +318,10 @@ if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/unit/test_rag_coordinator.cpp)
         ../app/model/DocumentModel.cpp
         ../app/model/AsyncDocumentLoader.cpp
         ../app/rag/config/RagSettings.cpp
+        ../app/rag/controller/RagConversationModel.cpp
         ../app/rag/controller/RagDocumentCoordinator.cpp
+        ../app/rag/conversation/RagConversationStore.cpp
+        ../app/rag/domain/RagConversation.cpp
         ../app/rag/extract/PdfTextExtractor.cpp
         ../app/rag/extract/PdfChunker.cpp
         ../app/rag/index/RagIndexStore.cpp

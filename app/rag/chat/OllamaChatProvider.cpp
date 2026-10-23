@@ -10,6 +10,32 @@
 #include "ContextAssembler.h"
 namespace Rag {
 namespace {
+
+RagChatFailure classifyNetworkError(QNetworkReply::NetworkError error) {
+    switch (error) {
+        case QNetworkReply::ConnectionRefusedError:
+        case QNetworkReply::HostNotFoundError:
+        case QNetworkReply::NetworkSessionFailedError:
+            return RagChatFailure::Unreachable;
+        case QNetworkReply::ContentNotFoundError:
+            return RagChatFailure::ModelMissing;
+        case QNetworkReply::OperationCanceledError:
+            return RagChatFailure::Cancelled;
+        default:
+            return RagChatFailure::Rejected;
+    }
+}
+
+RagChatFailure classifyServerError(const QString& text) {
+    const QString lowered = text.toLower();
+    if (lowered.contains(QStringLiteral("model")) &&
+        (lowered.contains(QStringLiteral("not found")) ||
+         lowered.contains(QStringLiteral("try pulling")) ||
+         lowered.contains(QStringLiteral("no such model")))) {
+        return RagChatFailure::ModelMissing;
+    }
+    return RagChatFailure::Rejected;
+}
 class OllamaChatTask : public ChatTask {
 public:
     OllamaChatTask(QString model, QUrl endpoint, ChatRequest request,
@@ -25,7 +51,8 @@ public:
         m_manager.setProxy(QNetworkProxy::NoProxy);
         m_timeout.setSingleShot(true);
         connect(&m_timeout, &QTimer::timeout, this, [this]() {
-            fail(QStringLiteral("Answer generation timed out"));
+            fail(RagChatFailure::Timeout,
+                 QStringLiteral("Answer generation timed out"));
         });
     }
     void start() override {
@@ -36,7 +63,7 @@ public:
         // must never send content that cannot fit the declared window.
         const QString budgetProblem = ContextAssembler::budgetError(m_request);
         if (!budgetProblem.isEmpty()) {
-            fail(budgetProblem);
+            fail(RagChatFailure::ContextTooSmall, budgetProblem);
             return;
         }
         const QJsonArray messages = ContextAssembler::messages(m_request);
@@ -65,9 +92,11 @@ public:
             if (m_terminal)
                 return;
             if (m_reply->error() != QNetworkReply::NoError)
-                fail(m_reply->errorString());
+                fail(classifyNetworkError(m_reply->error()),
+                     m_reply->errorString());
             else if (!m_done)
-                fail(QStringLiteral("Incomplete chat response"));
+                fail(RagChatFailure::Rejected,
+                     QStringLiteral("Incomplete chat response"));
             else {
                 m_terminal = true;
                 m_timeout.stop();
@@ -89,21 +118,22 @@ public:
     }
 
 private:
-    void fail(const QString& error) {
+    void fail(RagChatFailure failure, const QString& error) {
         if (m_terminal)
             return;
         m_terminal = true;
         m_timeout.stop();
         if (m_reply && !m_reply->isFinished())
             m_reply->abort();
-        emit failed(error);
+        emit failed(failure, error);
     }
     void consume(bool final) {
         if (m_terminal)
             return;
         m_buffer += m_reply->readAll();
         if (m_buffer.size() > 1024 * 1024) {
-            fail(QStringLiteral("Chat response too large"));
+            fail(RagChatFailure::Rejected,
+                 QStringLiteral("Chat response too large"));
             return;
         }
         while (!m_terminal) {
@@ -120,12 +150,14 @@ private:
             QJsonParseError error;
             const auto json = QJsonDocument::fromJson(line, &error);
             if (error.error != QJsonParseError::NoError || !json.isObject()) {
-                fail(QStringLiteral("Invalid chat stream"));
+                fail(RagChatFailure::Rejected,
+                     QStringLiteral("Invalid chat stream"));
                 return;
             }
             const auto object = json.object();
             if (object.contains("error")) {
-                fail(object.value("error").toString());
+                const QString detail = object.value("error").toString();
+                fail(classifyServerError(detail), detail);
                 return;
             }
 
@@ -138,7 +170,8 @@ private:
                 object.value("message").toObject().value("content").toString();
             m_answer += delta;
             if (m_answer.size() > 64000) {
-                fail(QStringLiteral("Answer too long"));
+                fail(RagChatFailure::Rejected,
+                     QStringLiteral("Answer too long"));
                 return;
             }
             if (!delta.isEmpty())

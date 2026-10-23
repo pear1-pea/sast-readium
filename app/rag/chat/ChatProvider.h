@@ -24,17 +24,6 @@ struct ChatRequest {
     QStringList skippedEvidenceIds;
     QString assemblyError;
 };
-struct RagCitation {
-    QString chunkId;
-    int pageStart = -1;
-    int pageEnd = -1;
-    QString sectionPath;
-    QString snippet;
-};
-struct RagAnswer {
-    QString text;
-    QVector<RagCitation> citations;
-};
 class ChatTask : public QObject {
     Q_OBJECT
 public:
@@ -46,7 +35,7 @@ signals:
     /** Prompt tokens reported by the service, or 0 when it did not report. */
     void promptEvaluated(int tokens);
     void completed(const QString& text);
-    void failed(const QString& error);
+    void failed(Rag::RagChatFailure failure, const QString& error);
     void cancelled();
 };
 class ChatProvider {

@@ -10,6 +10,9 @@
 
 #include "rag/chat/ChatProvider.h"
 #include "rag/config/RagSettings.h"
+#include "rag/controller/RagConversationModel.h"
+#include "rag/conversation/RagConversationStore.h"
+#include "rag/domain/RagConversation.h"
 #include "rag/domain/RagTypes.h"
 #include "rag/embedding/EmbeddingProvider.h"
 
@@ -48,6 +51,11 @@ public slots:
     void applySettings(const RagSettings& settings);
     void retryAnswer();
     void retryQuery();
+    void askQuestion(const QString& question, int limit = 10);
+    void regenerateTurn(const QString& turnId);
+    void stopActiveTurn();
+    void clearConversation();
+    RagConversationModel* currentConversationModel() const;
     void deleteCurrentDocumentIndex();
     void requestIndexStats();
 
@@ -68,8 +76,12 @@ signals:
     void documentIndexDeleted();
     void documentIndexDeleteFailed(const QString& error);
     void indexStatsReady(const Rag::RagIndexStats& stats);
+    void conversationModelChanged(Rag::RagConversationModel* model);
+    void conversationBusyChanged(bool busy);
 
 private:
+    struct Entry;
+
     void onDocumentOpened(int index);
     void onDocumentClosed(int index);
     void onCurrentDocumentChanged(int index);
@@ -82,6 +94,16 @@ private:
                         quint64 generation, int processed, int total);
     void publish(const QString& filePath);
     void startEmbedding(const QString& path, const DocumentKey& document);
+    void startRetrieval(const QString& turnId, const QString& question,
+                        int limit);
+    void startGeneration(const QString& turnId);
+    void ensureConversation(Entry& entry, const QString& path);
+    void persistConversation(const QString& path);
+    bool hasActiveTurn() const;
+    bool isActiveTurn(const QString& turnId, quint64 generation) const;
+    void setActiveTurn(const QString& turnId, quint64 generation);
+    void clearActiveTurn();
+    void cancelActiveTurn(RagTurnState terminal);
     void updateEmbeddingState(const QString& path, quint64 generation,
                               RagEmbeddingState state, int embeddedCount,
                               const QString& error);
@@ -102,7 +124,7 @@ private:
         quint64 embeddingGeneration = 0;
         RagCancellationToken embeddingCancellation;
         qint64 lastProgressPublishMs = 0;
-        QStringList conversation;
+        std::shared_ptr<RagConversationModel> conversation;
     };
 
     DocumentModel* m_documentModel = nullptr;
@@ -115,6 +137,10 @@ private:
     QPointer<ChatTask> m_chatTask;
     QString m_lastQuery;
     QVector<RagEvidence> m_lastEvidence;
+    std::shared_ptr<RagConversationStore> m_conversationStore =
+        std::make_shared<InMemoryConversationStore>();
+    QString m_activeTurnId;
+    quint64 m_activeTurnGeneration = 0;
     QHash<QString, RagEvidence> m_validCitations;
     ChatProviderFactory m_chatProviderFactory;
     EmbeddingProviderFactory m_embeddingProviderFactory;

@@ -118,6 +118,36 @@ struct RagEvidence {
     int rank = -1;
 };
 
+struct RagCitation {
+    QString chunkId;
+    int pageStart = -1;
+    int pageEnd = -1;
+    QString sectionPath;
+    QString snippet;
+};
+
+struct RagAnswer {
+    QString text;
+    QVector<RagCitation> citations;
+};
+
+/** Terminal reason for a chat generation attempt. */
+enum class RagChatFailure {
+    None,
+    Timeout,
+    Unreachable,
+    ModelMissing,
+    BudgetEvidence,
+    BudgetHistory,
+    ContextTooSmall,
+    Rejected,
+    Cancelled,
+    Unknown
+};
+
+/** Lifecycle state of one conversation turn. */
+enum class RagTurnState { Retrieving, Generating, Ready, Failed, Cancelled };
+
 enum class RagIndexState {
     NotIndexed,
     CheckingCache,
@@ -201,3 +231,10 @@ struct RagIndexStats {
 }  // namespace Rag
 
 Q_DECLARE_METATYPE(Rag::RagIndexStats)
+Q_DECLARE_METATYPE(Rag::RagChatFailure)
+Q_DECLARE_METATYPE(Rag::RagTurnState)
+Q_DECLARE_METATYPE(Rag::RagEvidence)
+Q_DECLARE_METATYPE(Rag::RagCitation)
+Q_DECLARE_METATYPE(Rag::RagAnswer)
+Q_DECLARE_METATYPE(QVector<Rag::RagEvidence>)
+Q_DECLARE_METATYPE(QVector<Rag::RagCitation>)

@@ -241,7 +241,7 @@ private slots:
         task->start();
         QCOMPARE(failed.count(), 1);
         QCOMPARE(done.count(), 0);
-        QVERIFY(!failed.first().first().toString().isEmpty());
+        QVERIFY(!failed.first().at(1).toString().isEmpty());
         delete task;
     }
 

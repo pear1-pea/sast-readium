@@ -19,7 +19,9 @@
 #include "model/DocumentModel.h"
 #include "rag/chat/ChatProvider.h"
 #include "rag/config/RagSettings.h"
+#include "rag/controller/RagConversationModel.h"
 #include "rag/controller/RagDocumentCoordinator.h"
+#include "rag/domain/RagConversation.h"
 
 namespace {
 
@@ -41,7 +43,9 @@ public:
         emit completed(answer);
     }
 
-    void fail(const QString& error) { emit failed(error); }
+    void fail(const QString& error) {
+        emit failed(Rag::RagChatFailure::Rejected, error);
+    }
 
 private:
     bool m_cancelled = false;
@@ -189,6 +193,10 @@ private slots:
     void retryQueryRerunsSearch();
     void indexProgressAndStats();
     void deleteCurrentDocumentIndex();
+    void conversationHistoryOnlyUsesCompletedTurns();
+    void conversationModelNotifications();
+    void regenerateRejectsStaleGeneration();
+    void conversationIsPerDocument();
     void embeddingFailureKeepsLexicalEvidence();
 };
 
@@ -985,6 +993,229 @@ void TestRagCoordinator::deleteCurrentDocumentIndex() {
     QCOMPARE(coordinator.currentSnapshot().state,
              Rag::RagIndexState::NotIndexed);
     QCOMPARE(coordinator.currentSnapshot().chunkCount, 0);
+}
+
+void TestRagCoordinator::conversationHistoryOnlyUsesCompletedTurns() {
+    Rag::RagConversationTurn ready;
+    ready.id = QStringLiteral("ready");
+    ready.state = Rag::RagTurnState::Ready;
+    ready.question = QStringLiteral("question");
+    ready.answerText = QStringLiteral("answer");
+
+    Rag::RagConversationTurn failed;
+    failed.id = QStringLiteral("failed");
+    failed.state = Rag::RagTurnState::Failed;
+    failed.question = QStringLiteral("failed question");
+    failed.answerText = QStringLiteral("failed answer");
+
+    Rag::RagConversationTurn generating;
+    generating.id = QStringLiteral("generating");
+    generating.state = Rag::RagTurnState::Generating;
+    generating.question = QStringLiteral("generating question");
+    generating.answerText = QStringLiteral("partial");
+
+    const QStringList history =
+        Rag::conversationFromTurns({ready, failed, generating});
+    QCOMPARE(history, (QStringList{QStringLiteral("question"),
+                                   QStringLiteral("answer")}));
+}
+
+void TestRagCoordinator::conversationModelNotifications() {
+    Rag::RagConversationModel model;
+    QSignalSpy inserted(&model, &QAbstractItemModel::rowsInserted);
+    QSignalSpy changed(&model, &QAbstractItemModel::dataChanged);
+    QSignalSpy removed(&model, &QAbstractItemModel::rowsRemoved);
+
+    Rag::RagConversationTurn first;
+    first.id = QStringLiteral("first");
+    first.question = QStringLiteral("q1");
+    QCOMPARE(model.appendTurn(first), 0);
+    QCOMPARE(inserted.count(), 1);
+
+    model.appendAnswerDelta(QStringLiteral("first"), QStringLiteral("hello"));
+    QCOMPARE(model.turn(QStringLiteral("first"))->answerText,
+             QStringLiteral("hello"));
+    QVERIFY(changed.count() >= 1);
+
+    Rag::RagConversationTurn second;
+    second.id = QStringLiteral("second");
+    second.question = QStringLiteral("q2");
+    model.appendTurn(second);
+    QCOMPARE(model.count(), 2);
+
+    model.truncateAfter(0);
+    QCOMPARE(model.count(), 1);
+    QCOMPARE(removed.count(), 1);
+    QCOMPARE(model.turns().first().id, QStringLiteral("first"));
+
+    model.keepOnly(QStringLiteral("missing"));
+    QVERIFY(model.isEmpty());
+}
+
+void TestRagCoordinator::regenerateRejectsStaleGeneration() {
+    qunsetenv("READIUM_OLLAMA_EMBED_MODEL");
+    qunsetenv("READIUM_OLLAMA_EMBED_VERSION");
+
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString pdf =
+        writePdf(directory.filePath(QStringLiteral("stale.pdf")),
+                 QStringLiteral("alpha evidence for stale generation"));
+
+    DocumentModel model;
+    auto fake = std::make_shared<FakeChatState>();
+    Rag::RagDocumentCoordinator coordinator(
+        &model, directory.filePath(QStringLiteral("rag.sqlite")), nullptr,
+        [fake]() -> std::unique_ptr<Rag::ChatProvider> {
+            return std::make_unique<FakeChatProvider>(fake);
+        },
+        {}, settingsWith(QStringLiteral("fake-chat"), true));
+
+    auto waitFor = [](auto predicate) {
+        QElapsedTimer timer;
+        timer.start();
+        while (timer.elapsed() < 20000) {
+            if (predicate()) {
+                return true;
+            }
+            QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+            QTest::qWait(10);
+        }
+        return false;
+    };
+
+    QSignalSpy opened(&model, &DocumentModel::documentOpened);
+    QVERIFY(model.openFromFile(pdf));
+    QTRY_COMPARE_WITH_TIMEOUT(opened.count(), 1, 20000);
+    QVERIFY(waitFor(
+        [&coordinator]() { return coordinator.currentSnapshot().isReady(); }));
+
+    fake->task = nullptr;
+    coordinator.queryCurrentDocument(QStringLiteral("alpha"));
+    QVERIFY(waitFor([&fake]() { return !fake->task.isNull(); }));
+    const QString chunkId = fake->lastRequest.evidence.first().chunkId;
+    fake->task->finish(QStringLiteral("first [[cite:%1]]").arg(chunkId));
+    QVERIFY(waitFor([&coordinator]() {
+        const auto* conversation = coordinator.currentConversationModel();
+        return conversation && !conversation->isEmpty() &&
+               conversation->turns().last().state == Rag::RagTurnState::Ready;
+    }));
+    const auto* conversation = coordinator.currentConversationModel();
+    QVERIFY(conversation);
+    const QString turnId = conversation->turns().last().id;
+
+    fake->task = nullptr;
+    coordinator.regenerateTurn(turnId);
+    QVERIFY(waitFor([&fake]() { return !fake->task.isNull(); }));
+    QPointer<FakeChatTask> stale = fake->task;
+
+    fake->task = nullptr;
+    coordinator.regenerateTurn(turnId);
+    QVERIFY(waitFor([&fake]() { return !fake->task.isNull(); }));
+
+    QVERIFY(stale);
+    stale->fail(QStringLiteral("stale failure"));
+    QCoreApplication::processEvents(QEventLoop::AllEvents, 100);
+
+    const auto* current = coordinator.currentConversationModel();
+    QVERIFY(current);
+    QCOMPARE(current->turn(turnId)->state, Rag::RagTurnState::Generating);
+    QCOMPARE(current->turn(turnId)->answerText, QString());
+
+    fake->task->finish(QStringLiteral("second"));
+    QVERIFY(waitFor([&coordinator, &turnId]() {
+        const auto* conversation = coordinator.currentConversationModel();
+        const auto* turn = conversation ? conversation->turn(turnId) : nullptr;
+        return turn && turn->state == Rag::RagTurnState::Ready;
+    }));
+    QCOMPARE(coordinator.currentConversationModel()->turn(turnId)->answerText,
+             QStringLiteral("second"));
+}
+
+void TestRagCoordinator::conversationIsPerDocument() {
+    qunsetenv("READIUM_OLLAMA_EMBED_MODEL");
+    qunsetenv("READIUM_OLLAMA_EMBED_VERSION");
+
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString documentA =
+        writePdf(directory.filePath(QStringLiteral("conv-a.pdf")),
+                 QStringLiteral("alpha evidence for document a"));
+    const QString documentB =
+        writePdf(directory.filePath(QStringLiteral("conv-b.pdf")),
+                 QStringLiteral("beta evidence for document b"));
+
+    DocumentModel model;
+    auto fake = std::make_shared<FakeChatState>();
+    Rag::RagDocumentCoordinator coordinator(
+        &model, directory.filePath(QStringLiteral("rag.sqlite")), nullptr,
+        [fake]() -> std::unique_ptr<Rag::ChatProvider> {
+            return std::make_unique<FakeChatProvider>(fake);
+        },
+        {}, settingsWith(QStringLiteral("fake-chat"), true));
+
+    auto waitFor = [](auto predicate) {
+        QElapsedTimer timer;
+        timer.start();
+        while (timer.elapsed() < 20000) {
+            if (predicate()) {
+                return true;
+            }
+            QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+            QTest::qWait(10);
+        }
+        return false;
+    };
+    auto waitReady = [&coordinator, &waitFor]() {
+        return waitFor([&coordinator]() {
+            return coordinator.currentSnapshot().isReady();
+        });
+    };
+    auto askAndFinish = [&coordinator, &fake, &waitFor](const QString& query) {
+        fake->task = nullptr;
+        coordinator.queryCurrentDocument(query);
+        if (!waitFor([&fake]() { return !fake->task.isNull(); })) {
+            return false;
+        }
+        fake->task->finish(QStringLiteral("answer"));
+        return waitFor([&coordinator]() {
+            const auto* conversation = coordinator.currentConversationModel();
+            return conversation && !conversation->isEmpty() &&
+                   conversation->turns().last().state ==
+                       Rag::RagTurnState::Ready;
+        });
+    };
+
+    QSignalSpy openedA(&model, &DocumentModel::documentOpened);
+    QVERIFY(model.openFromFile(documentA));
+    QTRY_COMPARE_WITH_TIMEOUT(openedA.count(), 1, 20000);
+    QVERIFY(waitReady());
+    QVERIFY(askAndFinish(QStringLiteral("alpha")));
+
+    QSignalSpy openedB(&model, &DocumentModel::documentOpened);
+    QVERIFY(model.openFromFile(documentB));
+    QTRY_COMPARE_WITH_TIMEOUT(openedB.count(), 1, 20000);
+    QVERIFY(waitReady());
+    QVERIFY(askAndFinish(QStringLiteral("beta")));
+
+    model.switchToDocument(0);
+    QVERIFY(waitFor([&coordinator]() {
+        return coordinator.currentConversationModel() != nullptr;
+    }));
+    QCOMPARE(coordinator.currentConversationModel()->count(), 1);
+    QCOMPARE(coordinator.currentConversationModel()->turns().first().question,
+             QStringLiteral("alpha"));
+
+    model.switchToDocument(1);
+    QVERIFY(waitFor([&coordinator]() {
+        return coordinator.currentConversationModel() != nullptr;
+    }));
+    QCOMPARE(coordinator.currentConversationModel()->count(), 1);
+    QCOMPARE(coordinator.currentConversationModel()->turns().first().question,
+             QStringLiteral("beta"));
+
+    coordinator.clearConversation();
+    QVERIFY(coordinator.currentConversationModel()->isEmpty());
 }
 
 QTEST_MAIN(TestRagCoordinator)

@@ -102,56 +102,101 @@ RagDocumentSnapshot RagDocumentCoordinator::currentSnapshot() const {
 
 void RagDocumentCoordinator::queryCurrentDocument(const QString& query,
                                                   int limit) {
+    askQuestion(query, limit);
+}
+
+void RagDocumentCoordinator::askQuestion(const QString& question, int limit) {
     invalidateQueries();
-    m_lastQuery = query;
+    m_lastQuery = question;
     m_lastEvidence.clear();
     const RagDocumentSnapshot snapshot = currentSnapshot();
-    if (!snapshot.isReady()) {
+    if (!snapshot.isReady() || m_currentPath.isEmpty()) {
         emit answerBusyChanged(false);
         emit queryFailed(QStringLiteral("The current document is not indexed"));
         return;
     }
+    Entry& entry = m_entries[m_currentPath];
+    ensureConversation(entry, m_currentPath);
+    RagConversationTurn turn;
+    turn.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    turn.question = question;
+    turn.state = RagTurnState::Retrieving;
+    const int index = entry.conversation->appendTurn(std::move(turn));
+    const QString turnId = entry.conversation->turns().at(index).id;
+    setActiveTurn(turnId, 0);
+    persistConversation(m_currentPath);
+    emit conversationBusyChanged(true);
+    startRetrieval(turnId, question, limit);
+}
 
+void RagDocumentCoordinator::startRetrieval(const QString& turnId,
+                                            const QString& question,
+                                            int limit) {
+    const RagDocumentSnapshot snapshot = currentSnapshot();
+    if (!snapshot.isReady() || !isActiveTurn(turnId, 0)) {
+        emit answerBusyChanged(false);
+        return;
+    }
     const quint64 queryGeneration = ++m_queryGeneration;
     emit answerBusyChanged(true);
     emit evidenceReady({});
     m_queryCancellation = {};
     const RagCancellationToken queryCancellation = m_queryCancellation;
+    const QString path = m_currentPath;
+    const QString documentHash = snapshot.key.contentHash;
     auto* watcher = new QFutureWatcher<QueryJobResult>(this);
     connect(watcher, &QFutureWatcher<QueryJobResult>::finished, this,
-            [this, watcher, query]() {
+            [this, watcher, turnId, path, documentHash]() {
                 const QueryJobResult result = watcher->result();
                 watcher->deleteLater();
-                const RagDocumentSnapshot snapshot = currentSnapshot();
                 if (result.generation != m_queryGeneration ||
-                    snapshot.filePath != result.documentPath ||
-                    snapshot.key.contentHash != result.documentHash) {
+                    !isActiveTurn(turnId, 0)) {
                     return;
                 }
+                auto it = m_entries.find(path);
+                if (it == m_entries.end() || !it->conversation ||
+                    it->snapshot.key.contentHash != documentHash) {
+                    return;
+                }
+                RagConversationModel& model = *it->conversation;
                 if (result.indexMissing) {
                     m_lastEvidence.clear();
-                    // Start the rebuild first: startIndexing() emits
-                    // answerReset(), so the panel message must be emitted
-                    // afterwards or it would be cleared immediately.
+                    model.setFailure(turnId, RagChatFailure::Unknown,
+                                     QStringLiteral("索引已丢失，正在重建"));
+                    model.setState(turnId, RagTurnState::Failed);
+                    clearActiveTurn();
                     startIndexing(result.documentPath, true);
                     emit answerBusyChanged(false);
+                    emit conversationBusyChanged(false);
                     emit queryFailed(QStringLiteral("索引已丢失，正在重建"));
                     return;
                 }
                 if (!result.error.isEmpty()) {
                     m_lastEvidence.clear();
+                    model.setFailure(turnId, RagChatFailure::Unknown,
+                                     result.error);
+                    model.setState(turnId, RagTurnState::Failed);
+                    clearActiveTurn();
                     emit answerBusyChanged(false);
+                    emit conversationBusyChanged(false);
                     emit queryFailed(result.error);
                     return;
                 }
+                model.setEvidence(turnId, result.evidence);
                 m_lastEvidence = result.evidence;
                 emit evidenceReady(result.evidence);
                 if (result.evidence.isEmpty()) {
-                    // No evidence means there is nothing to answer from.
+                    model.setFailure(turnId, RagChatFailure::None,
+                                     QStringLiteral("没有找到足够相关的证据"));
+                    model.setState(turnId, RagTurnState::Failed);
+                    clearActiveTurn();
+                    persistConversation(path);
                     emit answerBusyChanged(false);
+                    emit conversationBusyChanged(false);
                     return;
                 }
-                generateAnswer(query, result.evidence);
+                model.setState(turnId, RagTurnState::Generating);
+                startGeneration(turnId);
             });
 
     const QString databasePath = m_databasePath;
@@ -164,7 +209,7 @@ void RagDocumentCoordinator::queryCurrentDocument(const QString& query,
         m_embeddingProviderFactory;
     watcher->setFuture(
         QtConcurrent::run([databasePath, document = snapshot.key,
-                           documentPath = snapshot.filePath, query, limit,
+                           documentPath = snapshot.filePath, question, limit,
                            queryGeneration, queryCancellation, embeddingsReady,
                            embeddingProviderFactory, settings]() {
             QueryJobResult result;
@@ -204,7 +249,7 @@ void RagDocumentCoordinator::queryCurrentDocument(const QString& query,
                 }
             }
             result.evidence = retriever.retrieve(
-                store, document, query, limit, provider.get(),
+                store, document, question, limit, provider.get(),
                 queryCancellation, &result.error);
             if (!result.error.isEmpty()) {
                 return result;
@@ -274,6 +319,7 @@ void RagDocumentCoordinator::onCurrentDocumentChanged(int index) {
     m_currentPath = normalizedPath(pathForIndex(index));
     if (m_currentPath.isEmpty()) {
         emit currentDocumentStateChanged({});
+        emit conversationModelChanged(nullptr);
         return;
     }
     if (!m_entries.contains(m_currentPath)) {
@@ -281,6 +327,8 @@ void RagDocumentCoordinator::onCurrentDocumentChanged(int index) {
     } else {
         publish(m_currentPath);
     }
+    ensureConversation(m_entries[m_currentPath], m_currentPath);
+    emit conversationModelChanged(currentConversationModel());
 }
 
 void RagDocumentCoordinator::onAllDocumentsClosed() {
@@ -288,6 +336,7 @@ void RagDocumentCoordinator::onAllDocumentsClosed() {
     clearRetryState();
     m_currentPath.clear();
     emit currentDocumentStateChanged({});
+    emit conversationModelChanged(nullptr);
 }
 
 void RagDocumentCoordinator::startIndexing(const QString& filePath,
@@ -324,7 +373,10 @@ void RagDocumentCoordinator::startIndexing(const QString& filePath,
     entry.snapshot.failureReason = RagIndexFailureReason::None;
     entry.snapshot.chunkCount = 0;
     entry.snapshot.error.clear();
-    entry.conversation.clear();
+    if (entry.conversation) {
+        entry.conversation->clear();
+    }
+    m_conversationStore->remove(path);
     entry.snapshot.embeddingState = RagEmbeddingState::Disabled;
     entry.snapshot.embeddingIdentity = {};
     entry.snapshot.embeddedChunkCount = 0;
@@ -729,6 +781,7 @@ void RagDocumentCoordinator::publish(const QString& filePath) {
 }
 
 void RagDocumentCoordinator::abortInFlight() {
+    cancelActiveTurn(RagTurnState::Cancelled);
     ++m_queryGeneration;
     m_queryCancellation.cancel();
     m_queryCancellation = {};
@@ -746,30 +799,192 @@ void RagDocumentCoordinator::cancelActiveChat() {
     }
 }
 
+void RagDocumentCoordinator::cancelActiveTurn(RagTurnState terminal) {
+    if (!hasActiveTurn()) {
+        return;
+    }
+    const QString turnId = m_activeTurnId;
+    const QString path = m_currentPath;
+    m_queryCancellation.cancel();
+    m_queryCancellation = {};
+    ++m_queryGeneration;
+    cancelActiveChat();
+    auto it = m_entries.find(path);
+    if (it != m_entries.end() && it->conversation &&
+        it->conversation->turn(turnId)) {
+        it->conversation->setState(turnId, terminal);
+        persistConversation(path);
+    }
+    clearActiveTurn();
+    emit conversationBusyChanged(false);
+}
+
+bool RagDocumentCoordinator::hasActiveTurn() const {
+    return !m_activeTurnId.isEmpty();
+}
+
+bool RagDocumentCoordinator::isActiveTurn(const QString& turnId,
+                                          quint64 generation) const {
+    return hasActiveTurn() && m_activeTurnId == turnId &&
+           m_activeTurnGeneration == generation;
+}
+
+void RagDocumentCoordinator::setActiveTurn(const QString& turnId,
+                                           quint64 generation) {
+    m_activeTurnId = turnId;
+    m_activeTurnGeneration = generation;
+}
+
+void RagDocumentCoordinator::clearActiveTurn() {
+    m_activeTurnId.clear();
+    m_activeTurnGeneration = 0;
+}
+
 void RagDocumentCoordinator::invalidateQueries() {
     abortInFlight();
     m_validCitations.clear();
     emit answerReset();
 }
 
-void RagDocumentCoordinator::cancelAnswer() { invalidateQueries(); }
+void RagDocumentCoordinator::cancelAnswer() { stopActiveTurn(); }
 
-void RagDocumentCoordinator::retryAnswer() {
-    if (!m_settings.answerEnabled || m_lastEvidence.isEmpty() ||
-        m_lastQuery.trimmed().isEmpty()) {
+void RagDocumentCoordinator::stopActiveTurn() {
+    if (!hasActiveTurn()) {
+        invalidateQueries();
         return;
     }
-    cancelActiveChat();
+    cancelActiveTurn(RagTurnState::Cancelled);
+    m_validCitations.clear();
+    emit answerReset();
+    emit answerBusyChanged(false);
+    emit conversationBusyChanged(false);
+}
+
+void RagDocumentCoordinator::clearConversation() {
+    cancelActiveTurn(RagTurnState::Cancelled);
+    auto it = m_entries.find(m_currentPath);
+    if (it != m_entries.end() && it->conversation) {
+        it->conversation->clear();
+    }
+    if (!m_currentPath.isEmpty()) {
+        m_conversationStore->remove(m_currentPath);
+    }
+    m_lastEvidence.clear();
+    m_validCitations.clear();
+    emit answerReset();
+    emit answerBusyChanged(false);
+    emit conversationBusyChanged(false);
+}
+
+RagConversationModel* RagDocumentCoordinator::currentConversationModel() const {
+    auto it = m_entries.constFind(m_currentPath);
+    if (it == m_entries.constEnd() || !it->conversation) {
+        return nullptr;
+    }
+    return it->conversation.get();
+}
+
+void RagDocumentCoordinator::ensureConversation(Entry& entry,
+                                                const QString& path) {
+    if (entry.conversation) {
+        return;
+    }
+    entry.conversation = std::make_shared<RagConversationModel>();
+    const QVector<RagConversationTurn> stored = m_conversationStore->load(path);
+    for (const RagConversationTurn& turn : stored) {
+        entry.conversation->appendTurn(turn);
+    }
+}
+
+void RagDocumentCoordinator::persistConversation(const QString& path) {
+    auto it = m_entries.find(path);
+    if (it == m_entries.end() || !it->conversation) {
+        return;
+    }
+    m_conversationStore->save(path, it->conversation->turns());
+}
+
+void RagDocumentCoordinator::regenerateTurn(const QString& turnIdRef) {
+    const QString turnId = turnIdRef;
+    auto it = m_entries.find(m_currentPath);
+    if (it == m_entries.end() || !it->conversation) {
+        return;
+    }
+    const int index = it->conversation->indexOf(turnId);
+    if (index < 0) {
+        return;
+    }
+    it->conversation->truncateAfter(index);
+    cancelActiveTurn(RagTurnState::Cancelled);
+    const RagConversationTurn* current = it->conversation->turn(turnId);
+    if (!current) {
+        return;
+    }
+    const quint64 generation = current->generation + 1;
+    const bool needsRetrieval = current->evidence.isEmpty();
+    const QString question = current->question;
+    it->conversation->updateTurn(
+        turnId, [generation, needsRetrieval](RagConversationTurn& turn) {
+            turn.generation = generation;
+            turn.answerText.clear();
+            turn.citations.clear();
+            turn.failure = RagChatFailure::None;
+            turn.error.clear();
+            turn.promptTokens.reset();
+            turn.state = needsRetrieval ? RagTurnState::Retrieving
+                                        : RagTurnState::Generating;
+        });
+    persistConversation(m_currentPath);
+    if (needsRetrieval) {
+        setActiveTurn(turnId, 0);
+        emit conversationBusyChanged(true);
+        startRetrieval(turnId, question, 10);
+        return;
+    }
+    setActiveTurn(turnId, generation);
     emit answerReset();
     emit answerBusyChanged(true);
-    generateAnswer(m_lastQuery, m_lastEvidence);
+    emit conversationBusyChanged(true);
+    startGeneration(turnId);
+}
+
+void RagDocumentCoordinator::retryAnswer() {
+    auto it = m_entries.find(m_currentPath);
+    if (it == m_entries.end() || !it->conversation ||
+        it->conversation->isEmpty()) {
+        return;
+    }
+    const QString turnId = it->conversation->turns().last().id;
+    regenerateTurn(turnId);
 }
 
 void RagDocumentCoordinator::retryQuery() {
-    if (m_lastQuery.trimmed().isEmpty()) {
+    cancelActiveTurn(RagTurnState::Cancelled);
+    auto it = m_entries.find(m_currentPath);
+    if (it == m_entries.end() || !it->conversation ||
+        it->conversation->isEmpty()) {
+        if (!m_lastQuery.trimmed().isEmpty()) {
+            askQuestion(m_lastQuery);
+        }
         return;
     }
-    queryCurrentDocument(m_lastQuery);
+    const QString turnId = it->conversation->turns().last().id;
+    const RagConversationTurn* current = it->conversation->turn(turnId);
+    if (!current) {
+        return;
+    }
+    const QString question = current->question;
+    it->conversation->updateTurn(turnId, [](RagConversationTurn& turn) {
+        turn.state = RagTurnState::Retrieving;
+        turn.evidence.clear();
+        turn.answerText.clear();
+        turn.citations.clear();
+        turn.failure = RagChatFailure::None;
+        turn.error.clear();
+    });
+    setActiveTurn(turnId, 0);
+    emit conversationBusyChanged(true);
+    startRetrieval(turnId, question, 10);
 }
 
 void RagDocumentCoordinator::clearRetryState() {
@@ -803,7 +1018,11 @@ void RagDocumentCoordinator::applySettings(const RagSettings& settings) {
     for (auto it = m_entries.begin(); it != m_entries.end(); ++it) {
         Entry& entry = *it;
         if (chatModelChanged) {
-            entry.conversation.clear();
+            if (entry.conversation) {
+                entry.conversation->keepOnly(
+                    it.key() == m_currentPath ? m_activeTurnId : QString());
+            }
+            m_conversationStore->remove(it.key());
         }
         const bool embeddingWasActive =
             entry.snapshot.embeddingState == RagEmbeddingState::Pending ||
@@ -854,7 +1073,10 @@ void RagDocumentCoordinator::deleteCurrentDocumentIndex() {
     ++it->snapshot.generation;
     invalidateQueries();
     clearRetryState();
-    it->conversation.clear();
+    if (it->conversation) {
+        it->conversation->clear();
+    }
+    m_conversationStore->remove(it.key());
     it->snapshot.state = RagIndexState::NotIndexed;
     it->snapshot.failureReason = RagIndexFailureReason::None;
     it->snapshot.processedPages = 0;
@@ -973,7 +1195,10 @@ void RagDocumentCoordinator::clearAllIndexes() {
                 emit indexClearFailed(error);
             } else {
                 for (auto it = m_entries.begin(); it != m_entries.end(); ++it) {
-                    it->conversation.clear();
+                    if (it->conversation) {
+                        it->conversation->clear();
+                    }
+                    m_conversationStore->remove(it.key());
                     it->snapshot.state = RagIndexState::NotIndexed;
                     it->snapshot.failureReason = RagIndexFailureReason::None;
                     it->snapshot.processedPages = 0;
@@ -1021,78 +1246,101 @@ std::unique_ptr<ChatProvider> RagDocumentCoordinator::createChatProvider()
                                                 QUrl(m_settings.chatUrl()));
 }
 
-void RagDocumentCoordinator::generateAnswer(
-    const QString& question, const QVector<RagEvidence>& evidence) {
-    auto provider = createChatProvider();
-    if (!provider) {
-        emit answerBusyChanged(false);
+void RagDocumentCoordinator::startGeneration(const QString& turnId) {
+    auto it = m_entries.find(m_currentPath);
+    if (it == m_entries.end() || !it->conversation) {
         return;
     }
-    const auto snapshot = currentSnapshot();
+    const RagConversationTurn* current = it->conversation->turn(turnId);
+    if (!current) {
+        return;
+    }
+    const RagConversationTurn turn = *current;
+    auto provider = createChatProvider();
+    if (!provider) {
+        it->conversation->setState(turnId, RagTurnState::Ready);
+        clearActiveTurn();
+        persistConversation(m_currentPath);
+        emit answerBusyChanged(false);
+        emit conversationBusyChanged(false);
+        return;
+    }
     const ChatBudget budget;
     const auto request = ContextAssembler::assembleBudgeted(
-        question, evidence, m_entries.value(m_currentPath).conversation,
-        budget);
+        turn.question, turn.evidence,
+        conversationFromTurns(it->conversation->turns()), budget);
     if (!request.assemblyError.isEmpty()) {
+        it->conversation->setFailure(turnId, RagChatFailure::BudgetEvidence,
+                                     request.assemblyError);
+        it->conversation->setState(turnId, RagTurnState::Failed);
+        clearActiveTurn();
+        persistConversation(m_currentPath);
         emit answerReset();
         emit answerFailed(request.assemblyError);
         emit answerBusyChanged(false);
+        emit conversationBusyChanged(false);
         return;
     }
     if (request.evidence.isEmpty()) {
-        emit answerReady({QStringLiteral("文档中没有足够的检索依据。"), {}});
+        it->conversation->setFailure(
+            turnId, RagChatFailure::None,
+            QStringLiteral("文档中没有足够的检索依据。"));
+        it->conversation->setState(turnId, RagTurnState::Failed);
+        clearActiveTurn();
+        persistConversation(m_currentPath);
         emit answerBusyChanged(false);
+        emit conversationBusyChanged(false);
         return;
-    }
-    if (!request.skippedEvidenceIds.isEmpty() ||
-        request.droppedHistoryTurns > 0) {
-        LOG_DEBUG(
-            "RAG: chat budget skipped {} evidence blocks, dropped {} "
-            "history turns, estimated input tokens {}",
-            request.skippedEvidenceIds.size(), request.droppedHistoryTurns,
-            request.estimatedInputTokens);
     }
     auto* task = provider->generate(request, this);
     m_chatTask = task;
-    const quint64 generation = m_queryGeneration;
     const quint64 chatGeneration = ++m_chatGeneration;
+    const quint64 turnGeneration = turn.generation;
     const QString path = m_currentPath;
     connect(task, &ChatTask::deltaReceived, this,
-            [this, generation, chatGeneration](const QString& text) {
-                if (generation == m_queryGeneration &&
-                    chatGeneration == m_chatGeneration) {
-                    emit answerDelta(text);
-                }
-            });
-    connect(task, &ChatTask::promptEvaluated, this,
-            [this, generation, chatGeneration, request](int tokens) {
-                if (generation != m_queryGeneration ||
-                    chatGeneration != m_chatGeneration) {
+            [this, turnId, turnGeneration, chatGeneration,
+             path](const QString& text) {
+                if (chatGeneration != m_chatGeneration ||
+                    !isActiveTurn(turnId, turnGeneration)) {
                     return;
                 }
-                // The estimator is a byte bound; the service reports the real
-                // tokenizer count. A larger actual value means the bound must
-                // be tightened before the next answer.
-                if (qint64(tokens) > request.estimatedInputTokens) {
-                    LOG_WARNING("RAG: prompt tokens {} exceed estimate {}",
-                                tokens, request.estimatedInputTokens);
-                } else {
-                    LOG_DEBUG("RAG: prompt tokens {} estimated {} (num_ctx {})",
-                              tokens, request.estimatedInputTokens,
-                              request.contextWindowTokens);
+                auto entry = m_entries.find(path);
+                if (entry == m_entries.end() || !entry->conversation) {
+                    return;
+                }
+                entry->conversation->appendAnswerDelta(turnId, text);
+                emit answerDelta(text);
+            });
+    connect(task, &ChatTask::promptEvaluated, this,
+            [this, turnId, turnGeneration, chatGeneration, path](int tokens) {
+                if (chatGeneration != m_chatGeneration ||
+                    !isActiveTurn(turnId, turnGeneration)) {
+                    return;
+                }
+                auto entry = m_entries.find(path);
+                if (entry != m_entries.end() && entry->conversation) {
+                    entry->conversation->setPromptTokens(turnId, tokens);
                 }
             });
     connect(task, &ChatTask::completed, this,
-            [this, task, generation, chatGeneration, path, request,
-             snapshot](const QString& text) {
+            [this, task, turnId, turnGeneration, chatGeneration, path,
+             request](const QString& text) {
                 task->deleteLater();
-                if (generation != m_queryGeneration ||
-                    chatGeneration != m_chatGeneration) {
+                if (chatGeneration != m_chatGeneration ||
+                    !isActiveTurn(turnId, turnGeneration)) {
                     return;
                 }
                 m_chatTask = nullptr;
+                auto entry = m_entries.find(path);
+                if (entry == m_entries.end() || !entry->conversation) {
+                    return;
+                }
+                const RagDocumentSnapshot snapshot = entry->snapshot;
                 auto answer = CitationValidator::validate(
                     text, request.evidence, snapshot.key.contentHash);
+                entry->conversation->setAnswer(turnId, answer.text,
+                                               answer.citations);
+                entry->conversation->setState(turnId, RagTurnState::Ready);
                 m_validCitations.clear();
                 for (const auto& citation : answer.citations) {
                     for (const auto& item : request.evidence) {
@@ -1103,27 +1351,44 @@ void RagDocumentCoordinator::generateAnswer(
                         }
                     }
                 }
-                auto it = m_entries.find(path);
-                if (it != m_entries.end()) {
-                    it->conversation.append(request.question.left(2000));
-                    it->conversation.append(answer.text.left(4000));
-                    while (it->conversation.size() > 6)
-                        it->conversation.removeFirst();
-                }
+                m_lastEvidence = request.evidence;
+                persistConversation(path);
+                clearActiveTurn();
                 emit answerReady(answer);
                 emit answerBusyChanged(false);
+                emit conversationBusyChanged(false);
             });
     connect(task, &ChatTask::failed, this,
-            [this, task, generation, chatGeneration](const QString& error) {
+            [this, task, turnId, turnGeneration, chatGeneration](
+                RagChatFailure failure, const QString& error) {
                 task->deleteLater();
-                if (generation != m_queryGeneration ||
-                    chatGeneration != m_chatGeneration) {
+                if (chatGeneration != m_chatGeneration ||
+                    !isActiveTurn(turnId, turnGeneration)) {
                     return;
                 }
                 m_chatTask = nullptr;
+                auto entry = m_entries.find(m_currentPath);
+                if (entry != m_entries.end() && entry->conversation) {
+                    if (failure == RagChatFailure::Cancelled) {
+                        entry->conversation->setState(turnId,
+                                                      RagTurnState::Cancelled);
+                    } else {
+                        entry->conversation->setFailure(turnId, failure, error);
+                        entry->conversation->setState(turnId,
+                                                      RagTurnState::Failed);
+                    }
+                    persistConversation(m_currentPath);
+                }
+                clearActiveTurn();
+                if (failure == RagChatFailure::Cancelled) {
+                    emit answerBusyChanged(false);
+                    emit conversationBusyChanged(false);
+                    return;
+                }
                 emit answerReset();
                 emit answerFailed(error);
                 emit answerBusyChanged(false);
+                emit conversationBusyChanged(false);
             });
     task->start();
 }
