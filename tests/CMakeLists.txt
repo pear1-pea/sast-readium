@@ -267,10 +267,16 @@ target_sources(test_rag_p3 PRIVATE
     ../app/rag/chat/ContextAssembler.cpp
     ../app/rag/chat/OllamaChatProvider.cpp
     ../app/rag/embedding/OllamaEmbeddingProvider.cpp
+    ../app/rag/controller/RagConversationModel.cpp
+    ../app/rag/controller/RagConversationModel.h
+    ../app/rag/ui/AskPdfConversationView.cpp
+    ../app/rag/ui/AskPdfConversationView.h
     ../app/rag/ui/AskPdfProgress.cpp
     ../app/rag/ui/AskPdfProgress.h
     ../app/rag/ui/AskPdfState.cpp
     ../app/rag/ui/AskPdfState.h
+    ../app/rag/ui/AskPdfTurnCard.cpp
+    ../app/rag/ui/AskPdfTurnCard.h
     ../app/rag/ui/AskPdfWidget.cpp
     ../app/rag/ui/AskPdfWidget.h)
 target_link_libraries(test_rag_p3 PRIVATE Qt6::Network)

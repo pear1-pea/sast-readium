@@ -4,6 +4,7 @@
 #include <QJsonObject>
 #include <QLabel>
 #include <QListWidget>
+#include <QPlainTextEdit>
 #include <QProgressBar>
 #include <QPushButton>
 #include <QSignalSpy>
@@ -13,9 +14,13 @@
 #include <QtTest>
 #include "rag/chat/ContextAssembler.h"
 #include "rag/chat/OllamaChatProvider.h"
+#include "rag/controller/RagConversationModel.h"
+#include "rag/domain/RagConversation.h"
 #include "rag/embedding/OllamaEmbeddingProvider.h"
+#include "rag/ui/AskPdfConversationView.h"
 #include "rag/ui/AskPdfProgress.h"
 #include "rag/ui/AskPdfState.h"
+#include "rag/ui/AskPdfTurnCard.h"
 #include "rag/ui/AskPdfWidget.h"
 using namespace Rag;
 class TestRagP3 : public QObject {
@@ -26,11 +31,15 @@ private slots:
     void askPdfProgressCopy();
     void askPdfStatusTextCopy();
     void progressBarReflectsIndexing();
+    void turnCardActions();
+    void conversationViewFollowsModel();
+    void askPdfWidgetSubmitsAndClearsConversation();
     void statusAndSettingsButton();
     void citationLabels() {
-        AskPdfWidget widget;
-        RagAnswer answer;
-        answer.text = "answer";
+        RagConversationTurn turn;
+        turn.id = "turn_a";
+        turn.state = RagTurnState::Ready;
+        turn.answerText = "answer";
 
         RagCitation first;
         first.chunkId = "chunk_a";
@@ -38,17 +47,17 @@ private slots:
         first.pageEnd = 11;
         first.sectionPath = "Methods";
         first.snippet = "Alpha evidence";
-        answer.citations.append(first);
+        turn.citations.append(first);
 
         RagCitation second;
         second.chunkId = "chunk_b";
         second.pageStart = 20;
         second.pageEnd = 21;
         second.snippet = "Beta evidence";
-        answer.citations.append(second);
+        turn.citations.append(second);
 
-        widget.setAnswer(answer);
-        auto* list = widget.findChild<QListWidget*>("citationList");
+        AskPdfTurnCard card(turn);
+        auto* list = card.findChild<QListWidget*>("turnCitationList");
         QVERIFY(list);
         QCOMPARE(list->count(), 2);
         QVERIFY(list->item(0)->text().contains("第 12 页"));
@@ -674,6 +683,130 @@ void TestRagP3::progressBarReflectsIndexing() {
                          RagEmbeddingState::Ready, 100, {},
                          RagIndexFailureReason::None, 12, 12);
     QVERIFY(!bar->isVisibleTo(&widget));
+}
+
+void TestRagP3::turnCardActions() {
+    RagConversationTurn turn;
+    turn.id = QStringLiteral("turn-a");
+    turn.state = RagTurnState::Ready;
+    turn.question = QStringLiteral("question");
+    turn.answerText = QStringLiteral("answer");
+
+    AskPdfTurnCard card(turn);
+    auto* copy = card.findChild<QPushButton*>(QStringLiteral("turnCopyButton"));
+    auto* regenerate =
+        card.findChild<QPushButton*>(QStringLiteral("turnRegenerateButton"));
+    auto* stop = card.findChild<QPushButton*>(QStringLiteral("turnStopButton"));
+    auto* retry =
+        card.findChild<QPushButton*>(QStringLiteral("turnRetryButton"));
+    QVERIFY(copy);
+    QVERIFY(regenerate);
+    QVERIFY(stop);
+    QVERIFY(retry);
+
+    QSignalSpy copySpy(&card, &AskPdfTurnCard::copyRequested);
+    QSignalSpy regenerateSpy(&card, &AskPdfTurnCard::regenerateRequested);
+    QSignalSpy stopSpy(&card, &AskPdfTurnCard::stopRequested);
+
+    QVERIFY(copy->isVisibleTo(&card));
+    copy->click();
+    QCOMPARE(copySpy.count(), 1);
+    QCOMPARE(copySpy.first().first().toString(), QStringLiteral("answer"));
+
+    QVERIFY(regenerate->isVisibleTo(&card));
+    regenerate->click();
+    QCOMPARE(regenerateSpy.count(), 1);
+    QCOMPARE(regenerateSpy.first().first().toString(),
+             QStringLiteral("turn-a"));
+
+    turn.state = RagTurnState::Generating;
+    card.setTurn(turn);
+    QVERIFY(stop->isVisibleTo(&card));
+    stop->click();
+    QCOMPARE(stopSpy.count(), 1);
+
+    turn.state = RagTurnState::Failed;
+    turn.error = QStringLiteral("boom");
+    card.setTurn(turn);
+    QVERIFY(retry->isVisibleTo(&card));
+    QVERIFY(!stop->isVisibleTo(&card));
+    retry->click();
+    QCOMPARE(regenerateSpy.count(), 2);
+}
+
+void TestRagP3::conversationViewFollowsModel() {
+    RagConversationModel model;
+    AskPdfConversationView view;
+    view.setModel(&model);
+    QVERIFY(view.findChildren<AskPdfTurnCard*>().isEmpty());
+
+    RagConversationTurn turn;
+    turn.id = QStringLiteral("turn-a");
+    turn.question = QStringLiteral("question");
+    turn.state = RagTurnState::Retrieving;
+    model.appendTurn(turn);
+    const auto cards = view.findChildren<AskPdfTurnCard*>();
+    QCOMPARE(cards.size(), 1);
+    auto* status =
+        cards.first()->findChild<QLabel*>(QStringLiteral("turnStatus"));
+    QVERIFY(status);
+    QVERIFY(status->text().contains(QStringLiteral("检索")));
+
+    model.updateTurn(QStringLiteral("turn-a"), [](RagConversationTurn& value) {
+        value.state = RagTurnState::Ready;
+        value.answerText = QStringLiteral("answer");
+    });
+    auto* answer =
+        cards.first()->findChild<QLabel*>(QStringLiteral("turnAnswer"));
+    QVERIFY(answer);
+    QCOMPARE(answer->text(), QStringLiteral("answer"));
+
+    model.clear();
+    QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+    QVERIFY(view.findChildren<AskPdfTurnCard*>().isEmpty());
+}
+
+void TestRagP3::askPdfWidgetSubmitsAndClearsConversation() {
+    AskPdfWidget widget;
+    DocumentKey document;
+    document.canonicalPath = QStringLiteral("/tmp/ask-pdf.pdf");
+    document.contentHash = QStringLiteral("ask-pdf-hash");
+    widget.setDocumentContext(document);
+    widget.setIndexState(RagIndexState::Ready, 3, {}, RagEmbeddingState::Ready,
+                         3, {});
+
+    auto* query =
+        widget.findChild<QPlainTextEdit*>(QStringLiteral("askPdfQuery"));
+    auto* send = widget.findChild<QPushButton*>(QStringLiteral("askPdfSend"));
+    auto* stop = widget.findChild<QToolButton*>(QStringLiteral("askPdfStop"));
+    auto* clear = widget.findChild<QToolButton*>(
+        QStringLiteral("askPdfClearConversation"));
+    QVERIFY(query);
+    QVERIFY(send);
+    QVERIFY(stop);
+    QVERIFY(clear);
+
+    QSignalSpy questionSpy(&widget, &AskPdfWidget::questionSubmitted);
+    QSignalSpy clearSpy(&widget, &AskPdfWidget::clearConversationRequested);
+
+    query->setPlainText(QStringLiteral("what is the conclusion?"));
+    send->click();
+    QCOMPARE(questionSpy.count(), 1);
+    QCOMPARE(questionSpy.first().first().toString(),
+             QStringLiteral("what is the conclusion?"));
+    QVERIFY(query->toPlainText().isEmpty());
+
+    widget.setConversationBusy(true);
+    QVERIFY(query->isEnabled());
+    QVERIFY(!send->isEnabled());
+    QVERIFY(stop->isVisibleTo(&widget));
+
+    widget.setConversationBusy(false);
+    QVERIFY(send->isEnabled());
+    QVERIFY(!stop->isVisibleTo(&widget));
+
+    clear->click();
+    QCOMPARE(clearSpy.count(), 1);
 }
 
 void TestRagP3::statusAndSettingsButton() {

@@ -319,11 +319,10 @@ void MainWindow::initConnection() {
                         snapshot.embeddingError, snapshot.failureReason,
                         snapshot.processedPages, snapshot.totalPages);
                 });
-        connect(askWidget, &Rag::AskPdfWidget::querySubmitted, this,
-                [this, askWidget](const QString& query) {
+        connect(askWidget, &Rag::AskPdfWidget::questionSubmitted, this,
+                [this](const QString& question) {
                     if (m_ragCoordinator) {
-                        askWidget->setBusy(true);
-                        m_ragCoordinator->queryCurrentDocument(query);
+                        m_ragCoordinator->askQuestion(question);
                     }
                 });
         connect(askWidget, &Rag::AskPdfWidget::rebuildIndexRequested, this,
@@ -351,23 +350,32 @@ void MainWindow::initConnection() {
                     }
                     m_ragCoordinator->clearAllIndexes();
                 });
-        connect(m_ragCoordinator, &Rag::RagDocumentCoordinator::evidenceReady,
-                this, [askWidget](const QVector<Rag::RagEvidence>& evidence) {
-                    askWidget->setEvidence(evidence);
-                });
-        connect(m_ragCoordinator, &Rag::RagDocumentCoordinator::answerReset,
-                askWidget, &Rag::AskPdfWidget::resetAnswer);
-        connect(m_ragCoordinator, &Rag::RagDocumentCoordinator::answerDelta,
-                askWidget, &Rag::AskPdfWidget::appendAnswer);
-        connect(m_ragCoordinator, &Rag::RagDocumentCoordinator::answerReady,
-                askWidget, &Rag::AskPdfWidget::setAnswer);
-        connect(m_ragCoordinator, &Rag::RagDocumentCoordinator::answerFailed,
-                askWidget, &Rag::AskPdfWidget::setAnswerError);
         connect(m_ragCoordinator,
-                &Rag::RagDocumentCoordinator::answerBusyChanged, askWidget,
-                &Rag::AskPdfWidget::setBusy);
-        connect(askWidget, &Rag::AskPdfWidget::cancelAnswerRequested,
-                m_ragCoordinator, &Rag::RagDocumentCoordinator::cancelAnswer);
+                &Rag::RagDocumentCoordinator::conversationModelChanged, this,
+                [askWidget](Rag::RagConversationModel* model) {
+                    askWidget->setConversationModel(model);
+                });
+        connect(m_ragCoordinator,
+                &Rag::RagDocumentCoordinator::conversationBusyChanged,
+                askWidget, &Rag::AskPdfWidget::setConversationBusy);
+        connect(askWidget, &Rag::AskPdfWidget::regenerateTurnRequested,
+                m_ragCoordinator, &Rag::RagDocumentCoordinator::regenerateTurn);
+        connect(askWidget, &Rag::AskPdfWidget::stopGenerationRequested,
+                m_ragCoordinator, &Rag::RagDocumentCoordinator::stopActiveTurn);
+        connect(
+            askWidget, &Rag::AskPdfWidget::clearConversationRequested, this,
+            [this]() {
+                if (!m_ragCoordinator) {
+                    return;
+                }
+                if (QMessageBox::question(
+                        this, tr("清空对话"),
+                        tr("确定清空当前文档的对话吗？本地索引不会受影响。")) !=
+                    QMessageBox::Yes) {
+                    return;
+                }
+                m_ragCoordinator->clearConversation();
+            });
         connect(askWidget, &Rag::AskPdfWidget::citationActivated,
                 m_ragCoordinator,
                 &Rag::RagDocumentCoordinator::activateCitation);
@@ -392,9 +400,7 @@ void MainWindow::initConnection() {
                 QMessageBox::warning(this, tr("清空 Ask PDF 索引失败"), error);
             });
         connect(m_ragCoordinator, &Rag::RagDocumentCoordinator::queryFailed,
-                this, [this, askWidget](const QString& error) {
-                    askWidget->setBusy(false);
-                    askWidget->setQueryError(error);
+                this, [this](const QString& error) {
                     if (statusBar) {
                         statusBar->setMessage(error);
                     }
@@ -536,6 +542,8 @@ void MainWindow::initConnection() {
         askWidget->setAnswerEnabled(m_ragCoordinator->settings().chatEnabled());
         askWidget->setEmbeddingEnabled(
             m_ragCoordinator->settings().embeddingsEnabled());
+        askWidget->setConversationModel(
+            m_ragCoordinator->currentConversationModel());
         connect(
             askWidget, &Rag::AskPdfWidget::settingsRequested, this,
             [this, askWidget]() {

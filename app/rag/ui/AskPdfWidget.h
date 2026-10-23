@@ -9,15 +9,17 @@
 #include "rag/ui/AskPdfState.h"
 
 class QLabel;
-class QLineEdit;
 class QListWidget;
 class QListWidgetItem;
+class QPlainTextEdit;
 class QProgressBar;
 class QPushButton;
 class QToolButton;
-class QPlainTextEdit;
 
 namespace Rag {
+
+class AskPdfConversationView;
+class RagConversationModel;
 
 class AskPdfWidget : public QWidget {
     Q_OBJECT
@@ -36,35 +38,38 @@ public:
     void setBusy(bool busy);
     void setClearing(bool clearing);
     void resetAnswer();
-    void appendAnswer(const QString& text);
-    void setAnswer(const RagAnswer& answer);
     void setAnswerError(const QString& error);
     void setQueryError(const QString& error);
     void setAnswerEnabled(bool enabled);
     void setEmbeddingEnabled(bool enabled);
+    void setConversationModel(RagConversationModel* model);
+    void setConversationBusy(bool busy);
 
 signals:
-    void querySubmitted(const QString& query);
+    void questionSubmitted(const QString& question);
     void evidenceActivated(const Rag::RagEvidence& evidence);
     void rebuildIndexRequested();
     void cancelIndexRequested();
-    void cancelAnswerRequested();
     void clearIndexRequested();
     void citationActivated(const QString& chunkId);
     void settingsRequested();
     void indexManagementRequested();
+    void regenerateTurnRequested(const QString& turnId);
+    void stopGenerationRequested();
+    void clearConversationRequested();
     void retryAnswerRequested();
     void retryQueryRequested();
 
+protected:
+    bool eventFilter(QObject* watched, QEvent* event) override;
+
 private:
     void submitQuery();
-    void activateItem(QListWidgetItem* item);
     void updateControlStates();
     void refreshStatusText();
     void refreshEmptyState();
     void refreshProgress();
     void clearEvidence();
-    void runStateAction(AskPdfStateAction action);
 
     DocumentKey m_document;
     RagIndexState m_state = RagIndexState::NotIndexed;
@@ -83,7 +88,11 @@ private:
     bool m_answerFailed = false;
     QString m_queryError;
     QString m_answerError;
+    bool m_busy = false;
+    bool m_conversationBusy = false;
+    bool m_clearing = false;
     QVector<RagEvidence> m_evidence;
+
     QLabel* m_documentLabel = nullptr;
     QLabel* m_statusLabel = nullptr;
     QProgressBar* m_progressBar = nullptr;
@@ -94,19 +103,16 @@ private:
     QPushButton* m_stateSecondary = nullptr;
     AskPdfStateAction m_primaryAction = AskPdfStateAction::None;
     AskPdfStateAction m_secondaryAction = AskPdfStateAction::None;
-    QLineEdit* m_queryEdit = nullptr;
-    QToolButton* m_submitButton = nullptr;
+    AskPdfConversationView* m_conversation = nullptr;
+    QPlainTextEdit* m_queryEdit = nullptr;
+    QPushButton* m_sendButton = nullptr;
+    QToolButton* m_stopButton = nullptr;
+    QToolButton* m_clearConversationButton = nullptr;
     QToolButton* m_rebuildButton = nullptr;
     QToolButton* m_cancelButton = nullptr;
     QToolButton* m_clearButton = nullptr;
     QToolButton* m_settingsButton = nullptr;
     QToolButton* m_indexButton = nullptr;
-    QListWidget* m_evidenceList = nullptr;
-    QPlainTextEdit* m_answerEdit = nullptr;
-    QListWidget* m_citationList = nullptr;
-    QToolButton* m_stopButton = nullptr;
-    bool m_busy = false;
-    bool m_clearing = false;
 };
 
 }  // namespace Rag
