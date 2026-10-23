@@ -187,6 +187,8 @@ private slots:
     void zeroEvidenceDoesNotGenerateAnswer();
     void retryAnswerUsesLastEvidence();
     void retryQueryRerunsSearch();
+    void indexProgressAndStats();
+    void deleteCurrentDocumentIndex();
     void embeddingFailureKeepsLexicalEvidence();
 };
 
@@ -882,6 +884,107 @@ void TestRagCoordinator::retryQueryRerunsSearch() {
     coordinator.retryQuery();
     QVERIFY(waitFor([&fake]() { return !fake->task.isNull(); }));
     QVERIFY(!fake->lastRequest.evidence.isEmpty());
+}
+
+void TestRagCoordinator::indexProgressAndStats() {
+    qunsetenv("READIUM_OLLAMA_EMBED_MODEL");
+    qunsetenv("READIUM_OLLAMA_EMBED_VERSION");
+
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString pdf =
+        writePdf(directory.filePath(QStringLiteral("stats.pdf")),
+                 QStringLiteral("alpha evidence for index statistics"));
+
+    DocumentModel model;
+    Rag::RagDocumentCoordinator coordinator(
+        &model, directory.filePath(QStringLiteral("rag.sqlite")));
+
+    auto waitFor = [](auto predicate) {
+        QElapsedTimer timer;
+        timer.start();
+        while (timer.elapsed() < 20000) {
+            if (predicate()) {
+                return true;
+            }
+            QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+            QTest::qWait(10);
+        }
+        return false;
+    };
+
+    QSignalSpy opened(&model, &DocumentModel::documentOpened);
+    QVERIFY(model.openFromFile(pdf));
+    QTRY_COMPARE_WITH_TIMEOUT(opened.count(), 1, 20000);
+    QVERIFY(waitFor(
+        [&coordinator]() { return coordinator.currentSnapshot().isReady(); }));
+    QVERIFY(coordinator.currentSnapshot().totalPages >= 1);
+
+    bool statsReady = false;
+    Rag::RagIndexStats stats;
+    connect(&coordinator, &Rag::RagDocumentCoordinator::indexStatsReady, this,
+            [&statsReady, &stats](const Rag::RagIndexStats& value) {
+                stats = value;
+                statsReady = true;
+            });
+    coordinator.requestIndexStats();
+    QVERIFY(waitFor([&statsReady]() { return statsReady; }));
+    QVERIFY(stats.documentCount >= 1);
+    QVERIFY(stats.current.chunkCount > 0);
+    QVERIFY(stats.current.textBytes > 0);
+    QVERIFY(stats.databaseBytes > 0);
+}
+
+void TestRagCoordinator::deleteCurrentDocumentIndex() {
+    qunsetenv("READIUM_OLLAMA_EMBED_MODEL");
+    qunsetenv("READIUM_OLLAMA_EMBED_VERSION");
+
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString pdf =
+        writePdf(directory.filePath(QStringLiteral("delete.pdf")),
+                 QStringLiteral("alpha evidence for deleting the index"));
+
+    DocumentModel model;
+    Rag::RagDocumentCoordinator coordinator(
+        &model, directory.filePath(QStringLiteral("rag.sqlite")));
+
+    auto waitFor = [](auto predicate) {
+        QElapsedTimer timer;
+        timer.start();
+        while (timer.elapsed() < 20000) {
+            if (predicate()) {
+                return true;
+            }
+            QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+            QTest::qWait(10);
+        }
+        return false;
+    };
+
+    QSignalSpy opened(&model, &DocumentModel::documentOpened);
+    QVERIFY(model.openFromFile(pdf));
+    QTRY_COMPARE_WITH_TIMEOUT(opened.count(), 1, 20000);
+    QVERIFY(waitFor(
+        [&coordinator]() { return coordinator.currentSnapshot().isReady(); }));
+
+    bool deleted = false;
+    QString deleteError;
+    connect(&coordinator, &Rag::RagDocumentCoordinator::documentIndexDeleted,
+            this, [&deleted]() { deleted = true; });
+    connect(&coordinator,
+            &Rag::RagDocumentCoordinator::documentIndexDeleteFailed, this,
+            [&deleteError](const QString& error) { deleteError = error; });
+
+    coordinator.deleteCurrentDocumentIndex();
+    QVERIFY(waitFor([&deleted, &deleteError]() {
+        return deleted || !deleteError.isEmpty();
+    }));
+    QVERIFY2(deleteError.isEmpty(), qPrintable(deleteError));
+    QVERIFY(deleted);
+    QCOMPARE(coordinator.currentSnapshot().state,
+             Rag::RagIndexState::NotIndexed);
+    QCOMPARE(coordinator.currentSnapshot().chunkCount, 0);
 }
 
 QTEST_MAIN(TestRagCoordinator)

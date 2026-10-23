@@ -53,6 +53,41 @@ evidence and page navigation, and semantic retrieval keeps working when vectors
 are ready. Changing the chat model clears the in-memory conversation for open
 documents; toggling answers off and on does not.
 
+## Progress and index management
+
+While a document is indexed the panel shows a progress bar with the current
+phase:
+
+| Phase | Progress |
+| --- | --- |
+| Checking cache | indeterminate |
+| Extracting text | 0–60%, `提取 N/M 页` |
+| Chunking | 60–70%, `切分文本 N/M 页` |
+| Writing the FTS index | indeterminate at 70% |
+| Generating vectors | 80–100%, `向量 N/M` (only when embeddings are configured) |
+
+Worker threads report progress through `RagJobContext::onProgress`; both the
+worker and the coordinator throttle updates to roughly one publish per 100 ms
+and always publish the final value. Vector progress counts the vectors that
+exist for the configured model (including ones stored by an earlier run), so
+`向量 N/M` reaches `M` when the document is fully embedded. Progress is reset
+when the document is rebuilt, cancelled or its index is deleted.
+
+The gear next to the status row opens the local AI settings; the index button
+opens **Ask PDF 索引管理**:
+
+- Current document: file name, index state (including the typed failure
+  reason), page/chunk/vector counts, and the logical size (text + vector
+  bytes). Actions: rebuild, delete the current document index.
+- All documents: document count and the SQLite file size. Action: clear every
+  index.
+
+Deleting the current document index removes only the path mapping for this
+document. Content shared with another open tab is kept until its last path is
+removed. Deleting or clearing an index never modifies the PDF file. The
+per-document size is a logical size and can differ from the file size shown for
+the whole database.
+
 ## Empty and error states
 
 Ask PDF shows an inline state block above the answer/evidence area. The state is

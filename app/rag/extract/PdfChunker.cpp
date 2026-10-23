@@ -175,11 +175,15 @@ QVector<PdfChunk> PdfChunker::chunk(const QVector<PdfPageText>& pages,
         qMax(qMax(1, options.targetCharacters), options.maxCharacters),
         qMax(0, options.overlapCharacters), options.sentenceAwareOverlap};
 
-    for (const PdfPageText& page : pages) {
+    for (int pageIndex = 0; pageIndex < pages.size(); ++pageIndex) {
+        const PdfPageText& page = pages.at(pageIndex);
         if (context.isCancelled()) {
             return {};
         }
         if (!page.extractionSucceeded || !page.hasText()) {
+            if (context.onProgress) {
+                context.onProgress(pageIndex + 1, pages.size());
+            }
             continue;
         }
 
@@ -219,6 +223,9 @@ QVector<PdfChunk> PdfChunker::chunk(const QVector<PdfPageText>& pages,
                                              .arg(chunk.chunkHash)));
             chunk.locations = locationsForRange(page, trimmed);
             chunks.append(std::move(chunk));
+        }
+        if (context.onProgress) {
+            context.onProgress(pageIndex + 1, pages.size());
         }
     }
     return chunks;

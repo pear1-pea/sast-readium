@@ -4,6 +4,7 @@
 #include <QJsonObject>
 #include <QLabel>
 #include <QListWidget>
+#include <QProgressBar>
 #include <QPushButton>
 #include <QSignalSpy>
 #include <QTcpServer>
@@ -13,6 +14,7 @@
 #include "rag/chat/ContextAssembler.h"
 #include "rag/chat/OllamaChatProvider.h"
 #include "rag/embedding/OllamaEmbeddingProvider.h"
+#include "rag/ui/AskPdfProgress.h"
 #include "rag/ui/AskPdfState.h"
 #include "rag/ui/AskPdfWidget.h"
 using namespace Rag;
@@ -21,6 +23,9 @@ class TestRagP3 : public QObject {
 private slots:
     void askPdfStateCopy();
     void askPdfStatePanelActions();
+    void askPdfProgressCopy();
+    void askPdfStatusTextCopy();
+    void progressBarReflectsIndexing();
     void statusAndSettingsButton();
     void citationLabels() {
         AskPdfWidget widget;
@@ -570,8 +575,113 @@ void TestRagP3::askPdfStatePanelActions() {
     QCOMPARE(answerSpy.count(), 1);
 }
 
+void TestRagP3::askPdfProgressCopy() {
+    AskPdfProgressInput input;
+    input.indexState = RagIndexState::Extracting;
+    input.totalPages = 12;
+    input.processedPages = 3;
+    auto view = askPdfProgressView(input);
+    QVERIFY(view.visible);
+    QVERIFY(!view.indeterminate);
+    QCOMPARE(view.percent, 15);
+    QVERIFY(view.text.contains(QStringLiteral("3/12")));
+
+    input.indexState = RagIndexState::Chunking;
+    input.processedPages = 6;
+    view = askPdfProgressView(input);
+    QCOMPARE(view.percent, 65);
+
+    input.indexState = RagIndexState::Indexing;
+    view = askPdfProgressView(input);
+    QVERIFY(view.visible);
+    QVERIFY(view.indeterminate);
+    QCOMPARE(view.percent, 70);
+
+    input.indexState = RagIndexState::Ready;
+    input.embeddingsEnabled = true;
+    input.embeddingState = RagEmbeddingState::Running;
+    input.chunkCount = 100;
+    input.embeddedChunkCount = 40;
+    view = askPdfProgressView(input);
+    QVERIFY(view.visible);
+    QCOMPARE(view.percent, 88);
+
+    input.embeddingState = RagEmbeddingState::Ready;
+    view = askPdfProgressView(input);
+    QVERIFY(!view.visible);
+
+    input.embeddingsEnabled = false;
+    input.embeddingState = RagEmbeddingState::Running;
+    view = askPdfProgressView(input);
+    QVERIFY(!view.visible);
+
+    input.indexState = RagIndexState::Failed;
+    view = askPdfProgressView(input);
+    QVERIFY(!view.visible);
+}
+
+void TestRagP3::askPdfStatusTextCopy() {
+    AskPdfViewInput input;
+    input.hasDocument = true;
+    input.indexState = RagIndexState::NotIndexed;
+    QCOMPARE(askPdfStatusText(input), QStringLiteral("尚未建立索引"));
+
+    input.indexState = RagIndexState::Indexing;
+    QCOMPARE(askPdfStatusText(input), QStringLiteral("正在建立搜索索引..."));
+
+    input.indexState = RagIndexState::Ready;
+    input.embeddingState = RagEmbeddingState::Ready;
+    QVERIFY(askPdfStatusText(input).contains(QStringLiteral("索引就绪")));
+
+    input.indexState = RagIndexState::Failed;
+    input.failureReason = RagIndexFailureReason::Encrypted;
+    QVERIFY(askPdfStatusText(input).contains(QStringLiteral("加密")));
+
+    input.indexState = RagIndexState::Cancelled;
+    QVERIFY(askPdfStatusText(input).contains(QStringLiteral("索引已取消")));
+
+    input.hasDocument = false;
+    input.indexState = RagIndexState::NotIndexed;
+    QCOMPARE(askPdfStatusText(input), QStringLiteral("未打开 PDF"));
+}
+
+void TestRagP3::progressBarReflectsIndexing() {
+    AskPdfWidget widget;
+    DocumentKey document;
+    document.canonicalPath = QStringLiteral("/tmp/progress.pdf");
+    document.contentHash = QStringLiteral("progress-hash");
+    widget.setDocumentContext(document);
+    widget.setEmbeddingEnabled(true);
+
+    auto* bar =
+        widget.findChild<QProgressBar*>(QStringLiteral("askPdfProgress"));
+    QVERIFY(bar);
+
+    widget.setIndexState(RagIndexState::Extracting, 0, {},
+                         RagEmbeddingState::Disabled, 0, {},
+                         RagIndexFailureReason::None, 3, 12);
+    QVERIFY(bar->isVisibleTo(&widget));
+    QCOMPARE(bar->value(), 15);
+    QVERIFY(bar->format().contains(QStringLiteral("3/12")));
+
+    widget.setIndexState(RagIndexState::Ready, 100, {},
+                         RagEmbeddingState::Running, 40, {},
+                         RagIndexFailureReason::None, 12, 12);
+    QVERIFY(bar->isVisibleTo(&widget));
+    QCOMPARE(bar->value(), 88);
+
+    widget.setIndexState(RagIndexState::Ready, 100, {},
+                         RagEmbeddingState::Ready, 100, {},
+                         RagIndexFailureReason::None, 12, 12);
+    QVERIFY(!bar->isVisibleTo(&widget));
+}
+
 void TestRagP3::statusAndSettingsButton() {
     AskPdfWidget widget;
+    DocumentKey document;
+    document.canonicalPath = QStringLiteral("/tmp/status.pdf");
+    document.contentHash = QStringLiteral("status-hash");
+    widget.setDocumentContext(document);
     auto* status = widget.findChild<QLabel*>(QStringLiteral("askPdfStatus"));
     auto* settings =
         widget.findChild<QToolButton*>(QStringLiteral("askPdfSettings"));

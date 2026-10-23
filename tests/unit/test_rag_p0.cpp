@@ -111,6 +111,7 @@ private slots:
     void testCjkStopwordsDoNotSplitWords();
     void testBm25ScoresAreMonotonic();
     void testExtractionFailurePreservesFileIdentity();
+    void documentStatsAndPathRemoval();
 };
 
 void TestRagP0::testPdfTextExtraction() {
@@ -517,6 +518,61 @@ void TestRagP0::testExtractionFailurePreservesFileIdentity() {
         directory.filePath("missing.pdf"), context);
     QVERIFY(!missing.success);
     QCOMPARE(missing.reason, RagIndexFailureReason::FileMissing);
+}
+
+void TestRagP0::documentStatsAndPathRemoval() {
+    RagIndexStore store;
+    QString error;
+    QVERIFY2(store.open(QString(), &error), qPrintable(error));
+
+    DocumentKey document;
+    document.canonicalPath = QStringLiteral("/tmp/stats-a.pdf");
+    document.contentHash = QStringLiteral("stats-hash");
+    document.pageCount = 2;
+    const QVector<PdfChunk> chunks = {
+        makeChunk(document, QStringLiteral("stats-a"),
+                  QStringLiteral("alpha text for stats"), 0),
+        makeChunk(document, QStringLiteral("stats-b"),
+                  QStringLiteral("beta text for stats"), 1)};
+    QVERIFY2(store.replaceDocument(document, chunks, &error),
+             qPrintable(error));
+
+    RagDocumentIndexStats stats;
+    QVERIFY2(store.documentStats(document, &stats, &error), qPrintable(error));
+    QCOMPARE(stats.chunkCount, 2);
+    QVERIFY(stats.present);
+    QVERIFY(stats.textBytes > 0);
+    QCOMPARE(store.documentCount(&error), 1);
+    QCOMPARE(store.vectorCount(document, QStringLiteral("m"),
+                               QStringLiteral("1"), &error),
+             0);
+
+    RagIndexStore::VectorChunk vector;
+    vector.chunkId = chunks.first().id;
+    vector.chunkHash = chunks.first().chunkHash;
+    vector.text = chunks.first().text;
+    vector.vector = {1.0f, 0.0f};
+    QVERIFY2(store.storeVectors(document, QStringLiteral("m"),
+                                QStringLiteral("1"), {vector}, {}, &error),
+             qPrintable(error));
+    QCOMPARE(store.vectorCount(document, QStringLiteral("m"),
+                               QStringLiteral("1"), &error),
+             1);
+    QVERIFY2(store.documentStats(document, &stats, &error), qPrintable(error));
+    QCOMPARE(stats.vectorCount, 1);
+    QVERIFY(stats.vectorBytes > 0);
+
+    DocumentKey second = document;
+    second.canonicalPath = QStringLiteral("/tmp/stats-b.pdf");
+    QVERIFY2(store.registerDocumentPath(second, &error), qPrintable(error));
+    QVERIFY2(store.removeDocumentPath(second.canonicalPath, &error),
+             qPrintable(error));
+    // The first path still references the content.
+    QVERIFY(store.containsDocument(document, &error));
+    QVERIFY2(store.removeDocumentPath(document.canonicalPath, &error),
+             qPrintable(error));
+    QVERIFY(!store.containsDocument(document, &error));
+    QCOMPARE(store.documentCount(&error), 0);
 }
 
 QTEST_MAIN(TestRagP0)

@@ -20,7 +20,7 @@
 namespace Rag {
 namespace {
 
-constexpr int kSchemaVersion = 2;
+constexpr int kSchemaVersion = 3;
 
 QString databaseError(const QSqlQuery& query) {
     return query.lastError().text();
@@ -335,6 +335,8 @@ bool RagIndexStore::createSchema(QString* error) {
             "locations_json TEXT NOT NULL,"
             "FOREIGN KEY(document_hash) REFERENCES documents(document_hash)"
             ")"),
+        QStringLiteral("CREATE INDEX IF NOT EXISTS idx_chunks_document "
+                       "ON chunks(document_hash)"),
         QStringLiteral(
             "CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5("
             "chunk_id UNINDEXED,"
@@ -799,6 +801,169 @@ bool RagIndexStore::registerDocumentPath(const DocumentKey& document,
         return false;
     }
     return true;
+}
+
+bool RagIndexStore::removeDocumentPath(const QString& canonicalPath,
+                                       QString* error) {
+    setError(error, QString());
+    if (!isOpen()) {
+        setError(error, QStringLiteral("Index store is not open"));
+        return false;
+    }
+    if (canonicalPath.isEmpty()) {
+        setError(error, QStringLiteral("Document canonical path is empty"));
+        return false;
+    }
+
+    QMutexLocker writeLock(&writeMutex());
+    if (!m_database.transaction()) {
+        setError(error, databaseError(m_database));
+        return false;
+    }
+    auto rollback = [this, error](const QString& message) {
+        m_database.rollback();
+        setError(error, message);
+        return false;
+    };
+
+    QStringList hashes;
+    {
+        QSqlQuery query(m_database);
+        query.prepare(
+            QStringLiteral("SELECT document_hash FROM document_paths WHERE "
+                           "canonical_path = ?"));
+        query.addBindValue(canonicalPath);
+        if (!query.exec()) {
+            return rollback(databaseError(query));
+        }
+        while (query.next()) {
+            hashes.append(query.value(0).toString());
+        }
+        query.finish();
+    }
+
+    for (const QString& hash : hashes) {
+        QSqlQuery removePath(m_database);
+        removePath.prepare(
+            QStringLiteral("DELETE FROM document_paths WHERE document_hash = ? "
+                           "AND canonical_path = ?"));
+        removePath.addBindValue(hash);
+        removePath.addBindValue(canonicalPath);
+        if (!removePath.exec()) {
+            return rollback(databaseError(removePath));
+        }
+
+        QSqlQuery remainingPaths(m_database);
+        remainingPaths.prepare(QStringLiteral(
+            "SELECT COUNT(*) FROM document_paths WHERE document_hash = ?"));
+        remainingPaths.addBindValue(hash);
+        if (!remainingPaths.exec() || !remainingPaths.next()) {
+            return rollback(databaseError(remainingPaths));
+        }
+        const int remaining = remainingPaths.value(0).toInt();
+        remainingPaths.finish();
+        if (remaining == 0 && !deleteContentForHash(hash, error)) {
+            return rollback(
+                error && !error->isEmpty()
+                    ? *error
+                    : QStringLiteral("Cannot delete document index"));
+        }
+    }
+
+    if (!m_database.commit()) {
+        return rollback(databaseError(m_database));
+    }
+    return true;
+}
+
+bool RagIndexStore::documentStats(const DocumentKey& document,
+                                  RagDocumentIndexStats* stats,
+                                  QString* error) const {
+    setError(error, QString());
+    if (stats) {
+        *stats = {};
+    }
+    if (!stats) {
+        setError(error, QStringLiteral("Stats output is null"));
+        return false;
+    }
+    if (!isOpen()) {
+        setError(error, QStringLiteral("Index store is not open"));
+        return false;
+    }
+    if (document.contentHash.isEmpty()) {
+        setError(error, QStringLiteral("Document content hash is empty"));
+        return false;
+    }
+
+    QSqlQuery chunks(m_database);
+    chunks.prepare(QStringLiteral(
+        "SELECT COUNT(*), COALESCE(SUM(LENGTH(CAST(text AS BLOB))), 0) "
+        "FROM chunks WHERE document_hash = ?"));
+    chunks.addBindValue(document.contentHash);
+    if (!chunks.exec() || !chunks.next()) {
+        setError(error, databaseError(chunks));
+        return false;
+    }
+    stats->chunkCount = chunks.value(0).toInt();
+    stats->textBytes = chunks.value(1).toLongLong();
+    chunks.finish();
+
+    QSqlQuery vectors(m_database);
+    vectors.prepare(
+        QStringLiteral("SELECT COUNT(*), COALESCE(SUM(LENGTH(vector)), 0) "
+                       "FROM chunk_vectors WHERE document_hash = ?"));
+    vectors.addBindValue(document.contentHash);
+    if (!vectors.exec() || !vectors.next()) {
+        setError(error, databaseError(vectors));
+        return false;
+    }
+    stats->vectorCount = vectors.value(0).toInt();
+    stats->vectorBytes = vectors.value(1).toLongLong();
+    vectors.finish();
+
+    stats->present = stats->chunkCount > 0;
+    return true;
+}
+
+int RagIndexStore::vectorCount(const DocumentKey& document,
+                               const QString& model, const QString& version,
+                               QString* error) const {
+    setError(error, QString());
+    if (!isOpen()) {
+        setError(error, QStringLiteral("Index store is not open"));
+        return 0;
+    }
+    if (document.contentHash.isEmpty()) {
+        return 0;
+    }
+    QSqlQuery query(m_database);
+    query.prepare(QStringLiteral(
+        "SELECT COUNT(*) FROM chunk_vectors WHERE document_hash = ? "
+        "AND model_id = ? AND model_version = ?"));
+    query.addBindValue(document.contentHash);
+    query.addBindValue(model);
+    query.addBindValue(version);
+    if (!query.exec() || !query.next()) {
+        setError(error, databaseError(query));
+        return 0;
+    }
+    return query.value(0).toInt();
+}
+
+int RagIndexStore::documentCount(QString* error) const {
+    setError(error, QString());
+    if (!isOpen()) {
+        setError(error, QStringLiteral("Index store is not open"));
+        return 0;
+    }
+    QSqlQuery query(m_database);
+    if (!query.exec(QStringLiteral("SELECT COUNT(*) FROM documents")) ||
+        !query.next()) {
+        setError(error, databaseError(query));
+        return 0;
+    }
+    return query.value(0).toInt();
 }
 
 bool RagIndexStore::clearAll(QString* error) {

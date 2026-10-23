@@ -267,6 +267,8 @@ target_sources(test_rag_p3 PRIVATE
     ../app/rag/chat/ContextAssembler.cpp
     ../app/rag/chat/OllamaChatProvider.cpp
     ../app/rag/embedding/OllamaEmbeddingProvider.cpp
+    ../app/rag/ui/AskPdfProgress.cpp
+    ../app/rag/ui/AskPdfProgress.h
     ../app/rag/ui/AskPdfState.cpp
     ../app/rag/ui/AskPdfState.h
     ../app/rag/ui/AskPdfWidget.cpp

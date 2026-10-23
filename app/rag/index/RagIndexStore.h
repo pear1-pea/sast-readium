@@ -38,14 +38,24 @@ public:
     bool registerDocumentPath(const DocumentKey& document,
                               QString* error = nullptr);
     bool clearAll(QString* error = nullptr);
+    /** Remove one path; delete content only when no other path references it.
+     */
+    bool removeDocumentPath(const QString& canonicalPath,
+                            QString* error = nullptr);
     bool containsDocument(const DocumentKey& document,
                           QString* error = nullptr) const;
+    bool documentStats(const DocumentKey& document,
+                       RagDocumentIndexStats* stats,
+                       QString* error = nullptr) const;
+    int documentCount(QString* error = nullptr) const;
     /** True when the stored index was built with exactly this policy. */
     bool documentMatchesChunkerPolicy(const DocumentKey& document,
                                       const QString& policy,
                                       QString* error = nullptr) const;
     int documentChunkCount(const DocumentKey& document,
                            QString* error = nullptr) const;
+    int vectorCount(const DocumentKey& document, const QString& model,
+                    const QString& version, QString* error = nullptr) const;
 
     QVector<RagEvidence> search(const DocumentKey& document,
                                 const QString& query, int limit = 10,

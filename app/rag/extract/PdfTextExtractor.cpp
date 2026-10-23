@@ -194,6 +194,9 @@ PdfTextExtractionResult PdfTextExtractor::extractFile(
     }
 
     result.pages.reserve(result.document.pageCount);
+    if (context.onProgress) {
+        context.onProgress(0, result.document.pageCount);
+    }
     const QMap<int, QString> sections = outlineSections(document.get());
     for (int pageIndex = 0; pageIndex < result.document.pageCount;
          ++pageIndex) {
@@ -230,6 +233,9 @@ PdfTextExtractionResult PdfTextExtractor::extractFile(
         pageText.extractionSucceeded = true;
         result.hasText = result.hasText || pageText.hasText();
         result.pages.append(std::move(pageText));
+        if (context.onProgress) {
+            context.onProgress(pageIndex + 1, result.document.pageCount);
+        }
     }
 
     result.success = true;

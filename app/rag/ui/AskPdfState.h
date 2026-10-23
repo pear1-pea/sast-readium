@@ -36,6 +36,9 @@ struct AskPdfViewInput {
     RagIndexState indexState = RagIndexState::NotIndexed;
     RagIndexFailureReason failureReason = RagIndexFailureReason::None;
     RagEmbeddingState embeddingState = RagEmbeddingState::Disabled;
+    int chunkCount = 0;
+    int embeddedChunkCount = 0;
+    QString embeddingError;
     bool busy = false;
     bool hasSearched = false;
     bool hasEvidence = false;
@@ -60,5 +63,7 @@ struct AskPdfStateView {
 
 AskPdfViewState askPdfViewState(const AskPdfViewInput& input);
 AskPdfStateView askPdfStateView(const AskPdfViewInput& input);
+/** Single status line for any state, including the ones that hide the panel. */
+QString askPdfStatusText(const AskPdfViewInput& input);
 
 }  // namespace Rag

@@ -1,6 +1,8 @@
 #include "RagDocumentCoordinator.h"
 
+#include <QDateTime>
 #include <QDir>
+#include <QElapsedTimer>
 #include <QFile>
 #include <QFileInfo>
 #include <QFutureWatcher>
@@ -10,6 +12,7 @@
 #include <QUuid>
 #include <QtConcurrent>
 
+#include <atomic>
 #include <utility>
 
 #include "model/DocumentModel.h"
@@ -237,6 +240,8 @@ void RagDocumentCoordinator::cancelCurrentIndexing() {
     it->snapshot.embeddingIdentity = {};
     it->snapshot.embeddedChunkCount = 0;
     it->snapshot.embeddingError.clear();
+    it->snapshot.processedPages = 0;
+    it->snapshot.totalPages = 0;
     invalidateQueries();
     ++it->snapshot.generation;
     it->snapshot.state = RagIndexState::Cancelled;
@@ -309,6 +314,9 @@ void RagDocumentCoordinator::startIndexing(const QString& filePath,
         invalidateQueries();
     ++entry.snapshot.generation;
     entry.snapshot.stageSequence = 0;
+    entry.snapshot.processedPages = 0;
+    entry.snapshot.totalPages = 0;
+    entry.lastProgressPublishMs = 0;
     entry.snapshot.filePath = path;
     entry.snapshot.key = {};
     entry.snapshot.key.canonicalPath = path;
@@ -325,6 +333,38 @@ void RagDocumentCoordinator::startIndexing(const QString& filePath,
     entry.activeJob = {};
     entry.activeJob.jobId = QUuid::createUuid().toString(QUuid::WithoutBraces);
     entry.activeJob.generation = entry.snapshot.generation;
+    {
+        const QPointer<RagDocumentCoordinator> progressGuard(this);
+        const QString jobId = entry.activeJob.jobId;
+        const quint64 jobGeneration = entry.activeJob.generation;
+        auto lastPost = std::make_shared<std::atomic<qint64>>(0);
+        entry.activeJob.onProgress = [progressGuard, path, jobId, jobGeneration,
+                                      lastPost](int processed, int total) {
+            const qint64 now = QDateTime::currentMSecsSinceEpoch();
+            const bool final = total > 0 && processed >= total;
+            if (!final) {
+                const qint64 previous = lastPost->exchange(now);
+                if (now - previous < 100) {
+                    return;
+                }
+            } else {
+                lastPost->store(now);
+            }
+            if (!progressGuard) {
+                return;
+            }
+            QMetaObject::invokeMethod(
+                progressGuard,
+                [progressGuard, path, jobId, jobGeneration, processed,
+                 total]() {
+                    if (progressGuard) {
+                        progressGuard->acceptProgress(
+                            path, jobId, jobGeneration, processed, total);
+                    }
+                },
+                Qt::QueuedConnection);
+        };
+    }
     const RagJobContext context = entry.activeJob;
     publish(path);
 
@@ -553,8 +593,18 @@ void RagDocumentCoordinator::startEmbedding(const QString& path,
             return;
         }
 
+        int embeddedCount = store.vectorCount(document, provider->modelId(),
+                                              provider->modelVersion(), &error);
+        if (!error.isEmpty()) {
+            postState(RagEmbeddingState::Failed, 0, error);
+            return;
+        }
+        postState(RagEmbeddingState::Running, embeddedCount, {});
+
         constexpr int batchSize = 8;
-        int embeddedCount = 0;
+        QElapsedTimer progressTimer;
+        progressTimer.start();
+        qint64 lastProgressMs = 0;
         while (!cancel.isCancelled()) {
             const auto batch = store.chunksMissingVectors(
                 document, provider->modelId(), provider->modelVersion(),
@@ -596,7 +646,11 @@ void RagDocumentCoordinator::startEmbedding(const QString& path,
                 return;
             }
             embeddedCount += batch.size();
-            postState(RagEmbeddingState::Running, embeddedCount, {});
+            const qint64 now = progressTimer.elapsed();
+            if (now - lastProgressMs >= 100) {
+                lastProgressMs = now;
+                postState(RagEmbeddingState::Running, embeddedCount, {});
+            }
         }
         postState(RagEmbeddingState::Cancelled, embeddedCount,
                   QStringLiteral("Embedding cancelled"));
@@ -631,6 +685,35 @@ void RagDocumentCoordinator::acceptStage(const QString& filePath,
     }
     it->snapshot.stageSequence = stageSequence;
     it->snapshot.state = state;
+    if (state == RagIndexState::Chunking || state == RagIndexState::Indexing) {
+        // Page progress belongs to the previous phase.
+        it->snapshot.processedPages = 0;
+    }
+    publish(filePath);
+}
+
+void RagDocumentCoordinator::acceptProgress(const QString& filePath,
+                                            const QString& jobId,
+                                            quint64 generation, int processed,
+                                            int total) {
+    auto it = m_entries.find(filePath);
+    if (it == m_entries.end() || it->activeJob.jobId != jobId ||
+        it->snapshot.generation != generation ||
+        !isIndexingState(it->snapshot.state)) {
+        return;
+    }
+    if (total > 0) {
+        it->snapshot.totalPages = total;
+    }
+    if (processed >= it->snapshot.processedPages) {
+        it->snapshot.processedPages = processed;
+    }
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    const bool final = total > 0 && processed >= total;
+    if (!final && now - it->lastProgressPublishMs < 100) {
+        return;
+    }
+    it->lastProgressPublishMs = now;
     publish(filePath);
 }
 
@@ -756,6 +839,102 @@ void RagDocumentCoordinator::applySettings(const RagSettings& settings) {
     }
 }
 
+void RagDocumentCoordinator::deleteCurrentDocumentIndex() {
+    if (m_deletingCurrent || m_currentPath.isEmpty()) {
+        return;
+    }
+    auto it = m_entries.find(m_currentPath);
+    if (it == m_entries.end()) {
+        return;
+    }
+    it->activeJob.cancellation.cancel();
+    it->embeddingCancellation.cancel();
+    it->embeddingCancellation = {};
+    ++it->embeddingGeneration;
+    ++it->snapshot.generation;
+    invalidateQueries();
+    clearRetryState();
+    it->conversation.clear();
+    it->snapshot.state = RagIndexState::NotIndexed;
+    it->snapshot.failureReason = RagIndexFailureReason::None;
+    it->snapshot.processedPages = 0;
+    it->snapshot.totalPages = 0;
+    it->snapshot.chunkCount = 0;
+    it->snapshot.error.clear();
+    it->snapshot.embeddingState = RagEmbeddingState::Disabled;
+    it->snapshot.embeddingIdentity = {};
+    it->snapshot.embeddedChunkCount = 0;
+    it->snapshot.embeddingError.clear();
+    it->snapshot.key.contentHash.clear();
+    it->snapshot.key.pageCount = 0;
+    publish(m_currentPath);
+
+    m_deletingCurrent = true;
+    const QString path = m_currentPath;
+    const QString databasePath = m_databasePath;
+    auto* watcher = new QFutureWatcher<QString>(this);
+    connect(watcher, &QFutureWatcher<QString>::finished, this,
+            [this, watcher, path]() {
+                const QString error = watcher->result();
+                watcher->deleteLater();
+                m_deletingCurrent = false;
+                if (!error.isEmpty()) {
+                    LOG_WARNING("RAG: cannot delete document index: {}",
+                                error.toStdString());
+                    auto entry = m_entries.find(path);
+                    if (entry != m_entries.end()) {
+                        entry->snapshot.state = RagIndexState::Failed;
+                        entry->snapshot.failureReason =
+                            RagIndexFailureReason::Database;
+                        entry->snapshot.error = error;
+                        publish(path);
+                    }
+                    emit documentIndexDeleteFailed(error);
+                    return;
+                }
+                emit documentIndexDeleted();
+            });
+
+    watcher->setFuture(QtConcurrent::run([databasePath, path]() {
+        RagIndexStore store;
+        QString error;
+        if (!store.open(databasePath, &error)) {
+            return error;
+        }
+        if (!store.removeDocumentPath(path, &error)) {
+            return error;
+        }
+        return QString();
+    }));
+}
+
+void RagDocumentCoordinator::requestIndexStats() {
+    const QString databasePath = m_databasePath;
+    const DocumentKey key = currentSnapshot().key;
+    auto* watcher = new QFutureWatcher<RagIndexStats>(this);
+    connect(watcher, &QFutureWatcher<RagIndexStats>::finished, this,
+            [this, watcher]() {
+                const RagIndexStats stats = watcher->result();
+                watcher->deleteLater();
+                emit indexStatsReady(stats);
+            });
+    watcher->setFuture(QtConcurrent::run([databasePath, key]() {
+        RagIndexStats stats;
+        const QFileInfo info(databasePath);
+        stats.databaseBytes = info.exists() ? info.size() : 0;
+        RagIndexStore store;
+        QString error;
+        if (!store.open(databasePath, &error)) {
+            return stats;
+        }
+        stats.documentCount = store.documentCount(&error);
+        if (!key.contentHash.isEmpty()) {
+            store.documentStats(key, &stats.current, &error);
+        }
+        return stats;
+    }));
+}
+
 void RagDocumentCoordinator::clearAllIndexes() {
     if (m_clearing) {
         return;
@@ -797,6 +976,8 @@ void RagDocumentCoordinator::clearAllIndexes() {
                     it->conversation.clear();
                     it->snapshot.state = RagIndexState::NotIndexed;
                     it->snapshot.failureReason = RagIndexFailureReason::None;
+                    it->snapshot.processedPages = 0;
+                    it->snapshot.totalPages = 0;
                     it->snapshot.chunkCount = 0;
                     it->snapshot.error.clear();
                     it->snapshot.embeddingState = RagEmbeddingState::Disabled;

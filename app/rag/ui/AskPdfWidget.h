@@ -5,12 +5,14 @@
 
 #include "rag/chat/ChatProvider.h"
 #include "rag/domain/RagTypes.h"
+#include "rag/ui/AskPdfProgress.h"
 #include "rag/ui/AskPdfState.h"
 
 class QLabel;
 class QLineEdit;
 class QListWidget;
 class QListWidgetItem;
+class QProgressBar;
 class QPushButton;
 class QToolButton;
 class QPlainTextEdit;
@@ -28,7 +30,8 @@ public:
         RagIndexState state, int chunkCount = 0, const QString& error = {},
         RagEmbeddingState embeddingState = RagEmbeddingState::Disabled,
         int embeddedChunkCount = 0, const QString& embeddingError = {},
-        RagIndexFailureReason failureReason = RagIndexFailureReason::None);
+        RagIndexFailureReason failureReason = RagIndexFailureReason::None,
+        int processedPages = 0, int totalPages = 0);
     void setEvidence(const QVector<RagEvidence>& evidence);
     void setBusy(bool busy);
     void setClearing(bool clearing);
@@ -38,6 +41,7 @@ public:
     void setAnswerError(const QString& error);
     void setQueryError(const QString& error);
     void setAnswerEnabled(bool enabled);
+    void setEmbeddingEnabled(bool enabled);
 
 signals:
     void querySubmitted(const QString& query);
@@ -48,6 +52,7 @@ signals:
     void clearIndexRequested();
     void citationActivated(const QString& chunkId);
     void settingsRequested();
+    void indexManagementRequested();
     void retryAnswerRequested();
     void retryQueryRequested();
 
@@ -57,23 +62,22 @@ private:
     void updateControlStates();
     void refreshStatusText();
     void refreshEmptyState();
+    void refreshProgress();
     void clearEvidence();
     void runStateAction(AskPdfStateAction action);
-    static QString stateText(RagIndexState state, int chunkCount,
-                             const QString& error,
-                             RagEmbeddingState embeddingState,
-                             int embeddedChunkCount,
-                             const QString& embeddingError, bool answerEnabled);
 
     DocumentKey m_document;
     RagIndexState m_state = RagIndexState::NotIndexed;
     RagIndexFailureReason m_failureReason = RagIndexFailureReason::None;
+    int m_processedPages = 0;
+    int m_totalPages = 0;
     int m_chunkCount = 0;
     QString m_indexError;
     RagEmbeddingState m_embeddingState = RagEmbeddingState::Disabled;
     int m_embeddedChunkCount = 0;
     QString m_embeddingError;
     bool m_answerEnabled = true;
+    bool m_embeddingsEnabled = false;
     bool m_hasSearched = false;
     bool m_queryFailed = false;
     bool m_answerFailed = false;
@@ -82,6 +86,7 @@ private:
     QVector<RagEvidence> m_evidence;
     QLabel* m_documentLabel = nullptr;
     QLabel* m_statusLabel = nullptr;
+    QProgressBar* m_progressBar = nullptr;
     QWidget* m_statePanel = nullptr;
     QLabel* m_stateTitle = nullptr;
     QLabel* m_stateDetail = nullptr;
@@ -95,6 +100,7 @@ private:
     QToolButton* m_cancelButton = nullptr;
     QToolButton* m_clearButton = nullptr;
     QToolButton* m_settingsButton = nullptr;
+    QToolButton* m_indexButton = nullptr;
     QListWidget* m_evidenceList = nullptr;
     QPlainTextEdit* m_answerEdit = nullptr;
     QListWidget* m_citationList = nullptr;

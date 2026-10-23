@@ -48,6 +48,8 @@ public slots:
     void applySettings(const RagSettings& settings);
     void retryAnswer();
     void retryQuery();
+    void deleteCurrentDocumentIndex();
+    void requestIndexStats();
 
 signals:
     void currentDocumentStateChanged(const Rag::RagDocumentSnapshot& snapshot);
@@ -63,6 +65,9 @@ signals:
     void indexClearingChanged(bool clearing);
     void indexCleared();
     void indexClearFailed(const QString& error);
+    void documentIndexDeleted();
+    void documentIndexDeleteFailed(const QString& error);
+    void indexStatsReady(const Rag::RagIndexStats& stats);
 
 private:
     void onDocumentOpened(int index);
@@ -73,6 +78,8 @@ private:
     void acceptStage(const QString& filePath, const QString& jobId,
                      quint64 generation, int stageSequence,
                      RagIndexState state);
+    void acceptProgress(const QString& filePath, const QString& jobId,
+                        quint64 generation, int processed, int total);
     void publish(const QString& filePath);
     void startEmbedding(const QString& path, const DocumentKey& document);
     void updateEmbeddingState(const QString& path, quint64 generation,
@@ -94,6 +101,7 @@ private:
         RagJobContext activeJob;
         quint64 embeddingGeneration = 0;
         RagCancellationToken embeddingCancellation;
+        qint64 lastProgressPublishMs = 0;
         QStringList conversation;
     };
 
@@ -112,6 +120,7 @@ private:
     EmbeddingProviderFactory m_embeddingProviderFactory;
     RagSettings m_settings;
     bool m_clearing = false;
+    bool m_deletingCurrent = false;
 };
 
 }  // namespace Rag

@@ -1,12 +1,14 @@
 #pragma once
 
 #include <QDateTime>
+#include <QMetaType>
 #include <QRectF>
 #include <QSizeF>
 #include <QString>
 #include <QVector>
 
 #include <atomic>
+#include <functional>
 #include <memory>
 
 namespace Rag {
@@ -56,6 +58,8 @@ struct RagJobContext {
     DocumentKey document;
     quint64 generation = 0;
     RagCancellationToken cancellation;
+    /** Optional worker-thread progress callback (marshal to the UI thread). */
+    std::function<void(int processed, int total)> onProgress;
 
     bool isCancelled() const { return cancellation.isCancelled(); }
 };
@@ -168,6 +172,8 @@ struct RagDocumentSnapshot {
     RagIndexFailureReason failureReason = RagIndexFailureReason::None;
     quint64 generation = 0;
     int stageSequence = 0;
+    int processedPages = 0;
+    int totalPages = 0;
     int chunkCount = 0;
     QString error;
     RagEmbeddingState embeddingState = RagEmbeddingState::Disabled;
@@ -178,4 +184,20 @@ struct RagDocumentSnapshot {
     bool isReady() const { return state == RagIndexState::Ready; }
 };
 
+struct RagDocumentIndexStats {
+    bool present = false;
+    int chunkCount = 0;
+    int vectorCount = 0;
+    qint64 textBytes = 0;
+    qint64 vectorBytes = 0;
+};
+
+struct RagIndexStats {
+    qint64 databaseBytes = 0;
+    int documentCount = 0;
+    RagDocumentIndexStats current;
+};
+
 }  // namespace Rag
+
+Q_DECLARE_METATYPE(Rag::RagIndexStats)

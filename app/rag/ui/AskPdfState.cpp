@@ -92,6 +92,71 @@ AskPdfViewState askPdfViewState(const AskPdfViewInput& input) {
     return AskPdfViewState::ReadyIdle;
 }
 
+QString askPdfStatusText(const AskPdfViewInput& input) {
+    if (!input.hasDocument) {
+        return QStringLiteral("未打开 PDF");
+    }
+    switch (input.indexState) {
+        case RagIndexState::NotIndexed:
+            return QStringLiteral("尚未建立索引");
+        case RagIndexState::CheckingCache:
+            return QStringLiteral("正在检查索引缓存...");
+        case RagIndexState::Extracting:
+            return QStringLiteral("正在提取 PDF 文本...");
+        case RagIndexState::Chunking:
+            return QStringLiteral("正在切分文本...");
+        case RagIndexState::Indexing:
+            return QStringLiteral("正在建立搜索索引...");
+        case RagIndexState::Ready: {
+            QString semantic;
+            switch (input.embeddingState) {
+                case RagEmbeddingState::Pending:
+                case RagEmbeddingState::Running:
+                    semantic = QStringLiteral("语义检索准备中 %1/%2")
+                                   .arg(input.embeddedChunkCount)
+                                   .arg(input.chunkCount);
+                    break;
+                case RagEmbeddingState::Ready:
+                    semantic = QStringLiteral("语义检索就绪");
+                    break;
+                case RagEmbeddingState::Failed:
+                    semantic = input.embeddingError.isEmpty()
+                                   ? QStringLiteral("语义检索失败")
+                                   : QStringLiteral("语义检索失败：%1")
+                                         .arg(input.embeddingError);
+                    break;
+                case RagEmbeddingState::Cancelled:
+                    semantic = QStringLiteral("语义检索已取消");
+                    break;
+                case RagEmbeddingState::Disabled:
+                default:
+                    semantic = QStringLiteral("语义检索关闭");
+                    break;
+            }
+            QString text = QStringLiteral("索引就绪（%1 个文本块） · %2")
+                               .arg(input.chunkCount)
+                               .arg(semantic);
+            if (!input.answerEnabled) {
+                text += QStringLiteral(" · 回答已关闭");
+            }
+            return text;
+        }
+        case RagIndexState::Cancelled:
+        case RagIndexState::Failed:
+        case RagIndexState::Unsupported: {
+            const AskPdfStateView view = askPdfStateView(input);
+            if (view.visible) {
+                return view.detail.isEmpty() ? view.title
+                                             : QStringLiteral("%1\n%2")
+                                                   .arg(view.title)
+                                                   .arg(view.detail);
+            }
+            break;
+        }
+    }
+    return QStringLiteral("索引就绪");
+}
+
 AskPdfStateView askPdfStateView(const AskPdfViewInput& input) {
     const AskPdfViewState state = askPdfViewState(input);
     switch (state) {

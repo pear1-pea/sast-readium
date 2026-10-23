@@ -18,6 +18,7 @@
 #include "managers/StyleManager.h"
 #include "model/RenderModel.h"
 #include "rag/domain/EvidenceHighlightRequest.h"
+#include "rag/ui/AskPdfIndexDialog.h"
 #include "rag/ui/AskPdfSettingsDialog.h"
 #include "rag/ui/AskPdfWidget.h"
 #include "ui/dialogs/DocumentMetadataDialog.h"
@@ -315,7 +316,8 @@ void MainWindow::initConnection() {
                     askWidget->setIndexState(
                         snapshot.state, snapshot.chunkCount, snapshot.error,
                         snapshot.embeddingState, snapshot.embeddedChunkCount,
-                        snapshot.embeddingError, snapshot.failureReason);
+                        snapshot.embeddingError, snapshot.failureReason,
+                        snapshot.processedPages, snapshot.totalPages);
                 });
         connect(askWidget, &Rag::AskPdfWidget::querySubmitted, this,
                 [this, askWidget](const QString& query) {
@@ -401,6 +403,102 @@ void MainWindow::initConnection() {
                 m_ragCoordinator, &Rag::RagDocumentCoordinator::retryAnswer);
         connect(askWidget, &Rag::AskPdfWidget::retryQueryRequested,
                 m_ragCoordinator, &Rag::RagDocumentCoordinator::retryQuery);
+        connect(
+            askWidget, &Rag::AskPdfWidget::indexManagementRequested, this,
+            [this]() {
+                if (!m_ragCoordinator) {
+                    return;
+                }
+                Rag::AskPdfIndexDialog dialog(this);
+                const Rag::RagDocumentSnapshot snapshot =
+                    m_ragCoordinator->currentSnapshot();
+                dialog.setDocument(snapshot.key);
+                dialog.setSnapshot(snapshot);
+                connect(&dialog, &Rag::AskPdfIndexDialog::refreshRequested,
+                        m_ragCoordinator,
+                        &Rag::RagDocumentCoordinator::requestIndexStats);
+                connect(&dialog, &Rag::AskPdfIndexDialog::rebuildRequested,
+                        m_ragCoordinator,
+                        &Rag::RagDocumentCoordinator::rebuildCurrentDocument);
+                connect(&dialog, &Rag::AskPdfIndexDialog::deleteRequested, this,
+                        [this, &dialog]() {
+                            if (!m_ragCoordinator) {
+                                return;
+                            }
+                            if (QMessageBox::question(
+                                    this, tr("删除当前文档索引"),
+                                    tr("只删除本地索引，不会修改 PDF。确定继续"
+                                       "吗？")) != QMessageBox::Yes) {
+                                return;
+                            }
+                            dialog.setBusy(true);
+                            m_ragCoordinator->deleteCurrentDocumentIndex();
+                        });
+                connect(
+                    &dialog, &Rag::AskPdfIndexDialog::clearAllRequested, this,
+                    [this, &dialog]() {
+                        if (!m_ragCoordinator) {
+                            return;
+                        }
+                        if (QMessageBox::question(
+                                this, tr("清空 Ask PDF 索引"),
+                                tr("确定删除所有文档的本地索引吗？PDF 文件"
+                                   "本身不会被修改。")) != QMessageBox::Yes) {
+                            return;
+                        }
+                        dialog.setBusy(true);
+                        m_ragCoordinator->clearAllIndexes();
+                    });
+                connect(m_ragCoordinator,
+                        &Rag::RagDocumentCoordinator::indexStatsReady, &dialog,
+                        [&dialog](const Rag::RagIndexStats& stats) {
+                            dialog.setStats(stats);
+                            dialog.setBusy(false);
+                        });
+                connect(
+                    m_ragCoordinator,
+                    &Rag::RagDocumentCoordinator::currentDocumentStateChanged,
+                    &dialog,
+                    [&dialog](const Rag::RagDocumentSnapshot& updated) {
+                        dialog.setDocument(updated.key);
+                        dialog.setSnapshot(updated);
+                    });
+                connect(m_ragCoordinator,
+                        &Rag::RagDocumentCoordinator::documentIndexDeleted,
+                        &dialog, [this, &dialog]() {
+                            dialog.showInfo(tr("已删除当前文档索引。"));
+                            dialog.setBusy(false);
+                            if (m_ragCoordinator) {
+                                m_ragCoordinator->requestIndexStats();
+                            }
+                        });
+                connect(m_ragCoordinator,
+                        &Rag::RagDocumentCoordinator::documentIndexDeleteFailed,
+                        &dialog, [&dialog](const QString& error) {
+                            dialog.setBusy(false);
+                            dialog.showError(error);
+                        });
+                connect(m_ragCoordinator,
+                        &Rag::RagDocumentCoordinator::indexClearingChanged,
+                        &dialog,
+                        [&dialog](bool clearing) { dialog.setBusy(clearing); });
+                connect(m_ragCoordinator,
+                        &Rag::RagDocumentCoordinator::indexCleared, &dialog,
+                        [this, &dialog]() {
+                            dialog.showInfo(tr("已清空全部索引。"));
+                            dialog.setBusy(false);
+                            if (m_ragCoordinator) {
+                                m_ragCoordinator->requestIndexStats();
+                            }
+                        });
+                connect(m_ragCoordinator,
+                        &Rag::RagDocumentCoordinator::indexClearFailed, &dialog,
+                        [&dialog](const QString& error) {
+                            dialog.setBusy(false);
+                            dialog.showError(error);
+                        });
+                dialog.exec();
+            });
         connect(askWidget, &Rag::AskPdfWidget::evidenceActivated, this,
                 [this](const Rag::RagEvidence& evidence) {
                     if (!m_ragCoordinator || !viewWidget) {
@@ -433,8 +531,11 @@ void MainWindow::initConnection() {
         askWidget->setIndexState(
             snapshot.state, snapshot.chunkCount, snapshot.error,
             snapshot.embeddingState, snapshot.embeddedChunkCount,
-            snapshot.embeddingError, snapshot.failureReason);
+            snapshot.embeddingError, snapshot.failureReason,
+            snapshot.processedPages, snapshot.totalPages);
         askWidget->setAnswerEnabled(m_ragCoordinator->settings().chatEnabled());
+        askWidget->setEmbeddingEnabled(
+            m_ragCoordinator->settings().embeddingsEnabled());
         connect(
             askWidget, &Rag::AskPdfWidget::settingsRequested, this,
             [this, askWidget]() {
@@ -453,6 +554,8 @@ void MainWindow::initConnection() {
                             m_ragCoordinator->settings();
                         m_ragCoordinator->applySettings(settings);
                         askWidget->setAnswerEnabled(settings.chatEnabled());
+                        askWidget->setEmbeddingEnabled(
+                            settings.embeddingsEnabled());
                         if (statusBar) {
                             statusBar->setMessage(
                                 previous.chatModel != settings.chatModel
