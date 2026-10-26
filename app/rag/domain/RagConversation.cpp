@@ -19,4 +19,24 @@ QStringList conversationFromTurns(const QVector<RagConversationTurn>& turns) {
     return conversation;
 }
 
+QStringList historyForPrompt(const QVector<RagConversationTurn>& turns,
+                             quint64 historyEpoch,
+                             const QString& currentTurnId) {
+    QVector<RagConversationTurn> eligible;
+    bool foundCurrent = currentTurnId.isEmpty();
+    for (const RagConversationTurn& turn : turns) {
+        if (!currentTurnId.isEmpty() && turn.id == currentTurnId) {
+            foundCurrent = true;
+            break;
+        }
+        if (turn.historyEpoch == historyEpoch) {
+            eligible.append(turn);
+        }
+    }
+    if (!foundCurrent) {
+        return {};
+    }
+    return conversationFromTurns(eligible);
+}
+
 }  // namespace Rag

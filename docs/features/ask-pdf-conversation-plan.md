@@ -50,7 +50,7 @@ enum class RagTurnState { Retrieving, Generating, Ready, Failed, Cancelled };
 
 enum class RagChatFailure {
     None, Timeout, Unreachable, ModelMissing,
-    BudgetEvidence, BudgetHistory, ContextTooSmall,
+    BudgetEvidence, ContextTooSmall,
     Rejected, Cancelled, Unknown
 };
 
@@ -69,10 +69,13 @@ struct RagConversationTurn {
 ```
 
 - `turnId` 标识逻辑轮次，`generation` 标识生成尝试，两者分离。
-- 历史由有效轮次派生：
+- 历史由有效轮次派生。每个轮次带 `historyEpoch`，换 Chat 模型时递增
+  `Entry::historyEpoch`；只有当前纪元的完成轮次参与上下文，屏幕上的旧轮次保留：
 
 ```cpp
-QStringList conversationFromTurns(const QVector<RagConversationTurn>& turns);
+QStringList historyForPrompt(const QVector<RagConversationTurn>& turns,
+                             quint64 historyEpoch,
+                             const QString& currentTurnId);
 ```
 
 ### Model 通知规范
@@ -143,7 +146,7 @@ Coordinator 状态迁移
 ```
 
 - `Cancelled` 是正常终态，不用红色错误样式。
-- `BudgetExceeded` 拆三类：`BudgetEvidence`、`BudgetHistory`、`ContextTooSmall`。
+- 预算错误分为 `BudgetEvidence` 与 `ContextTooSmall`；历史按预算裁剪，不视为失败。
 - `ModelMissing` / `Unreachable` 由 Provider 适配层判断，UI 不解析 HTTP 状态码。
 
 ## UI

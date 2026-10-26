@@ -64,14 +64,18 @@ QThreadPool& embeddingPool() {
 RagDocumentCoordinator::RagDocumentCoordinator(
     DocumentModel* documentModel, QString databasePath, QObject* parent,
     ChatProviderFactory chatProviderFactory,
-    EmbeddingProviderFactory embeddingProviderFactory, RagSettings settings)
+    EmbeddingProviderFactory embeddingProviderFactory, RagSettings settings,
+    std::shared_ptr<RagConversationStore> conversationStore)
     : QObject(parent),
       m_documentModel(documentModel),
       m_databasePath(databasePath.isEmpty() ? defaultDatabasePath()
                                             : std::move(databasePath)),
       m_chatProviderFactory(std::move(chatProviderFactory)),
       m_embeddingProviderFactory(std::move(embeddingProviderFactory)),
-      m_settings(settings.normalized()) {
+      m_settings(settings.normalized()),
+      m_conversationStore(conversationStore
+                              ? std::move(conversationStore)
+                              : std::make_shared<InMemoryConversationStore>()) {
     if (!m_documentModel) {
         return;
     }
@@ -120,6 +124,7 @@ void RagDocumentCoordinator::askQuestion(const QString& question, int limit) {
     RagConversationTurn turn;
     turn.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
     turn.question = question;
+    turn.historyEpoch = entry.historyEpoch;
     turn.state = RagTurnState::Retrieving;
     const int index = entry.conversation->appendTurn(std::move(turn));
     const QString turnId = entry.conversation->turns().at(index).id;
@@ -347,6 +352,7 @@ void RagDocumentCoordinator::startIndexing(const QString& filePath,
     }
 
     Entry& entry = m_entries[path];
+    const QString previousContentHash = entry.snapshot.key.contentHash;
     if (!forceRebuild &&
         (entry.snapshot.isReady() || isIndexingState(entry.snapshot.state))) {
         if (path == m_currentPath) {
@@ -373,10 +379,13 @@ void RagDocumentCoordinator::startIndexing(const QString& filePath,
     entry.snapshot.failureReason = RagIndexFailureReason::None;
     entry.snapshot.chunkCount = 0;
     entry.snapshot.error.clear();
-    if (entry.conversation) {
-        entry.conversation->clear();
+    if (forceRebuild) {
+        ++entry.historyEpoch;
+        if (entry.conversation) {
+            entry.conversation->clear();
+        }
+        m_conversationStore->remove(path);
     }
-    m_conversationStore->remove(path);
     entry.snapshot.embeddingState = RagEmbeddingState::Disabled;
     entry.snapshot.embeddingIdentity = {};
     entry.snapshot.embeddedChunkCount = 0;
@@ -422,7 +431,7 @@ void RagDocumentCoordinator::startIndexing(const QString& filePath,
 
     auto* watcher = new QFutureWatcher<IndexJobResult>(this);
     connect(watcher, &QFutureWatcher<IndexJobResult>::finished, this,
-            [this, watcher, path]() {
+            [this, watcher, path, previousContentHash]() {
                 const IndexJobResult result = watcher->result();
                 watcher->deleteLater();
 
@@ -434,6 +443,15 @@ void RagDocumentCoordinator::startIndexing(const QString& filePath,
                 }
                 if (!result.document.canonicalPath.isEmpty()) {
                     it->snapshot.key = result.document;
+                }
+                if (!previousContentHash.isEmpty() &&
+                    !result.document.contentHash.isEmpty() &&
+                    result.document.contentHash != previousContentHash) {
+                    ++it->historyEpoch;
+                    if (it->conversation) {
+                        it->conversation->clear();
+                    }
+                    m_conversationStore->remove(path);
                 }
                 it->snapshot.state = result.state;
                 it->snapshot.failureReason = result.reason;
@@ -863,8 +881,11 @@ void RagDocumentCoordinator::stopActiveTurn() {
 void RagDocumentCoordinator::clearConversation() {
     cancelActiveTurn(RagTurnState::Cancelled);
     auto it = m_entries.find(m_currentPath);
-    if (it != m_entries.end() && it->conversation) {
-        it->conversation->clear();
+    if (it != m_entries.end()) {
+        ++it->historyEpoch;
+        if (it->conversation) {
+            it->conversation->clear();
+        }
     }
     if (!m_currentPath.isEmpty()) {
         m_conversationStore->remove(m_currentPath);
@@ -890,9 +911,20 @@ void RagDocumentCoordinator::ensureConversation(Entry& entry,
         return;
     }
     entry.conversation = std::make_shared<RagConversationModel>();
-    const QVector<RagConversationTurn> stored = m_conversationStore->load(path);
-    for (const RagConversationTurn& turn : stored) {
+    const RagConversationState state = m_conversationStore->load(path);
+    entry.historyEpoch = qMax<quint64>(1, state.historyEpoch);
+    if (!state.chatModel.isEmpty() && state.chatModel != m_settings.chatModel) {
+        quint64 maxEpoch = entry.historyEpoch;
+        for (const RagConversationTurn& turn : state.turns) {
+            maxEpoch = qMax(maxEpoch, turn.historyEpoch);
+        }
+        entry.historyEpoch = maxEpoch + 1;
+    }
+    for (const RagConversationTurn& turn : state.turns) {
         entry.conversation->appendTurn(turn);
+    }
+    if (!state.turns.isEmpty()) {
+        persistConversation(path);
     }
 }
 
@@ -901,7 +933,11 @@ void RagDocumentCoordinator::persistConversation(const QString& path) {
     if (it == m_entries.end() || !it->conversation) {
         return;
     }
-    m_conversationStore->save(path, it->conversation->turns());
+    RagConversationState state;
+    state.turns = it->conversation->turns();
+    state.historyEpoch = it->historyEpoch;
+    state.chatModel = m_settings.chatModel;
+    m_conversationStore->save(path, state);
 }
 
 void RagDocumentCoordinator::regenerateTurn(const QString& turnIdRef) {
@@ -921,7 +957,8 @@ void RagDocumentCoordinator::regenerateTurn(const QString& turnIdRef) {
         return;
     }
     const quint64 generation = current->generation + 1;
-    const bool needsRetrieval = current->evidence.isEmpty();
+    const bool needsRetrieval =
+        current->evidence.isEmpty() || !current->evidenceComplete;
     const QString question = current->question;
     it->conversation->updateTurn(
         turnId, [generation, needsRetrieval](RagConversationTurn& turn) {
@@ -974,14 +1011,17 @@ void RagDocumentCoordinator::retryQuery() {
         return;
     }
     const QString question = current->question;
-    it->conversation->updateTurn(turnId, [](RagConversationTurn& turn) {
-        turn.state = RagTurnState::Retrieving;
-        turn.evidence.clear();
-        turn.answerText.clear();
-        turn.citations.clear();
-        turn.failure = RagChatFailure::None;
-        turn.error.clear();
-    });
+    const quint64 historyEpoch = it->historyEpoch;
+    it->conversation->updateTurn(turnId,
+                                 [historyEpoch](RagConversationTurn& turn) {
+                                     turn.historyEpoch = historyEpoch;
+                                     turn.state = RagTurnState::Retrieving;
+                                     turn.evidence.clear();
+                                     turn.answerText.clear();
+                                     turn.citations.clear();
+                                     turn.failure = RagChatFailure::None;
+                                     turn.error.clear();
+                                 });
     setActiveTurn(turnId, 0);
     emit conversationBusyChanged(true);
     startRetrieval(turnId, question, 10);
@@ -1012,17 +1052,23 @@ void RagDocumentCoordinator::applySettings(const RagSettings& settings) {
     if (embeddingChanged || endpointChanged) {
         abortInFlight();
     } else if (chatModelChanged || answerToggled) {
-        cancelActiveChat();
+        auto active = m_entries.find(m_currentPath);
+        const RagConversationTurn* turn =
+            (active != m_entries.end() && active->conversation &&
+             hasActiveTurn())
+                ? active->conversation->turn(m_activeTurnId)
+                : nullptr;
+        if (turn && turn->state == RagTurnState::Generating) {
+            cancelActiveTurn(RagTurnState::Cancelled);
+            emit answerBusyChanged(false);
+        }
+        // A retrieval in flight is allowed to finish and use the new settings.
     }
 
     for (auto it = m_entries.begin(); it != m_entries.end(); ++it) {
         Entry& entry = *it;
         if (chatModelChanged) {
-            if (entry.conversation) {
-                entry.conversation->keepOnly(
-                    it.key() == m_currentPath ? m_activeTurnId : QString());
-            }
-            m_conversationStore->remove(it.key());
+            ++entry.historyEpoch;
         }
         const bool embeddingWasActive =
             entry.snapshot.embeddingState == RagEmbeddingState::Pending ||
@@ -1073,6 +1119,7 @@ void RagDocumentCoordinator::deleteCurrentDocumentIndex() {
     ++it->snapshot.generation;
     invalidateQueries();
     clearRetryState();
+    ++it->historyEpoch;
     if (it->conversation) {
         it->conversation->clear();
     }
@@ -1195,6 +1242,7 @@ void RagDocumentCoordinator::clearAllIndexes() {
                 emit indexClearFailed(error);
             } else {
                 for (auto it = m_entries.begin(); it != m_entries.end(); ++it) {
+                    ++it->historyEpoch;
                     if (it->conversation) {
                         it->conversation->clear();
                     }
@@ -1256,6 +1304,10 @@ void RagDocumentCoordinator::startGeneration(const QString& turnId) {
         return;
     }
     const RagConversationTurn turn = *current;
+    // The retrieval path registers generation 0; a regenerated/restored turn
+    // can have a newer generation. Every generation entry must agree with the
+    // generation checked by the task callbacks.
+    setActiveTurn(turnId, turn.generation);
     auto provider = createChatProvider();
     if (!provider) {
         it->conversation->setState(turnId, RagTurnState::Ready);
@@ -1268,10 +1320,14 @@ void RagDocumentCoordinator::startGeneration(const QString& turnId) {
     const ChatBudget budget;
     const auto request = ContextAssembler::assembleBudgeted(
         turn.question, turn.evidence,
-        conversationFromTurns(it->conversation->turns()), budget);
+        historyForPrompt(it->conversation->turns(), it->historyEpoch, turnId),
+        budget);
     if (!request.assemblyError.isEmpty()) {
-        it->conversation->setFailure(turnId, RagChatFailure::BudgetEvidence,
-                                     request.assemblyError);
+        const RagChatFailure failure =
+            request.budgetIssue == ChatBudgetIssue::ContextTooSmall
+                ? RagChatFailure::ContextTooSmall
+                : RagChatFailure::BudgetEvidence;
+        it->conversation->setFailure(turnId, failure, request.assemblyError);
         it->conversation->setState(turnId, RagTurnState::Failed);
         clearActiveTurn();
         persistConversation(m_currentPath);
@@ -1338,8 +1394,8 @@ void RagDocumentCoordinator::startGeneration(const QString& turnId) {
                 const RagDocumentSnapshot snapshot = entry->snapshot;
                 auto answer = CitationValidator::validate(
                     text, request.evidence, snapshot.key.contentHash);
-                entry->conversation->setAnswer(turnId, answer.text,
-                                               answer.citations);
+                entry->conversation->setAnswer(turnId, answer.plainText,
+                                               answer.text, answer.citations);
                 entry->conversation->setState(turnId, RagTurnState::Ready);
                 m_validCitations.clear();
                 for (const auto& citation : answer.citations) {
@@ -1394,15 +1450,32 @@ void RagDocumentCoordinator::startGeneration(const QString& turnId) {
 }
 
 void RagDocumentCoordinator::activateCitation(const QString& chunkId) {
-    const auto it = m_validCitations.constFind(chunkId);
-    if (it == m_validCitations.constEnd())
-        return;
     const auto snapshot = currentSnapshot();
-    if (snapshot.key.contentHash.isEmpty() ||
-        snapshot.key.contentHash != it->documentHash) {
+    if (snapshot.key.contentHash.isEmpty()) {
         return;
     }
-    emit citationReady(*it);
+    const auto it = m_validCitations.constFind(chunkId);
+    if (it != m_validCitations.constEnd() &&
+        snapshot.key.contentHash == it->documentHash) {
+        emit citationReady(*it);
+        return;
+    }
+
+    // Restored conversations keep only their cited evidence; fall back to it
+    // so citation jumps keep working after a restart.
+    auto entry = m_entries.find(m_currentPath);
+    if (entry == m_entries.end() || !entry->conversation) {
+        return;
+    }
+    for (const RagConversationTurn& turn : entry->conversation->turns()) {
+        for (const RagEvidence& evidence : turn.evidence) {
+            if (evidence.chunkId == chunkId &&
+                evidence.documentHash == snapshot.key.contentHash) {
+                emit citationReady(evidence);
+                return;
+            }
+        }
+    }
 }
 
 QString RagDocumentCoordinator::pathForIndex(int index) const {

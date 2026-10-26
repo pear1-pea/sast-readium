@@ -62,6 +62,14 @@ AskPdfWidget::AskPdfWidget(QWidget* parent) : QWidget(parent) {
     m_indexButton->setAutoRaise(true);
     statusRow->addWidget(m_indexButton);
 
+    m_returnButton = new QToolButton(this);
+    m_returnButton->setObjectName(QStringLiteral("askPdfReturn"));
+    m_returnButton->setIcon(style()->standardIcon(QStyle::SP_ArrowBack));
+    m_returnButton->setToolTip(QStringLiteral("返回原位置"));
+    m_returnButton->setAutoRaise(true);
+    m_returnButton->hide();
+    statusRow->addWidget(m_returnButton);
+
     m_rebuildButton = new QToolButton(this);
     m_rebuildButton->setIcon(style()->standardIcon(QStyle::SP_BrowserReload));
     m_rebuildButton->setToolTip(QStringLiteral("重建索引"));
@@ -169,6 +177,8 @@ AskPdfWidget::AskPdfWidget(QWidget* parent) : QWidget(parent) {
             &AskPdfWidget::settingsRequested);
     connect(m_indexButton, &QToolButton::clicked, this,
             &AskPdfWidget::indexManagementRequested);
+    connect(m_returnButton, &QToolButton::clicked, this,
+            &AskPdfWidget::returnToPositionRequested);
 
     connect(m_statePrimary, &QPushButton::clicked, this, [this]() {
         switch (m_primaryAction) {
@@ -229,6 +239,8 @@ AskPdfWidget::AskPdfWidget(QWidget* parent) : QWidget(parent) {
             &AskPdfWidget::stopGenerationRequested);
     connect(m_conversation, &AskPdfConversationView::citationActivated, this,
             &AskPdfWidget::citationActivated);
+    connect(m_conversation, &AskPdfConversationView::settingsRequested, this,
+            &AskPdfWidget::settingsRequested);
 
     setDocumentContext({});
     setIndexState(RagIndexState::NotIndexed);
@@ -242,13 +254,7 @@ void AskPdfWidget::setDocumentContext(const DocumentKey& document) {
     m_documentLabel->setText(fileName.isEmpty() ? QStringLiteral("未打开 PDF")
                                                 : fileName);
     if (changed) {
-        clearEvidence();
-        resetAnswer();
-        m_hasSearched = false;
-        m_queryFailed = false;
-        m_answerFailed = false;
-        m_queryError.clear();
-        m_answerError.clear();
+        m_returnButton->hide();
         refreshStatusText();
         refreshEmptyState();
         refreshProgress();
@@ -272,14 +278,6 @@ void AskPdfWidget::setIndexState(RagIndexState state, int chunkCount,
     m_embeddingState = embeddingState;
     m_embeddedChunkCount = embeddedChunkCount;
     m_embeddingError = embeddingError;
-    if (state != RagIndexState::Ready) {
-        clearEvidence();
-        m_hasSearched = false;
-        m_queryFailed = false;
-        m_answerFailed = false;
-        m_queryError.clear();
-        m_answerError.clear();
-    }
     refreshStatusText();
     refreshEmptyState();
     refreshProgress();
@@ -348,21 +346,6 @@ void AskPdfWidget::setClearing(bool clearing) {
     updateControlStates();
 }
 
-void AskPdfWidget::setEvidence(const QVector<RagEvidence>& evidence) {
-    m_evidence = evidence;
-    m_hasSearched = true;
-    m_queryFailed = false;
-    m_queryError.clear();
-    refreshEmptyState();
-}
-
-void AskPdfWidget::setBusy(bool busy) {
-    m_busy = busy;
-    refreshEmptyState();
-    refreshProgress();
-    updateControlStates();
-}
-
 void AskPdfWidget::setConversationBusy(bool busy) {
     m_conversationBusy = busy;
     m_stopButton->setVisible(busy && !m_clearing);
@@ -374,32 +357,9 @@ void AskPdfWidget::setConversationModel(RagConversationModel* model) {
     m_conversation->setModel(model);
 }
 
-void AskPdfWidget::resetAnswer() {
-    m_answerFailed = false;
-    m_answerError.clear();
-    refreshEmptyState();
+void AskPdfWidget::setReturnToPositionAvailable(bool available) {
+    m_returnButton->setVisible(available);
 }
-
-void AskPdfWidget::setAnswerError(const QString& error) {
-    resetAnswer();
-    m_queryFailed = false;
-    m_queryError.clear();
-    m_answerFailed = true;
-    m_answerError = error;
-    refreshEmptyState();
-}
-
-void AskPdfWidget::setQueryError(const QString& error) {
-    m_hasSearched = true;
-    m_queryFailed = true;
-    m_queryError = error;
-    m_answerFailed = false;
-    m_answerError.clear();
-    clearEvidence();
-    refreshEmptyState();
-}
-
-void AskPdfWidget::clearEvidence() { m_evidence.clear(); }
 
 void AskPdfWidget::submitQuery() {
     const QString query = m_queryEdit->toPlainText().trimmed();
@@ -407,11 +367,6 @@ void AskPdfWidget::submitQuery() {
         m_conversationBusy || m_clearing) {
         return;
     }
-    m_queryFailed = false;
-    m_answerFailed = false;
-    m_queryError.clear();
-    m_answerError.clear();
-    clearEvidence();
     m_queryEdit->clear();
     refreshEmptyState();
     emit questionSubmitted(query);
@@ -447,14 +402,8 @@ void AskPdfWidget::refreshEmptyState() {
     input.chunkCount = m_chunkCount;
     input.embeddedChunkCount = m_embeddedChunkCount;
     input.embeddingError = m_embeddingError;
-    input.busy = m_busy || m_conversationBusy;
-    input.hasSearched = m_hasSearched;
-    input.hasEvidence = !m_evidence.isEmpty();
+    input.busy = m_conversationBusy;
     input.answerEnabled = m_answerEnabled;
-    input.queryFailed = m_queryFailed;
-    input.answerFailed = m_answerFailed;
-    input.queryError = m_queryError;
-    input.answerError = m_answerError;
     input.indexError = m_indexError;
 
     const AskPdfStateView view = askPdfStateView(input);

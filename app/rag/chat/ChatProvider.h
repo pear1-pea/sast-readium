@@ -5,6 +5,8 @@
 #include "rag/domain/RagTypes.h"
 
 namespace Rag {
+enum class ChatBudgetIssue { None, ContextTooSmall, EvidenceOverflow };
+
 struct ChatRequest {
     QString question;
     QString context;
@@ -23,6 +25,7 @@ struct ChatRequest {
     int droppedHistoryTurns = 0;
     QStringList skippedEvidenceIds;
     QString assemblyError;
+    ChatBudgetIssue budgetIssue = ChatBudgetIssue::None;
 };
 class ChatTask : public QObject {
     Q_OBJECT

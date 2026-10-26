@@ -127,7 +127,10 @@ struct RagCitation {
 };
 
 struct RagAnswer {
+    /** Markdown with numbered inline citation links. */
     QString text;
+    /** Clean text without citation markers, used for copy/history. */
+    QString plainText;
     QVector<RagCitation> citations;
 };
 
@@ -138,7 +141,6 @@ enum class RagChatFailure {
     Unreachable,
     ModelMissing,
     BudgetEvidence,
-    BudgetHistory,
     ContextTooSmall,
     Rejected,
     Cancelled,

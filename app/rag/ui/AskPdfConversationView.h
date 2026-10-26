@@ -26,6 +26,7 @@ signals:
     void regenerateRequested(const QString& turnId);
     void stopRequested();
     void citationActivated(const QString& chunkId);
+    void settingsRequested();
 
 private:
     void rebuild();

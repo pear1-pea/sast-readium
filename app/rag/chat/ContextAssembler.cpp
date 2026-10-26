@@ -106,6 +106,7 @@ ChatRequest ContextAssembler::assembleBudgeted(
         budget.tokenSafetyMargin < 0 || capacity <= 0) {
         request.estimatedInputTokens = estimateInputTokens(request);
         request.assemblyError = QStringLiteral("上下文预算配置无效");
+        request.budgetIssue = ChatBudgetIssue::ContextTooSmall;
         return request;
     }
 
@@ -115,6 +116,7 @@ ChatRequest ContextAssembler::assembleBudgeted(
     if (remaining < 0) {
         request.estimatedInputTokens = estimateInputTokens(request);
         request.assemblyError = QStringLiteral("问题超出上下文预算");
+        request.budgetIssue = ChatBudgetIssue::ContextTooSmall;
         return request;
     }
 
@@ -166,6 +168,7 @@ ChatRequest ContextAssembler::assembleBudgeted(
     if (request.evidence.isEmpty() && !evidence.isEmpty()) {
         request.assemblyError =
             QStringLiteral("证据超出上下文预算，未能放入任何片段");
+        request.budgetIssue = ChatBudgetIssue::EvidenceOverflow;
     }
     return request;
 }
@@ -192,30 +195,46 @@ RagAnswer CitationValidator::validate(const QString& answer,
             allowed.insert(item.chunkId, item);
     }
     RagAnswer result;
-    QSet<QString> cited;
+    QHash<QString, int> numbers;
     const QRegularExpression pattern(
         QStringLiteral("\\[\\[cite:([^\\]\\r\\n]+)\\]\\]"));
     auto iterator = pattern.globalMatch(answer);
     int offset = 0;
     while (iterator.hasNext()) {
         const auto match = iterator.next();
-        result.text += answer.mid(offset, match.capturedStart() - offset);
+        const QString prefix =
+            answer.mid(offset, match.capturedStart() - offset);
+        result.text += prefix;
+        result.plainText += prefix;
+
         const QString id = match.captured(1);
         const auto evidence = allowed.constFind(id);
-        if (evidence != allowed.constEnd() && !cited.contains(id)) {
-            RagCitation citation;
-            citation.chunkId = id;
-            citation.pageStart = evidence->pageStart;
-            citation.pageEnd = evidence->pageEnd;
-            citation.sectionPath = evidence->sectionPath;
-            citation.snippet = citationSnippet(evidence->text);
-            result.citations.append(citation);
-            cited.insert(id);
+        if (evidence != allowed.constEnd()) {
+            int number = 0;
+            const auto existing = numbers.constFind(id);
+            if (existing != numbers.constEnd()) {
+                number = existing.value();
+            } else {
+                number = result.citations.size() + 1;
+                numbers.insert(id, number);
+                RagCitation citation;
+                citation.chunkId = id;
+                citation.pageStart = evidence->pageStart;
+                citation.pageEnd = evidence->pageEnd;
+                citation.sectionPath = evidence->sectionPath;
+                citation.snippet = citationSnippet(evidence->text);
+                result.citations.append(citation);
+            }
+            result.text +=
+                QStringLiteral("[%1](readium-cite:%2)").arg(number).arg(id);
         }
         offset = match.capturedEnd();
     }
-    result.text += answer.mid(offset);
+    const QString tail = answer.mid(offset);
+    result.text += tail;
+    result.plainText += tail;
     result.text = result.text.trimmed();
+    result.plainText = result.plainText.trimmed();
     return result;
 }
 }  // namespace Rag

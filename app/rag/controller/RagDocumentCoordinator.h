@@ -34,7 +34,8 @@ public:
         DocumentModel* documentModel, QString databasePath = {},
         QObject* parent = nullptr, ChatProviderFactory chatProviderFactory = {},
         EmbeddingProviderFactory embeddingProviderFactory = {},
-        RagSettings settings = {});
+        RagSettings settings = {},
+        std::shared_ptr<RagConversationStore> conversationStore = {});
     ~RagDocumentCoordinator() override;
 
     RagDocumentSnapshot currentSnapshot() const;
@@ -125,6 +126,7 @@ private:
         RagCancellationToken embeddingCancellation;
         qint64 lastProgressPublishMs = 0;
         std::shared_ptr<RagConversationModel> conversation;
+        quint64 historyEpoch = 1;
     };
 
     DocumentModel* m_documentModel = nullptr;
@@ -137,8 +139,7 @@ private:
     QPointer<ChatTask> m_chatTask;
     QString m_lastQuery;
     QVector<RagEvidence> m_lastEvidence;
-    std::shared_ptr<RagConversationStore> m_conversationStore =
-        std::make_shared<InMemoryConversationStore>();
+    std::shared_ptr<RagConversationStore> m_conversationStore;
     QString m_activeTurnId;
     quint64 m_activeTurnGeneration = 0;
     QHash<QString, RagEvidence> m_validCitations;

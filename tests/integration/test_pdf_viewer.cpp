@@ -103,6 +103,7 @@ private slots:
     void testZoomSignals();
     void testRotation();
     void testViewModeSwitch();
+    void testViewportCaptureRestore();
     void testContinuousModeRendersCanvas();
     void testSinglePagePaintDoesNotCrash();
     void testAnnotationPlacementDoesNotCrash();
@@ -265,6 +266,32 @@ void TestPDFViewer::testViewModeSwitch() {
     // Same mode → no signal
     m_viewer->setViewMode(PDFViewMode::SinglePage);
     QCOMPARE(modeSpy.count(), 4);
+}
+
+void TestPDFViewer::testViewportCaptureRestore() {
+    m_viewer->resize(800, 1000);
+    m_viewer->show();
+    QCoreApplication::processEvents();
+    m_viewer->setViewMode(PDFViewMode::ContinuousScroll);
+    QCoreApplication::processEvents();
+    m_viewer->goToPage(1);
+    m_viewer->setZoom(1.5);
+    QCoreApplication::processEvents();
+
+    const PDFViewerPosition position = m_viewer->captureViewport();
+    QCOMPARE(position.page, 1);
+    QCOMPARE(position.zoom, 1.5);
+
+    m_viewer->goToPage(0);
+    m_viewer->setZoom(1.0);
+    QCoreApplication::processEvents();
+    m_viewer->restoreViewport(position);
+    QCoreApplication::processEvents();
+
+    const PDFViewerPosition restored = m_viewer->captureViewport();
+    QCOMPARE(restored.page, position.page);
+    QCOMPARE(restored.zoom, position.zoom);
+    QVERIFY(qAbs(restored.offsetY - position.offsetY) <= 5.0);
 }
 
 void TestPDFViewer::testContinuousModeRendersCanvas() {

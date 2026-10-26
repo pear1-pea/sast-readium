@@ -10,6 +10,7 @@
 #include <QSignalSpy>
 #include <QTcpServer>
 #include <QTcpSocket>
+#include <QTextBrowser>
 #include <QToolButton>
 #include <QtTest>
 #include "rag/chat/ContextAssembler.h"
@@ -32,6 +33,7 @@ private slots:
     void askPdfStatusTextCopy();
     void progressBarReflectsIndexing();
     void turnCardActions();
+    void turnCardMarkdownAndCollapse();
     void conversationViewFollowsModel();
     void askPdfWidgetSubmitsAndClearsConversation();
     void statusAndSettingsButton();
@@ -558,30 +560,6 @@ void TestRagP3::askPdfStatePanelActions() {
     QCOMPARE(primary->text(), QStringLiteral("配置本地模型"));
     primary->click();
     QCOMPARE(settingsSpy.count(), 1);
-
-    widget.setAnswerEnabled(true);
-    widget.setEvidence({});
-    QVERIFY(title->text().contains(QStringLiteral("没有找到足够相关的证据")));
-    QCOMPARE(primary->text(), QStringLiteral("换个问法"));
-
-    QSignalSpy querySpy(&widget, &AskPdfWidget::retryQueryRequested);
-    widget.setQueryError(QStringLiteral("boom"));
-    QVERIFY(title->text().contains(QStringLiteral("检索失败")));
-    QCOMPARE(primary->text(), QStringLiteral("重试"));
-    primary->click();
-    QCOMPARE(querySpy.count(), 1);
-
-    QSignalSpy answerSpy(&widget, &AskPdfWidget::retryAnswerRequested);
-    RagEvidence evidence;
-    evidence.chunkId = QStringLiteral("chunk");
-    evidence.documentHash = QStringLiteral("hash");
-    evidence.pageStart = 0;
-    evidence.text = QStringLiteral("evidence");
-    widget.setEvidence({evidence});
-    widget.setAnswerError(QStringLiteral("chat failed"));
-    QVERIFY(title->text().contains(QStringLiteral("回答生成失败")));
-    primary->click();
-    QCOMPARE(answerSpy.count(), 1);
 }
 
 void TestRagP3::askPdfProgressCopy() {
@@ -692,6 +670,15 @@ void TestRagP3::turnCardActions() {
     turn.question = QStringLiteral("question");
     turn.answerText = QStringLiteral("answer");
 
+    RagConversationTurn loading;
+    loading.id = QStringLiteral("loading");
+    loading.state = RagTurnState::Retrieving;
+    AskPdfTurnCard loadingCard(loading);
+    auto* skeleton =
+        loadingCard.findChild<QLabel*>(QStringLiteral("turnSkeleton"));
+    QVERIFY(skeleton);
+    QVERIFY(skeleton->isVisibleTo(&loadingCard));
+
     AskPdfTurnCard card(turn);
     auto* copy = card.findChild<QPushButton*>(QStringLiteral("turnCopyButton"));
     auto* regenerate =
@@ -734,6 +721,41 @@ void TestRagP3::turnCardActions() {
     QCOMPARE(regenerateSpy.count(), 2);
 }
 
+void TestRagP3::turnCardMarkdownAndCollapse() {
+    RagConversationTurn turn;
+    turn.id = QStringLiteral("turn-long");
+    turn.state = RagTurnState::Ready;
+    turn.question = QStringLiteral("question");
+    turn.answerText = QString(700, QLatin1Char('a'));
+    turn.answerMarkdown = QString(700, QLatin1Char('a')) +
+                          QStringLiteral(" [1](readium-cite:chunk_a)");
+    RagCitation citation;
+    citation.chunkId = QStringLiteral("chunk_a");
+    citation.pageStart = 3;
+    citation.pageEnd = 3;
+    citation.sectionPath = QStringLiteral("Methods");
+    citation.snippet = QStringLiteral("snippet");
+    turn.citations.append(citation);
+
+    AskPdfTurnCard card(turn);
+    auto* answer = card.findChild<QTextBrowser*>(QStringLiteral("turnAnswer"));
+    auto* expand =
+        card.findChild<QPushButton*>(QStringLiteral("turnExpandButton"));
+    QVERIFY(answer);
+    QVERIFY(expand);
+    QVERIFY(expand->isVisibleTo(&card));
+    QVERIFY(answer->toPlainText().size() < turn.answerText.size());
+
+    QSignalSpy citationSpy(&card, &AskPdfTurnCard::citationActivated);
+    answer->anchorClicked(QUrl(QStringLiteral("readium-cite:chunk_a")));
+    QCOMPARE(citationSpy.count(), 1);
+    QCOMPARE(citationSpy.first().first().toString(), QStringLiteral("chunk_a"));
+
+    expand->click();
+    QVERIFY(answer->toPlainText().size() >= turn.answerText.size());
+    QCOMPARE(expand->text(), QStringLiteral("收起"));
+}
+
 void TestRagP3::conversationViewFollowsModel() {
     RagConversationModel model;
     AskPdfConversationView view;
@@ -757,9 +779,9 @@ void TestRagP3::conversationViewFollowsModel() {
         value.answerText = QStringLiteral("answer");
     });
     auto* answer =
-        cards.first()->findChild<QLabel*>(QStringLiteral("turnAnswer"));
+        cards.first()->findChild<QTextBrowser*>(QStringLiteral("turnAnswer"));
     QVERIFY(answer);
-    QCOMPARE(answer->text(), QStringLiteral("answer"));
+    QCOMPARE(answer->toPlainText(), QStringLiteral("answer"));
 
     model.clear();
     QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);

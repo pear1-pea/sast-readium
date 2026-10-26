@@ -887,6 +887,36 @@ bool PDFViewer::goToPageWithValidation(int pageNumber, bool showMessage) {
     return true;
 }
 
+PDFViewerPosition PDFViewer::captureViewport() const {
+    PDFViewerPosition position;
+    position.page = d->currentPageNumber;
+    position.mode = getViewMode();
+    position.zoom = d->zoomController ? d->zoomController->currentZoom() : 1.0;
+    if (getViewMode() == PDFViewMode::ContinuousScroll &&
+        d->continuousScrollArea) {
+        position.offsetY =
+            d->continuousScrollArea->verticalScrollBar()->value();
+    }
+    return position;
+}
+
+void PDFViewer::restoreViewport(const PDFViewerPosition& position) {
+    if (position.zoom > 0.0 && d->zoomController &&
+        qAbs(d->zoomController->currentZoom() - position.zoom) > 0.001) {
+        setZoom(position.zoom);
+    }
+    goToPage(position.page);
+    if (getViewMode() == position.mode &&
+        getViewMode() == PDFViewMode::ContinuousScroll &&
+        d->continuousScrollArea) {
+        d->continuousScrollArea->verticalScrollBar()->setValue(
+            int(position.offsetY));
+        if (d->continuousCanvas) {
+            d->continuousCanvas->setContentOffsetY(position.offsetY);
+        }
+    }
+}
+
 void PDFViewer::nextPage() {
     if (d->document && d->currentPageNumber < d->document->numPages() - 1) {
         goToPage(d->currentPageNumber + 1);

@@ -26,6 +26,7 @@ public:
         TurnIdRole = Qt::UserRole + 1,
         QuestionRole,
         AnswerRole,
+        AnswerMarkdownRole,
         CitationsRole,
         EvidenceRole,
         StateRole,
@@ -54,12 +55,11 @@ public:
     void setEvidence(const QString& turnId, QVector<RagEvidence> evidence);
     void appendAnswerDelta(const QString& turnId, const QString& delta);
     void setAnswer(const QString& turnId, const QString& text,
-                   QVector<RagCitation> citations);
+                   const QString& markdown, QVector<RagCitation> citations);
     void setFailure(const QString& turnId, RagChatFailure failure,
                     const QString& error);
     void setPromptTokens(const QString& turnId, int tokens);
     void truncateAfter(int index);
-    void keepOnly(const QString& turnId);
     void clear();
 
 signals:

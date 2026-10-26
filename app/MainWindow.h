@@ -136,6 +136,8 @@ private:
     ThemeManager* m_themeManager;
     Rag::RagDocumentCoordinator* m_ragCoordinator;
     QString m_ragUiDocumentPath;
+    int m_returnPage = -1;
+    qreal m_returnOffsetY = 0.0;
 
     QPair<QString, int> m_pendingBookmarkNavigation;
 

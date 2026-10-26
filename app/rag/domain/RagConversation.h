@@ -21,10 +21,14 @@ namespace Rag {
 struct RagConversationTurn {
     QString id;
     quint64 generation = 0;
+    quint64 historyEpoch = 1;
     QString question;
-    QString answerText;
+    QString answerText;      // clean text for copy/history
+    QString answerMarkdown;  // numbered inline citation links for rendering
     QVector<RagCitation> citations;
     QVector<RagEvidence> evidence;
+    /** False when evidence was restored from a partial persisted subset. */
+    bool evidenceComplete = true;
     RagTurnState state = RagTurnState::Retrieving;
     RagChatFailure failure = RagChatFailure::None;
     QString error;
@@ -39,6 +43,15 @@ struct RagConversationTurn {
  * they were a normal assistant reply.
  */
 QStringList conversationFromTurns(const QVector<RagConversationTurn>& turns);
+
+/**
+ * History for the current prompt: only completed turns from the current
+ * history epoch, in order, up to (but excluding) the current turn. Returns an
+ * empty list when currentTurnId is not part of the conversation.
+ */
+QStringList historyForPrompt(const QVector<RagConversationTurn>& turns,
+                             quint64 historyEpoch,
+                             const QString& currentTurnId);
 
 }  // namespace Rag
 

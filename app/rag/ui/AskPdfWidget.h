@@ -34,16 +34,12 @@ public:
         int embeddedChunkCount = 0, const QString& embeddingError = {},
         RagIndexFailureReason failureReason = RagIndexFailureReason::None,
         int processedPages = 0, int totalPages = 0);
-    void setEvidence(const QVector<RagEvidence>& evidence);
-    void setBusy(bool busy);
     void setClearing(bool clearing);
-    void resetAnswer();
-    void setAnswerError(const QString& error);
-    void setQueryError(const QString& error);
     void setAnswerEnabled(bool enabled);
     void setEmbeddingEnabled(bool enabled);
     void setConversationModel(RagConversationModel* model);
     void setConversationBusy(bool busy);
+    void setReturnToPositionAvailable(bool available);
 
 signals:
     void questionSubmitted(const QString& question);
@@ -59,6 +55,7 @@ signals:
     void clearConversationRequested();
     void retryAnswerRequested();
     void retryQueryRequested();
+    void returnToPositionRequested();
 
 protected:
     bool eventFilter(QObject* watched, QEvent* event) override;
@@ -69,7 +66,6 @@ private:
     void refreshStatusText();
     void refreshEmptyState();
     void refreshProgress();
-    void clearEvidence();
 
     DocumentKey m_document;
     RagIndexState m_state = RagIndexState::NotIndexed;
@@ -83,15 +79,8 @@ private:
     QString m_embeddingError;
     bool m_answerEnabled = true;
     bool m_embeddingsEnabled = false;
-    bool m_hasSearched = false;
-    bool m_queryFailed = false;
-    bool m_answerFailed = false;
-    QString m_queryError;
-    QString m_answerError;
-    bool m_busy = false;
     bool m_conversationBusy = false;
     bool m_clearing = false;
-    QVector<RagEvidence> m_evidence;
 
     QLabel* m_documentLabel = nullptr;
     QLabel* m_statusLabel = nullptr;
@@ -113,6 +102,7 @@ private:
     QToolButton* m_clearButton = nullptr;
     QToolButton* m_settingsButton = nullptr;
     QToolButton* m_indexButton = nullptr;
+    QToolButton* m_returnButton = nullptr;
 };
 
 }  // namespace Rag

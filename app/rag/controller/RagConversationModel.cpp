@@ -3,6 +3,11 @@
 #include <utility>
 
 namespace Rag {
+namespace {
+constexpr int kMaxTurns = 20;
+constexpr int kMaxCharacters = 200000;
+constexpr int kMaxTurnCharacters = 20000;
+}  // namespace
 
 RagConversationModel::RagConversationModel(QObject* parent)
     : QAbstractListModel(parent) {}
@@ -23,6 +28,8 @@ QVariant RagConversationModel::data(const QModelIndex& index, int role) const {
             return turn.question;
         case AnswerRole:
             return turn.answerText;
+        case AnswerMarkdownRole:
+            return turn.answerMarkdown;
         case CitationsRole:
             return QVariant::fromValue(turn.citations);
         case EvidenceRole:
@@ -67,6 +74,22 @@ const RagConversationTurn* RagConversationModel::turn(
 }
 
 int RagConversationModel::appendTurn(RagConversationTurn turn) {
+    while (!m_turns.isEmpty()) {
+        int characters = 0;
+        for (const RagConversationTurn& existing : m_turns) {
+            characters += existing.question.size() + existing.answerText.size();
+        }
+        const bool tooManyTurns = m_turns.size() >= kMaxTurns;
+        const bool tooManyCharacters =
+            characters + turn.question.size() + turn.answerText.size() >
+            kMaxCharacters;
+        if (!tooManyTurns && !tooManyCharacters) {
+            break;
+        }
+        beginRemoveRows({}, 0, 0);
+        m_turns.removeFirst();
+        endRemoveRows();
+    }
     const int row = m_turns.size();
     beginInsertRows({}, row, row);
     m_turns.append(std::move(turn));
@@ -97,6 +120,7 @@ void RagConversationModel::setEvidence(const QString& turnId,
     updateTurn(turnId, [evidence = std::move(evidence)](
                            RagConversationTurn& turn) mutable {
         turn.evidence = std::move(evidence);
+        turn.evidenceComplete = true;
     });
 }
 
@@ -109,19 +133,27 @@ void RagConversationModel::appendAnswerDelta(const QString& turnId,
     if (row < 0) {
         return;
     }
-    m_turns[row].answerText += delta;
+    QString& text = m_turns[row].answerText;
+    const int remaining = kMaxTurnCharacters - text.size();
+    if (remaining <= 0) {
+        return;
+    }
+    text += delta.left(remaining);
     const QModelIndex modelIndex = index(row);
     emit dataChanged(modelIndex, modelIndex, {AnswerRole});
 }
 
 void RagConversationModel::setAnswer(const QString& turnId, const QString& text,
+                                     const QString& markdown,
                                      QVector<RagCitation> citations) {
-    updateTurn(turnId, [&text, &citations](RagConversationTurn& turn) {
-        turn.answerText = text;
-        turn.citations = citations;
-        turn.failure = RagChatFailure::None;
-        turn.error.clear();
-    });
+    updateTurn(turnId,
+               [&text, &markdown, &citations](RagConversationTurn& turn) {
+                   turn.answerText = text;
+                   turn.answerMarkdown = markdown;
+                   turn.citations = citations;
+                   turn.failure = RagChatFailure::None;
+                   turn.error.clear();
+               });
 }
 
 void RagConversationModel::setFailure(const QString& turnId,
@@ -147,22 +179,6 @@ void RagConversationModel::truncateAfter(int index) {
     beginRemoveRows({}, first, m_turns.size() - 1);
     m_turns.resize(first);
     endRemoveRows();
-}
-
-void RagConversationModel::keepOnly(const QString& turnId) {
-    const int index = indexOf(turnId);
-    if (index < 0) {
-        clear();
-        return;
-    }
-    if (m_turns.size() == 1) {
-        return;
-    }
-    beginResetModel();
-    RagConversationTurn turn = m_turns.at(index);
-    m_turns.clear();
-    m_turns.append(std::move(turn));
-    endResetModel();
 }
 
 void RagConversationModel::clear() {

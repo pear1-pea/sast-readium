@@ -50,8 +50,9 @@ iteration.
 Readium never starts or downloads an Ollama model. If embeddings are unavailable,
 the lexical path remains usable. If answers are disabled, Ask PDF still returns
 evidence and page navigation, and semantic retrieval keeps working when vectors
-are ready. Changing the chat model clears the in-memory conversation for open
-documents; toggling answers off and on does not.
+are ready. Changing the chat model keeps the conversation on screen but starts a new
+history boundary: later answers are generated without earlier turns as model
+context. Toggling answers off and on does not reset history.
 
 ## Progress and index management
 
@@ -87,6 +88,35 @@ document. Content shared with another open tab is kept until its last path is
 removed. Deleting or clearing an index never modifies the PDF file. The
 per-document size is a logical size and can differ from the file size shown for
 the whole database.
+
+## Conversation UI
+
+Each question becomes a turn card: question, answer, citations and per-turn
+actions (copy, regenerate, stop, retry). Answers are rendered as Markdown after
+generation completes; while streaming the card shows plain text. Long answers
+start collapsed and can be expanded. Citation numbers are assigned once by the
+validator and shared by inline links and the citation list (`[1] 第 3 页 · 方法`).
+
+Typed chat failures drive the copy and actions:
+
+- timeout: "回答生成超时，模型可能正在加载。" (retry)
+- unreachable: "无法连接本地 Ollama，请确认服务已启动。" (retry / settings)
+- missing model: "Chat 模型不存在，请先在 Ollama 中安装。" (settings)
+- evidence/history budget: retry, or clear the conversation when history no
+  longer fits the context window
+- cancelled: a normal terminal state, not a red error
+
+Clicking a citation records the viewer position before jumping. "返回原位置"
+restores the page and continuous-scroll offset and clears the evidence
+highlight. Only the first jump of a series updates the saved position.
+
+## Conversation persistence
+
+Completed turns (question, answer, numbered citations) are stored in
+`<QStandardPaths::AppDataLocation>/rag/conversations.json` with owner-only
+permissions. In-flight, failed and cancelled turns are not persisted; evidence
+is not stored, so regenerating a restored turn runs retrieval again. Clearing
+the conversation, rebuilding or deleting the index removes the stored turns.
 
 ## Empty and error states
 

@@ -312,6 +312,11 @@ void MainWindow::initConnection() {
                          snapshot.state != Rag::RagIndexState::Ready)) {
                         viewWidget->clearEvidenceHighlights();
                     }
+                    if (documentChanged) {
+                        m_returnPage = -1;
+                        m_returnOffsetY = 0.0;
+                        askWidget->setReturnToPositionAvailable(false);
+                    }
                     askWidget->setDocumentContext(snapshot.key);
                     askWidget->setIndexState(
                         snapshot.state, snapshot.chunkCount, snapshot.error,
@@ -379,8 +384,20 @@ void MainWindow::initConnection() {
         connect(askWidget, &Rag::AskPdfWidget::citationActivated,
                 m_ragCoordinator,
                 &Rag::RagDocumentCoordinator::activateCitation);
-        connect(m_ragCoordinator, &Rag::RagDocumentCoordinator::citationReady,
-                askWidget, &Rag::AskPdfWidget::evidenceActivated);
+        connect(
+            m_ragCoordinator, &Rag::RagDocumentCoordinator::citationReady, this,
+            [this, askWidget](const Rag::RagEvidence& evidence) {
+                if (viewWidget && m_returnPage < 0) {
+                    if (PDFViewer* viewer = viewWidget->getCurrentViewer()) {
+                        const PDFViewerPosition position =
+                            viewer->captureViewport();
+                        m_returnPage = position.page;
+                        m_returnOffsetY = position.offsetY;
+                        askWidget->setReturnToPositionAvailable(true);
+                    }
+                }
+                askWidget->evidenceActivated(evidence);
+            });
         connect(m_ragCoordinator,
                 &Rag::RagDocumentCoordinator::indexClearingChanged, askWidget,
                 &Rag::AskPdfWidget::setClearing);
@@ -409,6 +426,22 @@ void MainWindow::initConnection() {
                 m_ragCoordinator, &Rag::RagDocumentCoordinator::retryAnswer);
         connect(askWidget, &Rag::AskPdfWidget::retryQueryRequested,
                 m_ragCoordinator, &Rag::RagDocumentCoordinator::retryQuery);
+        connect(askWidget, &Rag::AskPdfWidget::returnToPositionRequested, this,
+                [this, askWidget]() {
+                    if (m_returnPage < 0 || !viewWidget) {
+                        return;
+                    }
+                    if (PDFViewer* viewer = viewWidget->getCurrentViewer()) {
+                        PDFViewerPosition position;
+                        position.page = m_returnPage;
+                        position.offsetY = m_returnOffsetY;
+                        viewer->restoreViewport(position);
+                        viewer->clearEvidenceHighlights();
+                    }
+                    m_returnPage = -1;
+                    m_returnOffsetY = 0.0;
+                    askWidget->setReturnToPositionAvailable(false);
+                });
         connect(
             askWidget, &Rag::AskPdfWidget::indexManagementRequested, this,
             [this]() {
@@ -569,7 +602,7 @@ void MainWindow::initConnection() {
                                 previous.chatModel != settings.chatModel
                                     ? QStringLiteral(
                                           "Ask PDF 设置已保存，更换 Chat 模型后"
-                                          "对话上下文已清空")
+                                          "后续回答不再使用此前对话作为上下文")
                                     : QStringLiteral(
                                           "Ask PDF 本地 AI 设置已保存"));
                         }

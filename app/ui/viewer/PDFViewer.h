@@ -26,6 +26,13 @@ enum class PDFViewMode {
     GridView           // 多页网格视图 (index 3)
 };
 
+struct PDFViewerPosition {
+    int page = 0;
+    qreal offsetY = 0.0;
+    qreal zoom = 1.0;
+    PDFViewMode mode = PDFViewMode::SinglePage;
+};
+
 class PDFViewer : public QWidget {
     Q_OBJECT
 
@@ -40,6 +47,8 @@ public:
 
     // 页面导航
     void goToPage(int pageNumber);
+    PDFViewerPosition captureViewport() const;
+    void restoreViewport(const PDFViewerPosition& position);
     void nextPage();
     void previousPage();
     void firstPage();

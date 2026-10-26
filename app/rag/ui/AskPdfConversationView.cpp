@@ -91,6 +91,8 @@ AskPdfTurnCard* AskPdfConversationView::createCard(int row) {
             &AskPdfConversationView::stopRequested);
     connect(card, &AskPdfTurnCard::citationActivated, this,
             &AskPdfConversationView::citationActivated);
+    connect(card, &AskPdfTurnCard::settingsRequested, this,
+            &AskPdfConversationView::settingsRequested);
     return card;
 }
 
