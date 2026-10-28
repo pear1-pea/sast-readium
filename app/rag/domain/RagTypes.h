@@ -127,7 +127,7 @@ struct RagCitation {
 };
 
 struct RagAnswer {
-    /** Markdown with numbered inline citation links. */
+    /** Markdown with page-labelled inline citation links. */
     QString text;
     /** Clean text without citation markers, used for copy/history. */
     QString plainText;

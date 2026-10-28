@@ -50,7 +50,6 @@ private:
     void setStatus(QLabel* label, const OllamaProbe::Result& result,
                    const QString& readyText);
     void resetStatuses();
-    static void setModelItems(QComboBox* combo, const QStringList& models);
 
     RagSettings m_initial;
     OllamaProbe* m_probe = nullptr;

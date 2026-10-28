@@ -1,3 +1,4 @@
+#include <QClipboard>
 #include <QElapsedTimer>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -34,6 +35,11 @@ private slots:
     void progressBarReflectsIndexing();
     void turnCardActions();
     void turnCardMarkdownAndCollapse();
+    void citationPageLabels();
+    void streamingHidesCitationMarkers();
+    void streamingHidesSingleBracketMarkers();
+    void beginAnswerDropsInterruptedMarker();
+    void answerCopyShortcutKeepsPages();
     void conversationViewFollowsModel();
     void askPdfWidgetSubmitsAndClearsConversation();
     void statusAndSettingsButton();
@@ -93,6 +99,11 @@ private slots:
         QCOMPARE(answer.citations.first().snippet.size(), 160);
         QVERIFY(answer.citations.first().snippet.endsWith("..."));
         QVERIFY(!answer.text.contains("[[cite:"));
+        // Inline citations carry the page, and the copyable text keeps it too.
+        QVERIFY(answer.text.contains(
+            QStringLiteral("[第 4 页](readium-cite:chunk_one)")));
+        QVERIFY(answer.plainText.contains(QStringLiteral("（第 4 页）")));
+        QVERIFY(request.context.contains(QStringLiteral("[page=4]")));
         QCOMPARE(
             CitationValidator::validate("[[cite:chunk_one]]", {item}, "other")
                 .citations.size(),
@@ -564,34 +575,48 @@ void TestRagP3::askPdfStatePanelActions() {
 
 void TestRagP3::askPdfProgressCopy() {
     AskPdfProgressInput input;
+    input.embeddingsEnabled = true;
     input.indexState = RagIndexState::Extracting;
     input.totalPages = 12;
     input.processedPages = 3;
     auto view = askPdfProgressView(input);
     QVERIFY(view.visible);
     QVERIFY(!view.indeterminate);
-    QCOMPARE(view.percent, 15);
+    // Stage-local progress: 3 of 12 pages is 25%, not a cumulative 15%.
+    QCOMPARE(view.percent, 25);
+    QVERIFY(view.text.contains(QStringLiteral("阶段 1/4")));
     QVERIFY(view.text.contains(QStringLiteral("3/12")));
 
     input.indexState = RagIndexState::Chunking;
     input.processedPages = 6;
     view = askPdfProgressView(input);
-    QCOMPARE(view.percent, 65);
+    QVERIFY(view.indeterminate);
+    QCOMPARE(view.percent, 0);
+    QVERIFY(view.text.contains(QStringLiteral("阶段 2/4")));
 
     input.indexState = RagIndexState::Indexing;
     view = askPdfProgressView(input);
     QVERIFY(view.visible);
     QVERIFY(view.indeterminate);
-    QCOMPARE(view.percent, 70);
+    QCOMPARE(view.percent, 0);
+    QVERIFY(view.text.contains(QStringLiteral("阶段 3/4")));
 
     input.indexState = RagIndexState::Ready;
-    input.embeddingsEnabled = true;
+    input.embeddingState = RagEmbeddingState::Pending;
+    view = askPdfProgressView(input);
+    QVERIFY(view.visible);
+    QVERIFY(view.indeterminate);
+    QVERIFY(view.text.contains(QStringLiteral("阶段 4/4")));
+
     input.embeddingState = RagEmbeddingState::Running;
     input.chunkCount = 100;
     input.embeddedChunkCount = 40;
     view = askPdfProgressView(input);
     QVERIFY(view.visible);
-    QCOMPARE(view.percent, 88);
+    QVERIFY(!view.indeterminate);
+    QCOMPARE(view.percent, 40);
+    QVERIFY(view.text.contains(QStringLiteral("40/100")));
+    QVERIFY(view.text.contains(QStringLiteral("文本块")));
 
     input.embeddingState = RagEmbeddingState::Ready;
     view = askPdfProgressView(input);
@@ -601,6 +626,12 @@ void TestRagP3::askPdfProgressCopy() {
     input.embeddingState = RagEmbeddingState::Running;
     view = askPdfProgressView(input);
     QVERIFY(!view.visible);
+
+    // Without embeddings the pipeline has three stages.
+    input.indexState = RagIndexState::Extracting;
+    input.processedPages = 3;
+    view = askPdfProgressView(input);
+    QVERIFY(view.text.contains(QStringLiteral("阶段 1/3")));
 
     input.indexState = RagIndexState::Failed;
     view = askPdfProgressView(input);
@@ -648,14 +679,16 @@ void TestRagP3::progressBarReflectsIndexing() {
                          RagEmbeddingState::Disabled, 0, {},
                          RagIndexFailureReason::None, 3, 12);
     QVERIFY(bar->isVisibleTo(&widget));
-    QCOMPARE(bar->value(), 15);
+    QCOMPARE(bar->value(), 25);
+    QVERIFY(bar->format().contains(QStringLiteral("阶段 1/4")));
     QVERIFY(bar->format().contains(QStringLiteral("3/12")));
 
     widget.setIndexState(RagIndexState::Ready, 100, {},
                          RagEmbeddingState::Running, 40, {},
                          RagIndexFailureReason::None, 12, 12);
     QVERIFY(bar->isVisibleTo(&widget));
-    QCOMPARE(bar->value(), 88);
+    QCOMPARE(bar->value(), 40);
+    QVERIFY(bar->format().contains(QStringLiteral("阶段 4/4")));
 
     widget.setIndexState(RagIndexState::Ready, 100, {},
                          RagEmbeddingState::Ready, 100, {},
@@ -860,6 +893,166 @@ void TestRagP3::statusAndSettingsButton() {
 
     widget.setAnswerEnabled(false);
     QVERIFY(status->text().contains(QStringLiteral("回答已关闭")));
+}
+
+void TestRagP3::citationPageLabels() {
+    RagEvidence range;
+    range.chunkId = QStringLiteral("range");
+    range.documentHash = QStringLiteral("doc");
+    range.pageStart = 11;
+    range.pageEnd = 12;
+    range.text = QStringLiteral("evidence");
+
+    const auto answer = CitationValidator::validate(
+        QStringLiteral("[[cite:range]]"), {range}, QStringLiteral("doc"));
+    QCOMPARE(answer.text, QStringLiteral("[第 12–13 页](readium-cite:range)"));
+    QCOMPARE(answer.plainText, QStringLiteral("（第 12–13 页）"));
+
+    RagEvidence unknown = range;
+    unknown.chunkId = QStringLiteral("unknown");
+    unknown.pageStart = -1;
+    unknown.pageEnd = -1;
+    const auto unknownAnswer = CitationValidator::validate(
+        QStringLiteral("[[cite:unknown]]"), {unknown}, QStringLiteral("doc"));
+    QCOMPARE(unknownAnswer.text,
+             QStringLiteral("[引用](readium-cite:unknown)"));
+    QCOMPARE(unknownAnswer.plainText, QStringLiteral("（引用）"));
+    QVERIFY(!unknownAnswer.text.contains(QStringLiteral("第 0 页")));
+
+    // A single-bracket marker is accepted, and an echoed placeholder is
+    // dropped instead of leaking into the answer text.
+    const auto single = CitationValidator::validate(
+        QStringLiteral("[cite:range]"), {range}, QStringLiteral("doc"));
+    QCOMPARE(single.text, QStringLiteral("[第 12–13 页](readium-cite:range)"));
+    const auto placeholder =
+        CitationValidator::validate(QStringLiteral("See [cite:chunk_id] above"),
+                                    {range}, QStringLiteral("doc"));
+    QVERIFY(!placeholder.text.contains(QStringLiteral("cite:")));
+    QVERIFY(!placeholder.text.contains(QStringLiteral("chunk_id")));
+    QVERIFY(placeholder.plainText.contains(QStringLiteral("See")));
+
+    // The evidence header uses the same 1-based range and omits unknown pages.
+    const auto request =
+        ContextAssembler::assembleBudgeted(QStringLiteral("q"), {range}, {});
+    QVERIFY(request.context.contains(QStringLiteral("[pages=12-13]")));
+    const auto unknownRequest =
+        ContextAssembler::assembleBudgeted(QStringLiteral("q"), {unknown}, {});
+    QVERIFY(!unknownRequest.context.contains(QStringLiteral("[page")));
+}
+
+void TestRagP3::streamingHidesCitationMarkers() {
+    RagConversationModel model;
+    RagConversationTurn turn;
+    turn.id = QStringLiteral("turn-stream");
+    turn.question = QStringLiteral("q");
+    model.appendTurn(turn);
+
+    const QString id = QStringLiteral("turn-stream");
+    model.appendAnswerDelta(id, QStringLiteral("在第 12 页 [[cit"));
+    QCOMPARE(model.turn(id)->answerText, QStringLiteral("在第 12 页 "));
+
+    // The marker is completed by the next delta and stays hidden.
+    model.appendAnswerDelta(id, QStringLiteral("e:chunk_a]]，见上文。"));
+    QCOMPARE(model.turn(id)->answerText,
+             QStringLiteral("在第 12 页 ，见上文。"));
+    QVERIFY(!model.turn(id)->answerText.contains(QStringLiteral("[[")));
+
+    // A single '[' is held for one delta but is not a citation marker.
+    model.appendAnswerDelta(id, QStringLiteral(" ["));
+    QCOMPARE(model.turn(id)->answerText,
+             QStringLiteral("在第 12 页 ，见上文。 "));
+    model.appendAnswerDelta(id, QStringLiteral("1]"));
+    QCOMPARE(model.turn(id)->answerText,
+             QStringLiteral("在第 12 页 ，见上文。 [1]"));
+
+    // A complete marker inside one delta is hidden immediately.
+    model.appendAnswerDelta(id, QStringLiteral("a[[cite:x]]b"));
+    QVERIFY(model.turn(id)->answerText.endsWith(QStringLiteral("ab")));
+
+    model.setAnswer(id, QStringLiteral("final（第 12 页）"),
+                    QStringLiteral("final [第 12 页](readium-cite:x)"), {});
+    QCOMPARE(model.turn(id)->answerText, QStringLiteral("final（第 12 页）"));
+}
+
+void TestRagP3::streamingHidesSingleBracketMarkers() {
+    RagConversationModel model;
+    RagConversationTurn turn;
+    turn.id = QStringLiteral("turn-single");
+    turn.question = QStringLiteral("q");
+    model.appendTurn(turn);
+
+    const QString id = QStringLiteral("turn-single");
+    // Some models drop one bracket from the prompt's [[cite:id]] form.
+    model.appendAnswerDelta(id, QStringLiteral("答案 [cit"));
+    QCOMPARE(model.turn(id)->answerText, QStringLiteral("答案 "));
+    model.appendAnswerDelta(id, QStringLiteral("e:chunk_a] 结束"));
+    QCOMPARE(model.turn(id)->answerText, QStringLiteral("答案  结束"));
+
+    // Bracketed text that is not a citation stays visible.
+    model.appendAnswerDelta(id, QStringLiteral(" [note] [1]"));
+    QCOMPARE(model.turn(id)->answerText,
+             QStringLiteral("答案  结束 [note] [1]"));
+
+    model.appendAnswerDelta(id, QStringLiteral(" [cite:chunk_a]!"));
+    QCOMPARE(model.turn(id)->answerText,
+             QStringLiteral("答案  结束 [note] [1] !"));
+}
+
+void TestRagP3::beginAnswerDropsInterruptedMarker() {
+    RagConversationModel model;
+    RagConversationTurn turn;
+    turn.id = QStringLiteral("turn-regen");
+    turn.state = RagTurnState::Generating;
+    turn.question = QStringLiteral("q");
+    turn.citations.append(RagCitation{});
+    model.appendTurn(turn);
+
+    const QString id = QStringLiteral("turn-regen");
+    // A stopped answer can leave a half marker held back for the next delta.
+    model.appendAnswerDelta(id, QStringLiteral("旧答案 [[cit"));
+    QCOMPARE(model.turn(id)->answerText, QStringLiteral("旧答案 "));
+
+    model.beginAnswer(id);
+    QCOMPARE(model.turn(id)->answerText, QString());
+    QVERIFY(model.turn(id)->answerMarkdown.isEmpty());
+    QVERIFY(model.turn(id)->citations.isEmpty());
+
+    // The new stream must not start with the stale fragment.
+    model.appendAnswerDelta(id, QStringLiteral("新答案"));
+    QCOMPARE(model.turn(id)->answerText, QStringLiteral("新答案"));
+}
+
+void TestRagP3::answerCopyShortcutKeepsPages() {
+    RagConversationTurn turn;
+    turn.id = QStringLiteral("turn-copy");
+    turn.state = RagTurnState::Ready;
+    turn.question = QStringLiteral("q");
+    turn.answerText = QStringLiteral("该情节在第 4 页（第 4 页）");
+    turn.answerMarkdown =
+        QStringLiteral("该情节在第 4 页[第 4 页](readium-cite:chunk_a)");
+    RagCitation citation;
+    citation.chunkId = QStringLiteral("chunk_a");
+    citation.pageStart = 3;
+    citation.pageEnd = 3;
+    turn.citations.append(citation);
+
+    AskPdfTurnCard card(turn);
+    auto* answer = card.findChild<QTextBrowser*>(QStringLiteral("turnAnswer"));
+    QVERIFY(answer);
+    answer->selectAll();
+    QTest::keyClick(answer, Qt::Key_C, Qt::ControlModifier);
+    // The browser copies its rendered text: the page link survives and chunk
+    // ids never appear.
+    const QString copied = QGuiApplication::clipboard()->text();
+    QVERIFY(copied.contains(QStringLiteral("第 4 页")));
+    QVERIFY(!copied.contains(QStringLiteral("chunk_")));
+
+    auto* copy = card.findChild<QPushButton*>(QStringLiteral("turnCopyButton"));
+    QVERIFY(copy);
+    QSignalSpy copySpy(&card, &AskPdfTurnCard::copyRequested);
+    copy->click();
+    QCOMPARE(copySpy.count(), 1);
+    QCOMPARE(copySpy.first().first().toString(), turn.answerText);
 }
 
 QTEST_MAIN(TestRagP3)

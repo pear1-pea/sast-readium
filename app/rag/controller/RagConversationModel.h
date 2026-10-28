@@ -54,6 +54,12 @@ public:
     void setState(const QString& turnId, RagTurnState state);
     void setEvidence(const QString& turnId, QVector<RagEvidence> evidence);
     void appendAnswerDelta(const QString& turnId, const QString& delta);
+    /**
+     * Start a fresh answer: drop the previous text, citations and any partial
+     * `[[cite:` fragment still held from an interrupted stream. Regenerating
+     * must not prefix the new answer with the old marker fragment.
+     */
+    void beginAnswer(const QString& turnId);
     void setAnswer(const QString& turnId, const QString& text,
                    const QString& markdown, QVector<RagCitation> citations);
     void setFailure(const QString& turnId, RagChatFailure failure,
@@ -67,6 +73,8 @@ signals:
 
 private:
     QVector<RagConversationTurn> m_turns;
+    /** Trailing partial `[[cite:` marker held back while streaming. */
+    QHash<QString, QString> m_streamPending;
 };
 
 }  // namespace Rag

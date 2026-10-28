@@ -257,13 +257,10 @@ void AskPdfTurnCard::refreshCitations() {
     }
     m_citationIds = ids;
     m_citations->clear();
-    for (int i = 0; i < m_turn.citations.size(); ++i) {
-        auto* item =
-            new QListWidgetItem(QStringLiteral("[%1] %2").arg(i + 1).arg(
-                                    citationLabel(m_turn.citations.at(i))),
-                                m_citations);
-        item->setData(Qt::UserRole, m_turn.citations.at(i).chunkId);
-        item->setToolTip(m_turn.citations.at(i).snippet);
+    for (const RagCitation& citation : m_turn.citations) {
+        auto* item = new QListWidgetItem(citationLabel(citation), m_citations);
+        item->setData(Qt::UserRole, citation.chunkId);
+        item->setToolTip(citation.snippet);
     }
     m_citations->setVisible(!m_turn.citations.isEmpty());
 }

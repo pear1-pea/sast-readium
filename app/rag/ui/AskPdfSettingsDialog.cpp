@@ -1,5 +1,7 @@
 #include "AskPdfSettingsDialog.h"
 
+#include "AskPdfModelCombo.h"
+
 #include <QCheckBox>
 #include <QCloseEvent>
 #include <QComboBox>
@@ -208,7 +210,7 @@ void AskPdfSettingsDialog::startNextProbe() {
     }
     const QString kind = m_probeQueue.takeFirst();
     if (kind == QStringLiteral("embedding")) {
-        const QString model = m_embedCombo->currentText().trimmed();
+        const QString model = ModelCombo::selectedTag(m_embedCombo);
         if (model.isEmpty()) {
             startNextProbe();
             return;
@@ -218,7 +220,7 @@ void AskPdfSettingsDialog::startNextProbe() {
         m_probe->testEmbedding(endpoint, model);
         return;
     }
-    const QString model = m_chatCombo->currentText().trimmed();
+    const QString model = ModelCombo::selectedTag(m_chatCombo);
     if (model.isEmpty()) {
         startNextProbe();
         return;
@@ -287,8 +289,8 @@ void AskPdfSettingsDialog::testConnection() {
         return;
     }
 
-    const QString embedModel = m_embedCombo->currentText().trimmed();
-    const QString chatModel = m_chatCombo->currentText().trimmed();
+    const QString embedModel = ModelCombo::selectedTag(m_embedCombo);
+    const QString chatModel = ModelCombo::selectedTag(m_chatCombo);
 
     cancelProbes();
     if (!embedModel.isEmpty()) {
@@ -327,8 +329,8 @@ bool AskPdfSettingsDialog::resultMatchesCurrent(
         return false;
     }
     if (!result.model.isEmpty() &&
-        result.model != m_embedCombo->currentText().trimmed() &&
-        result.model != m_chatCombo->currentText().trimmed()) {
+        result.model != ModelCombo::selectedTag(m_embedCombo) &&
+        result.model != ModelCombo::selectedTag(m_chatCombo)) {
         return false;
     }
     return true;
@@ -372,8 +374,10 @@ void AskPdfSettingsDialog::onModelsFetched(const OllamaProbe::Result& result) {
         setStatus(m_serviceStatus, result, result.message);
         if (!result.models.isEmpty()) {
             m_updatingModels = true;
-            setModelItems(m_embedCombo, result.models);
-            setModelItems(m_chatCombo, result.models);
+            ModelCombo::populate(m_embedCombo, result.embeddingModels,
+                                 result.unknownModels);
+            ModelCombo::populate(m_chatCombo, result.chatModels,
+                                 result.unknownModels);
             m_updatingModels = false;
         }
         startNextProbe();
@@ -387,7 +391,7 @@ void AskPdfSettingsDialog::onEmbeddingTested(
     const OllamaProbe::Result& result) {
     endProbe();
     if (!resultMatchesCurrent(result) ||
-        result.model != m_embedCombo->currentText().trimmed()) {
+        result.model != ModelCombo::selectedTag(m_embedCombo)) {
         return;
     }
     setStatus(m_embeddingStatus, result, result.message);
@@ -397,28 +401,10 @@ void AskPdfSettingsDialog::onEmbeddingTested(
 void AskPdfSettingsDialog::onChatTested(const OllamaProbe::Result& result) {
     endProbe();
     if (!resultMatchesCurrent(result) ||
-        result.model != m_chatCombo->currentText().trimmed()) {
+        result.model != ModelCombo::selectedTag(m_chatCombo)) {
         return;
     }
     setStatus(m_chatStatus, result, result.message);
-}
-
-void AskPdfSettingsDialog::setModelItems(QComboBox* combo,
-                                         const QStringList& models) {
-    if (!combo) {
-        return;
-    }
-    const QString current = combo->currentText();
-    combo->clear();
-    combo->addItems(models);
-    if (current.trimmed().isEmpty()) {
-        // QComboBox selects the first inserted item; an empty selection must
-        // stay empty so refreshing the list never changes the configuration.
-        combo->setCurrentIndex(-1);
-        combo->setEditText(QString());
-    } else {
-        combo->setEditText(current);
-    }
 }
 
 void AskPdfSettingsDialog::saveSettings() {
@@ -434,8 +420,8 @@ void AskPdfSettingsDialog::saveSettings() {
 
     RagSettings next = m_initial;
     next.endpoint = endpoint;
-    next.embedModel = m_embedCombo->currentText().trimmed();
-    next.chatModel = m_chatCombo->currentText().trimmed();
+    next.embedModel = ModelCombo::selectedTag(m_embedCombo);
+    next.chatModel = ModelCombo::selectedTag(m_chatCombo);
     next.answerEnabled = m_answerCheck->isChecked();
 
     if (next.answerEnabled && next.chatModel.isEmpty()) {

@@ -1,6 +1,7 @@
 #include <poppler/qt6/poppler-qt6.h>
 #include <QCoreApplication>
 #include <QFile>
+#include <QShortcut>
 #include <QSignalSpy>
 #include <QStandardPaths>
 #include <QTextStream>
@@ -97,6 +98,7 @@ private slots:
     void cleanupTestCase();
 
     void testDocumentLoad();
+    void testCopyShortcutScope();
     void testNavigation();
     void testPageBounds();
     void testZoom();
@@ -144,6 +146,20 @@ void TestPDFViewer::testDocumentLoad() {
     QVERIFY(m_viewer->hasDocument());
     QCOMPARE(m_viewer->getPageCount(), 3);
     QCOMPARE(m_viewer->getCurrentPage(), 0);
+}
+
+void TestPDFViewer::testCopyShortcutScope() {
+    bool found = false;
+    for (QShortcut* shortcut : m_viewer->findChildren<QShortcut*>()) {
+        if (shortcut->key() != QKeySequence(QKeySequence::Copy)) {
+            continue;
+        }
+        found = true;
+        // A window-wide Copy shortcut would steal Ctrl/Cmd+C from the Ask PDF
+        // answer view and any other focusable widget in the same window.
+        QCOMPARE(shortcut->context(), Qt::WidgetWithChildrenShortcut);
+    }
+    QVERIFY(found);
 }
 
 void TestPDFViewer::testNavigation() {

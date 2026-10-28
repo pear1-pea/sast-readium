@@ -152,6 +152,29 @@ if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/unit/test_thumbnail_priority.cpp)
         unit/test_thumbnail_priority.cpp)
 endif()
 
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/unit/test_thumbnail_list_copy.cpp)
+    create_unit_test(test_thumbnail_list_copy
+        unit/test_thumbnail_list_copy.cpp)
+    target_sources(test_thumbnail_list_copy PRIVATE
+        ../app/delegate/ThumbnailDelegate.cpp
+        ../app/managers/StyleManager.cpp
+        ../app/model/ThumbnailModel.cpp
+        ../app/ui/thumbnail/ThumbnailGenerator.cpp
+        ../app/ui/thumbnail/ThumbnailListView.cpp
+        ../app/utils/Logger.cpp
+        ../app/utils/LoggingConfig.cpp
+        ../app/utils/LoggingMacros.cpp
+        ../app/utils/LoggingManager.cpp
+        ../app/utils/QtSpdlogBridge.cpp)
+    target_link_libraries(test_thumbnail_list_copy PRIVATE
+        Qt6::Concurrent Qt6::Gui spdlog::spdlog)
+endif()
+
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/unit/test_ask_pdf_model_combo.cpp)
+    create_unit_test(test_ask_pdf_model_combo
+        unit/test_ask_pdf_model_combo.cpp)
+endif()
+
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/unit/test_reading_progress_manager.cpp)
     create_unit_test(test_reading_progress_manager
         unit/test_reading_progress_manager.cpp)

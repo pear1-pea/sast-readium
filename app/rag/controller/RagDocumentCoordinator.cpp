@@ -960,11 +960,12 @@ void RagDocumentCoordinator::regenerateTurn(const QString& turnIdRef) {
     const bool needsRetrieval =
         current->evidence.isEmpty() || !current->evidenceComplete;
     const QString question = current->question;
+    // Drop the old answer and any partial citation marker before the new
+    // stream starts, otherwise a fragment from a stopped answer leaks into it.
+    it->conversation->beginAnswer(turnId);
     it->conversation->updateTurn(
         turnId, [generation, needsRetrieval](RagConversationTurn& turn) {
             turn.generation = generation;
-            turn.answerText.clear();
-            turn.citations.clear();
             turn.failure = RagChatFailure::None;
             turn.error.clear();
             turn.promptTokens.reset();

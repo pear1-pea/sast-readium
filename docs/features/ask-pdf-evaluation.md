@@ -119,6 +119,72 @@ QT_QPA_PLATFORM=offscreen READIUM_RAG_EVAL_REPORT="$PWD/build/rag-evidence-basel
   无法实现，未立项。语义切分与更换 embedding 模型需要真实模型对照，等 01 的
   真实语料基线完成后另行立项。
 
+## 第四批：交互修复（复制、模型分类、阶段进度、页码引用）
+
+日期：2026-10-27。2026-10-28 完成验收修复。
+
+- 复制：PDF 视图与缩略图列表的 `Copy` 快捷键改为 `WidgetWithChildrenShortcut`；
+  缩略图的快捷键动作挂到列表控件上并复制当前选中页。回答区恢复 `QTextBrowser`
+  原生选中复制。缩略图复制不再弹出模态“复制成功”提示，否则每次 Cmd+C 都会抢
+  焦点；缩略图右键菜单目前未接入窗口，快捷键是唯一支持的复制路径。
+- 模型分类：`/api/tags` 取名称与 digest，`/api/show` 取 capabilities，最多 3 个
+  并发请求，单请求 5 秒、整轮 15 秒截止；结果按 endpoint + model + digest 缓存。
+  缺少能力或请求失败时模型保留在两个列表并标注“能力未知”。标注只出现在显示
+  文本和 tooltip，原始 tag 保存在 item data，保存与请求始终使用原始 tag；可编辑
+  下拉框中手动输入的 tag 优先于陈旧选中项。能力查询改为共享状态 + 成员函数，
+  取消或截止后不会再保留自引用回调。
+- 进度：改为阶段内进度，阶段号与计数一致；切分和写索引使用不定进度，向量按
+  文本块计数，Pending 为不定进度；未启用 embedding 时显示三阶段。
+- 页码引用：证据头提供 `[page=N]`/`[pages=N-M]`（一基，未知页不输出字段）；
+  校验后内联引用为 `[第 12 页](readium-cite:…)`，纯文本保留 `（第 12 页）`；
+  引用列表使用页码标签，chunk id 只作为跳转键。流式期间完整与跨 delta 的半截
+  引用标记都会被过滤。重新生成或重试时清空暂存的半截标记，旧回答的片段不会
+  进入新回答（`RagConversationModel::beginAnswer`）。
+
+验收发现并修复的两处问题：
+
+1. 可编辑下拉框里手动输入的 tag 会被陈旧 `currentIndex` 的 item data 覆盖，
+   导致保存/测试使用了错误的模型。
+2. 取消生成时若恰好停在 `[[cit` 这类半截标记，重新生成会把该片段拼到新回答前。
+
+验证：`cmake --build build --config Release` 通过；`ctest` 28/28 通过（新增
+`test_thumbnail_list_copy`、`test_ask_pdf_model_combo`，扩展 `test_ollama_probe`、
+`test_rag_p3`、`test_pdf_viewer`）；`pre-commit run --all-files` 通过。
+
+### 真实服务与真实 PDF 验收（2026-10-28）
+
+环境：Ollama 0.40.11，模型 `qwen2.5:3b`（chat/tools）与 `bge-m3:latest`
+（embedding）；用 `QPdfWriter` 生成 5 页真实 PDF，经 poppler 解析。临时验收程序
+放在仓库外，复用 coordinator，未新增产品功能。
+
+- 模型列表刷新：真实 `/api/tags` + `/api/show` 得到
+  `embedding=[bge-m3:latest]`、`chat=[qwen2.5:3b]`、`unknown=[]`；embedding 与
+  chat 探测均通过，冷启动合计约 6.9 秒。
+- 索引进度：观察到 `Extracting 0/5 → 5/5 → CheckingCache → Chunking → Indexing
+  → Ready`，随后 `Pending → Running 0/5 → 5/5 → Ready`；5 页 5 块，向量齐全。
+- 缓存：同一 PDF 再次打开时仍在 `Extracting 5/5` 之后才出现 `CheckingCache`
+  （耗时 62 ms）。这就是第二步“把缓存检查提前到全文提取之前”的现状基线。
+- 页码引用：真实 `qwen2.5:3b` 的引用行为不稳定——一次输出完整句子但不带标记；
+  一次输出 `[cite:chunk_id=4]`（虚构 id，单方括号）；一次只输出截断的 id 标记。
+  这些无效标记都被过滤，未泄露到可见文本；只输出无效标记时最终回答为空，属于
+  模型能力限制，不是标记泄露。用真实索引、真实 embedding 和脚本化 chat provider
+  验证固定路径：流式半截标记不显示，最终纯文本为 `答案：（第 1–5 页） 完成`，
+  Markdown 为 `[第 1–5 页](readium-cite:…)`，点击引用解析到证据首部并带 5 个
+  高亮位置。
+- 合并证据的粒度：该 PDF 检索结果被邻近扩展合并成跨 1–5 页的单条证据，因此
+  引用标签是页码范围，跳转目标是 `pageStart`（第 1 页）。这与发送给模型的证据
+  一致，但对“答案在第 4 页”的用户不够精确；后续可考虑聚焦最高排名位置，本轮
+  未改动。
+- 应用本体（最终构建）已用同一 PDF 启动：日志确认主窗口创建、文档打开、首页
+  渲染和缩略图生成。界面内的鼠标选中复制、缩略图快捷键、设置对话框模型刷新、
+  引用点击仍需人工在运行中的应用里完成；自动化验收程序只覆盖到 coordinator
+  与控件级测试。
+
+无法自动验证的部分：PDF 文本选中复制的真实鼠标选择与剪贴板内容、缩略图快捷键
+在真实窗口焦点下的触发、设置对话框中点击“刷新模型”的界面反馈、`/api/show`
+超时/降级在真实旧版服务上的表现，均需要重启应用手工验收。`/api/show` 的截止
+与取消路径已用本地 HTTP fixture 覆盖；真实服务只验证了正常能力返回。
+
 ## 未完成与限制
 
 - 合成文本绕过 PDF 解析，没有测试表格阅读顺序、OCR、真实 embedding 或模型回答。

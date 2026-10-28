@@ -483,6 +483,10 @@ void PDFViewer::setupConnections() {
             [](const QString& url) { QDesktopServices::openUrl(QUrl(url)); });
 
     auto* copySelection = new QShortcut(QKeySequence::Copy, this);
+    // Keep Copy local to the viewer. A window-wide shortcut would swallow
+    // Ctrl/Cmd+C from other focusable widgets in the same window, such as the
+    // Ask PDF answer view.
+    copySelection->setContext(Qt::WidgetWithChildrenShortcut);
     connect(copySelection, &QShortcut::activated, this,
             &PDFViewer::copySelectedText);
 

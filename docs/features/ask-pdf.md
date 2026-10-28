@@ -42,10 +42,19 @@ embedding and chat checks one after another so two cold models are not loaded at
 the same time. A successful test only means the service and model are usable at
 that moment; it does not mean the current document has vectors. Requests are
 asynchronous, cancellable, and their results are ignored after the address or
-model changes. The model dropdown lists every model returned by `/api/tags`
-without filtering by capability; choosing the wrong model is reported by the
-per-capability check, and filtering with `/api/show` is left for a later
-iteration.
+model changes.
+
+Model lists are split by capability: `/api/tags` supplies names and digests, and
+`/api/show` supplies `capabilities` for each model (at most three requests at a
+time, with a per-request timeout and an overall deadline). Models with
+`embedding` fill the embedding list, models with `completion` fill the chat list,
+and models that support both appear in both. When a service does not report
+capabilities, or a single lookup fails, the model stays in both lists marked
+"能力未知" instead of being hidden. The annotation exists only in the item's
+display text and tooltip; the raw tag lives in item data, so saving and testing
+always use the raw tag, and a tag typed into the editable combo always wins over
+a stale item selection. Capability results are cached by endpoint, model and
+digest for the lifetime of the process.
 
 Readium never starts or downloads an Ollama model. If embeddings are unavailable,
 the lexical path remains usable. If answers are disabled, Ask PDF still returns
@@ -57,15 +66,21 @@ context. Toggling answers off and on does not reset history.
 ## Progress and index management
 
 While a document is indexed the panel shows a progress bar with the current
-phase:
+phase. Progress is stage-local: every phase starts at 0%, and the text names the
+stage so a count of zero never looks like a finished bar:
 
 | Phase | Progress |
 | --- | --- |
-| Checking cache | indeterminate |
-| Extracting text | 0–60%, `提取 N/M 页` |
-| Chunking | 60–70%, `切分文本 N/M 页` |
-| Writing the FTS index | indeterminate at 70% |
-| Generating vectors | 80–100%, `向量 N/M` (only when embeddings are configured) |
+| 1/4 Extracting text | `提取 N/M 页`, N/M of the pages |
+| Checking cache | indeterminate; currently runs after extraction |
+| 2/4 Chunking | indeterminate (`正在切分文本`); there is no reliable per-page count |
+| 3/4 Writing the FTS index | indeterminate (`正在写入索引`) |
+| 4/4 Generating vectors | `向量 N/M 个文本块`, N/M of the chunks; indeterminate while pending |
+
+Without embeddings the pipeline reports three stages. The cache is consulted
+after the full text extraction, so a cached document still shows the extraction
+counters before it jumps to ready; moving that check ahead of extraction is the
+next planned change.
 
 Worker threads report progress through `RagJobContext::onProgress`; both the
 worker and the coordinator throttle updates to roughly one publish per 100 ms
@@ -94,8 +109,33 @@ the whole database.
 Each question becomes a turn card: question, answer, citations and per-turn
 actions (copy, regenerate, stop, retry). Answers are rendered as Markdown after
 generation completes; while streaming the card shows plain text. Long answers
-start collapsed and can be expanded. Citation numbers are assigned once by the
-validator and shared by inline links and the citation list (`[1] 第 3 页 · 方法`).
+start collapsed and can be expanded.
+
+Citations are user-facing page references, not chunk handles. The validator
+accepts both `[[cite:chunk_id]]` and the `[cite:chunk_id]` form some models
+produce, and replaces the marker with `[第 12 页](readium-cite:…)` (or
+`第 12–13 页` for a merged range); the copyable text keeps `（第 12 页）`.
+Unknown pages render as `引用`, never `第 0 页`; the citation list below the
+answer uses `未知页码` for the same case. A marker whose id is not in the sent
+evidence — including an echoed `chunk_id` placeholder or a hallucinated hash —
+is dropped instead of shown as text. Otherwise the list shows the same page
+label; the chunk id stays only in the item data used for navigation. While an
+answer streams, complete and partial citation markers in either form are
+filtered out (including markers split across deltas), so chunk ids never appear
+in the visible text or in a copy made mid-stream. Regenerating or retrying
+clears the held-back fragment, so a stopped answer cannot prefix the next one.
+
+The question prompt asks the model to answer location questions with the page
+number from the evidence's `[page=N]`/`[pages=N-M]` header, to never invent page
+numbers, and to keep chunk ids inside citation markers only.
+
+Copy shortcuts are scoped to the widget that owns them. Cmd/Ctrl+C copies PDF
+text only while the viewer or one of its children has focus, and the thumbnail
+list copies its selected page only while the list has focus; the answer view
+keeps its native text copy instead of losing the key to the PDF viewer. Thumbnail
+copy is silent (no confirmation dialog) so it stays repeatable. The thumbnail
+context menu is not wired into the window yet; the shortcut is the supported
+copy path.
 
 Typed chat failures drive the copy and actions:
 

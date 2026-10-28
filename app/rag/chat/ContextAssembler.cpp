@@ -20,11 +20,23 @@ QString citationSnippet(const QString& text) {
     return snippet;
 }
 
+QString pageHeader(const RagEvidence& item) {
+    if (item.pageStart < 0) {
+        // Unknown page: omit the field rather than emitting "page 0".
+        return {};
+    }
+    if (item.pageEnd > item.pageStart) {
+        return QStringLiteral("\n[pages=%1-%2]")
+            .arg(item.pageStart + 1)
+            .arg(item.pageEnd + 1);
+    }
+    return QStringLiteral("\n[page=%1]").arg(item.pageStart + 1);
+}
+
 QString evidenceBlock(const RagEvidence& item) {
-    return QStringLiteral("\n[chunk_id=%1]\n[page=%2]\n")
-               .arg(item.chunkId)
-               .arg(item.pageStart + 1) +
-           item.text + QStringLiteral("\n[/chunk]\n");
+    return QStringLiteral("\n[chunk_id=%1]").arg(item.chunkId) +
+           pageHeader(item) + QLatin1Char('\n') + item.text +
+           QStringLiteral("\n[/chunk]\n");
 }
 
 qint64 utf8Size(const QString& text) { return text.toUtf8().size(); }
@@ -186,6 +198,18 @@ QString ContextAssembler::budgetError(const ChatRequest& request) {
     return {};
 }
 
+QString pageLabel(const RagEvidence& evidence) {
+    if (evidence.pageStart < 0) {
+        return QStringLiteral("引用");
+    }
+    if (evidence.pageEnd > evidence.pageStart) {
+        return QStringLiteral("第 %1–%2 页")
+            .arg(evidence.pageStart + 1)
+            .arg(evidence.pageEnd + 1);
+    }
+    return QStringLiteral("第 %1 页").arg(evidence.pageStart + 1);
+}
+
 RagAnswer CitationValidator::validate(const QString& answer,
                                       const QVector<RagEvidence>& sentEvidence,
                                       const QString& documentHash) {
@@ -196,8 +220,10 @@ RagAnswer CitationValidator::validate(const QString& answer,
     }
     RagAnswer result;
     QHash<QString, int> numbers;
+    // Accept both the prompt's `[[cite:id]]` and the `[cite:id]` form some
+    // models produce; an unknown id is dropped instead of leaked as text.
     const QRegularExpression pattern(
-        QStringLiteral("\\[\\[cite:([^\\]\\r\\n]+)\\]\\]"));
+        QStringLiteral("\\[{1,2}cite:([^\\]\\r\\n]+)\\]{1,2}"));
     auto iterator = pattern.globalMatch(answer);
     int offset = 0;
     while (iterator.hasNext()) {
@@ -225,8 +251,12 @@ RagAnswer CitationValidator::validate(const QString& answer,
                 citation.snippet = citationSnippet(evidence->text);
                 result.citations.append(citation);
             }
+            const QString label = pageLabel(*evidence);
             result.text +=
-                QStringLiteral("[%1](readium-cite:%2)").arg(number).arg(id);
+                QStringLiteral("[%1](readium-cite:%2)").arg(label, id);
+            // Keep the page reference in the copyable text; chunk ids stay
+            // internal.
+            result.plainText += QStringLiteral("（%1）").arg(label);
         }
         offset = match.capturedEnd();
     }

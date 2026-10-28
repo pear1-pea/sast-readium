@@ -1,8 +1,11 @@
 #include "OllamaProbe.h"
 
+#include <QHash>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QMutex>
+#include <QMutexLocker>
 #include <QNetworkAccessManager>
 #include <QNetworkProxy>
 #include <QNetworkReply>
@@ -10,12 +13,34 @@
 #include <QTimer>
 #include <QUrl>
 
+#include <functional>
+#include <memory>
 #include <utility>
 
 #include "rag/config/RagSettings.h"
 
 namespace Rag {
 namespace {
+
+/**
+ * Capabilities are stable for a given model digest, so they can be reused for
+ * the whole process lifetime. The endpoint is part of the key because two
+ * local services can expose the same tag with different builds.
+ */
+QMutex& capabilityCacheMutex() {
+    static QMutex mutex;
+    return mutex;
+}
+
+QHash<QString, QStringList>& capabilityCache() {
+    static QHash<QString, QStringList> cache;
+    return cache;
+}
+
+QString capabilityKey(const QString& endpoint, const QString& model,
+                      const QString& digest) {
+    return endpoint + QLatin1Char('\n') + model + QLatin1Char('\n') + digest;
+}
 
 QString errorTextFromBody(const QByteArray& body) {
     const QJsonDocument document = QJsonDocument::fromJson(body);
@@ -91,6 +116,7 @@ void OllamaProbe::fetchModels(const QString& endpoint, int timeoutMs) {
                          document.object()
                              .value(QStringLiteral("models"))
                              .toArray();
+                     QVector<QPair<QString, QString>> entries;
                      for (const QJsonValue& value : models) {
                          const QJsonObject item = value.toObject();
                          QString name =
@@ -101,6 +127,9 @@ void OllamaProbe::fetchModels(const QString& endpoint, int timeoutMs) {
                          }
                          if (!name.isEmpty()) {
                              tags.models.append(name);
+                             entries.append(
+                                 {name, item.value(QStringLiteral("digest"))
+                                            .toString()});
                          }
                      }
                      tags.status = Status::Ready;
@@ -109,9 +138,139 @@ void OllamaProbe::fetchModels(const QString& endpoint, int timeoutMs) {
                              ? QStringLiteral("已连接，但尚未安装模型")
                              : QStringLiteral("已连接 · %1 个模型")
                                    .arg(tags.models.size());
-                     emit modelsFetched(tags);
+                     classifyCapabilities(base, entries, tags, generation);
                  });
          });
+}
+
+void OllamaProbe::classifyCapabilities(
+    const QString& base, const QVector<QPair<QString, QString>>& models,
+    Result result, quint64 generation) {
+    auto state = std::make_shared<CapabilityRequestState>();
+    state->all = models;
+    state->result = std::move(result);
+    {
+        QMutexLocker lock(&capabilityCacheMutex());
+        for (const auto& entry : models) {
+            const auto cached = capabilityCache().constFind(
+                capabilityKey(base, entry.first, entry.second));
+            if (cached != capabilityCache().constEnd()) {
+                state->capabilities.insert(entry.first, cached.value());
+            } else {
+                state->queue.append(entry);
+            }
+        }
+    }
+
+    if (state->queue.isEmpty()) {
+        finishCapabilities(generation, state);
+        return;
+    }
+
+    requestNextCapability(base, generation, state);
+    QTimer::singleShot(15000, this, [this, generation, state]() {
+        // A slow or hanging /api/show must not keep the dialog "正在连接...".
+        // Unresolved models are reported as unknown, not hidden.
+        finishCapabilities(generation, state);
+    });
+}
+
+void OllamaProbe::requestNextCapability(
+    const QString& base, quint64 generation,
+    const std::shared_ptr<CapabilityRequestState>& state) {
+    if (!state || state->finished || generation != m_serviceGeneration) {
+        return;
+    }
+    // Bounded concurrency keeps a large model list from opening dozens of
+    // sockets at once on a local service.
+    while (state->active < 3 && !state->queue.isEmpty()) {
+        const auto entry = state->queue.takeFirst();
+        ++state->active;
+        const QJsonObject payload{{QStringLiteral("model"), entry.first}};
+        send(QUrl(joinEndpoint(base, "/api/show")),
+             QJsonDocument(payload).toJson(QJsonDocument::Compact), 5000,
+             [this, base, generation, state, entry](QNetworkReply* reply) {
+                 if (state->finished || generation != m_serviceGeneration) {
+                     return;
+                 }
+                 --state->active;
+                 const int httpStatus =
+                     reply->attribute(QNetworkRequest::HttpStatusCodeAttribute)
+                         .toInt();
+                 if (httpStatus == 200 &&
+                     reply->error() == QNetworkReply::NoError) {
+                     const QJsonObject object =
+                         QJsonDocument::fromJson(readBody(reply)).object();
+                     const QJsonArray capabilitiesArray =
+                         object.value(QStringLiteral("capabilities")).toArray();
+                     QStringList capabilities;
+                     for (const QJsonValue& value : capabilitiesArray) {
+                         const QString capability = value.toString();
+                         if (!capability.isEmpty()) {
+                             capabilities.append(capability);
+                         }
+                     }
+                     if (!capabilities.isEmpty()) {
+                         state->capabilities.insert(entry.first, capabilities);
+                         QMutexLocker lock(&capabilityCacheMutex());
+                         capabilityCache().insert(
+                             capabilityKey(base, entry.first, entry.second),
+                             capabilities);
+                     }
+                 }
+                 // A failed lookup stays unresolved and is retried on the next
+                 // refresh instead of being cached as "no capabilities".
+                 requestNextCapability(base, generation, state);
+             });
+    }
+    if (state->active == 0) {
+        finishCapabilities(generation, state);
+    }
+}
+
+void OllamaProbe::finishCapabilities(
+    quint64 generation, const std::shared_ptr<CapabilityRequestState>& state) {
+    if (!state || state->finished || generation != m_serviceGeneration) {
+        return;
+    }
+    state->finished = true;
+    Result out = state->result;
+    out.embeddingModels.clear();
+    out.chatModels.clear();
+    out.unknownModels.clear();
+    for (const auto& entry : state->all) {
+        const QString& name = entry.first;
+        const QStringList capabilities = state->capabilities.value(name);
+        if (capabilities.isEmpty()) {
+            out.unknownModels.append(name);
+            out.embeddingModels.append(name);
+            out.chatModels.append(name);
+            continue;
+        }
+        const bool embedding =
+            capabilities.contains(QStringLiteral("embedding"));
+        const bool chat = capabilities.contains(QStringLiteral("completion"));
+        if (embedding) {
+            out.embeddingModels.append(name);
+        }
+        if (chat) {
+            out.chatModels.append(name);
+        }
+        if (!embedding && !chat) {
+            // A capability set we do not understand must not hide a model.
+            out.unknownModels.append(name);
+            out.embeddingModels.append(name);
+            out.chatModels.append(name);
+        }
+    }
+    if (!out.models.isEmpty()) {
+        out.message =
+            QStringLiteral("已连接 · %1 个模型（%2 个 embedding / %3 个 chat）")
+                .arg(out.models.size())
+                .arg(out.embeddingModels.size())
+                .arg(out.chatModels.size());
+    }
+    emit modelsFetched(out);
 }
 
 void OllamaProbe::testEmbedding(const QString& endpoint, const QString& model,

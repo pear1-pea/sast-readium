@@ -206,16 +206,30 @@ void ThumbnailListView::setupContextMenu() {
     m_contextMenu = new QMenu(this);
     m_contextMenu->setObjectName("ThumbnailContextMenu");
 
-    // 添加默认动作
-    QAction* copyAction = new QAction("复制页面", this);
-    copyAction->setShortcut(QKeySequence::Copy);
+    // The shortcut action copies the selected page and must be owned by the
+    // view, not only by the menu, so it fires while the list has focus.
+    auto* copySelectedAction = new QAction(QStringLiteral("复制页面"), this);
+    copySelectedAction->setShortcut(QKeySequence::Copy);
+    copySelectedAction->setShortcutContext(Qt::WidgetWithChildrenShortcut);
+    connect(copySelectedAction, &QAction::triggered, this, [this]() {
+        const QModelIndex index = currentIndex();
+        const int pageNumber = index.isValid() ? pageAtIndex(index) : -1;
+        if (pageNumber >= 0) {
+            copyPageToClipboard(pageNumber);
+        }
+    });
+    addAction(copySelectedAction);
+
+    // The context-menu action always uses the right-clicked page, which can
+    // differ from the current selection.
+    QAction* copyAction = new QAction(QStringLiteral("复制页面"), this);
     connect(copyAction, &QAction::triggered, [this]() {
         if (m_contextMenuPage >= 0) {
             copyPageToClipboard(m_contextMenuPage);
         }
     });
 
-    QAction* exportAction = new QAction("导出页面", this);
+    QAction* exportAction = new QAction(QStringLiteral("导出页面"), this);
     connect(exportAction, &QAction::triggered, [this]() {
         if (m_contextMenuPage >= 0) {
             exportPageToFile(m_contextMenuPage);
@@ -224,6 +238,8 @@ void ThumbnailListView::setupContextMenu() {
 
     m_contextMenu->addAction(copyAction);
     m_contextMenu->addAction(exportAction);
+    connect(m_contextMenu, &QMenu::aboutToHide, this,
+            [this]() { m_contextMenuPage = -1; });
     m_contextMenuActions << copyAction << exportAction;
 }
 
@@ -1230,13 +1246,11 @@ void ThumbnailListView::copyPageToClipboard(int pageNumber) {
         return;
     }
 
-    // Copy to clipboard
+    // Copy to clipboard. No confirmation dialog: the shortcut must be
+    // repeatable, and a modal box would steal focus after every copy.
     QClipboard* clipboard = QApplication::clipboard();
     if (clipboard) {
         clipboard->setPixmap(pixmap);
-        QMessageBox::information(
-            this, "复制成功",
-            QString("第 %1 页图像已复制到剪贴板").arg(pageNumber + 1));
     }
 }
 
