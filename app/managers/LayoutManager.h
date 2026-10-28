@@ -5,7 +5,6 @@
 class QSplitter;
 class QWidget;
 class SideBar;
-class RightSideBar;
 class ViewWidget;
 
 /**
@@ -18,9 +17,8 @@ class LayoutManager : public QObject {
     Q_OBJECT
 
 public:
-    LayoutManager(SideBar* sideBar, RightSideBar* rightSideBar,
-                  ViewWidget* viewWidget, QWidget* mainViewerParent,
-                  QObject* parent = nullptr);
+    LayoutManager(SideBar* sideBar, ViewWidget* viewWidget,
+                  QWidget* mainViewerParent, QObject* parent = nullptr);
     ~LayoutManager() override = default;
 
     /** Creates and returns the main viewer widget containing the splitter. */
@@ -42,7 +40,6 @@ private slots:
 
 private:
     SideBar* m_sideBar;
-    RightSideBar* m_rightSideBar;
     ViewWidget* m_viewWidget;
     QWidget* m_mainViewerParent;
     QSplitter* m_splitter = nullptr;

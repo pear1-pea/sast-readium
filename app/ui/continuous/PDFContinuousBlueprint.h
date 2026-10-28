@@ -1,11 +1,9 @@
 #pragma once
 
-#include <QVector>
-
 #include <cstdint>
 #include <optional>
 
-#include "PDFContinuousTypes.h"
+#include "PDFContinuousLayout.h"
 
 class PDFContinuousBlueprint {
 public:
@@ -29,9 +27,9 @@ public:
     std::optional<PDFPageHit> hitTest(const QPointF& documentPoint) const;
 
     QPointF viewportToDocument(const QPointF& viewportPoint,
-                               qreal contentOffsetY) const;
+                               const QPointF& contentOffset) const;
     QPointF documentToViewport(const QPointF& documentPoint,
-                               qreal contentOffsetY) const;
+                               const QPointF& contentOffset) const;
 
     QPointF documentToPage(int pageIndex, const QPointF& documentPoint) const;
     QPointF pageToDocument(int pageIndex, const QPointF& pagePoint) const;
@@ -49,12 +47,6 @@ public:
                               qreal viewportHeight) const;
 
 private:
-    static int normalizeRotation(int rotation);
-    static QSizeF rotatedSize(const QSizeF& size, int rotation);
-    int nearestPageByY(qreal documentY) const;
-
-    QVector<PDFPageGeometry> m_pages;
-    PDFContinuousLayoutOptions m_options;
-    QSizeF m_documentSize;
+    PDFContinuousLayout m_layout;
     std::uint64_t m_revision = 0;
 };

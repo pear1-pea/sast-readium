@@ -8,11 +8,14 @@
 #include "../../controller/tool.hpp"
 #include "../../managers/RecentFilesManager.h"
 
+class ShortcutManager;
+
 class MenuBar : public QMenuBar {
     Q_OBJECT
 
 public:
-    MenuBar(RecentFilesManager* recentFilesManager, QWidget* parent = nullptr);
+    MenuBar(RecentFilesManager* recentFilesManager,
+            ShortcutManager* shortcutManager, QWidget* parent = nullptr);
 
 signals:
     void onExecuted(ActionMap id, QWidget* context = nullptr);
@@ -36,8 +39,10 @@ private:
     void createViewMenu();
     void createThemeMenu();
     void setupRecentFilesMenu();
+    QAction* shortcutAction(ActionMap action);
 
     RecentFilesManager* m_recentFilesManager;
+    ShortcutManager* m_shortcutManager;
     QMenu* m_recentFilesMenu;
     QAction* m_clearRecentFilesAction;
     QAction* m_welcomeScreenToggleAction;

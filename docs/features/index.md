@@ -8,6 +8,15 @@ SAST Readium is designed as a modern, high-performance PDF reader with a focus o
 
 ## Documentation in this Section
 
+### [Ask PDF](ask-pdf.md)
+
+Local document evidence search with optional Ollama embeddings and chat:
+
+- SQLite FTS5 lexical index with natural-language query handling
+- Optional local embedding and vector retrieval
+- Optional local answer generation with validated page citations
+- Persistent index with explicit clearing and privacy notes
+
 ### [Thumbnail System](thumbnail-system.md)
 
 Comprehensive documentation of the Chrome-style PDF thumbnail system:

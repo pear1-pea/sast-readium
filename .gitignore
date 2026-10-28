@@ -64,6 +64,7 @@ Makefile
 CMakeLists.txt.user*
 CTestTestfile.cmake
 Testing/
+CMakeUserPresets.json
 
 # xmake
 .xmake/
@@ -329,3 +330,5 @@ deploy/
 .env
 .env.local
 .env.*.local
+
+build-asan/

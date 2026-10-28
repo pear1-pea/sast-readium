@@ -51,8 +51,8 @@ Bookmark Bookmark::fromJson(const QJsonObject& json) {
     return bookmark;
 }
 
-BookmarkModel::BookmarkModel(QObject* parent)
-    : QAbstractItemModel(parent), m_autoSave(true) {
+BookmarkModel::BookmarkModel(QObject* parent, const QString& storageFile)
+    : QAbstractItemModel(parent), m_autoSave(true), m_storageFile(storageFile) {
     initializeStorage();
     loadFromFile();
 
@@ -316,7 +316,9 @@ Bookmark BookmarkModel::getBookmarkForPage(const QString& documentPath,
 }
 
 void BookmarkModel::initializeStorage() {
-    m_storageFile = getStorageFilePath();
+    if (m_storageFile.isEmpty()) {
+        m_storageFile = getStorageFilePath();
+    }
 
     // Ensure directory exists
     QFileInfo fileInfo(m_storageFile);

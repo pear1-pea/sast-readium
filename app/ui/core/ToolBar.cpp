@@ -1,10 +1,14 @@
 #include "ToolBar.h"
 #include <QAction>
+#include <QApplication>
 #include <QHBoxLayout>
+#include <QStyle>
 #include <QWidget>
+#include "../../managers/ShortcutManager.h"
 #include "../../managers/StyleManager.h"
 
-ToolBar::ToolBar(QWidget* parent) : QToolBar(parent) {
+ToolBar::ToolBar(QWidget* parent)
+    : QToolBar(parent), m_shortcutManager(&ShortcutManager::instance()) {
     setMovable(true);
     setObjectName("MainToolBar");
     setToolButtonStyle(Qt::ToolButtonIconOnly);
@@ -15,6 +19,8 @@ ToolBar::ToolBar(QWidget* parent) : QToolBar(parent) {
     setupViewActions();
     createSeparator();
     setupRotationActions();
+    createSeparator();
+    setupAnnotationActions();
     createSeparator();
     setupThemeActions();
 
@@ -32,20 +38,17 @@ ToolBar::ToolBar(QWidget* parent) : QToolBar(parent) {
 void ToolBar::setupFileActions() {
     // Open file
     openAction = new QAction("📁", this);
-    openAction->setToolTip("打开PDF文件 (Ctrl+O)");
-    openAction->setShortcut(QKeySequence("Ctrl+O"));
+    applyShortcut(openAction, ActionMap::openFile, "打开PDF文件");
     addAction(openAction);
 
     // Open folder
     openFolderAction = new QAction("📂", this);
-    openFolderAction->setToolTip("打开文件夹 (Ctrl+Shift+O)");
-    openFolderAction->setShortcut(QKeySequence("Ctrl+Shift+O"));
+    applyShortcut(openFolderAction, ActionMap::openFolder, "打开文件夹");
     addAction(openFolderAction);
 
     // Save file
     saveAction = new QAction("💾", this);
-    saveAction->setToolTip("保存文件 (Ctrl+S)");
-    saveAction->setShortcut(QKeySequence("Ctrl+S"));
+    applyShortcut(saveAction, ActionMap::save, "保存文件");
     addAction(saveAction);
 
     connect(openAction, &QAction::triggered, this,
@@ -57,9 +60,20 @@ void ToolBar::setupFileActions() {
 }
 
 void ToolBar::setupViewActions() {
+    // Attach the registered search action to a visible QWidget so its
+    // ApplicationShortcut is active and the entry is discoverable.
+    if (m_shortcutManager) {
+        if (QAction* searchAction =
+                m_shortcutManager->actionFor(ActionMap::showSearch)) {
+            searchAction->setIcon(QApplication::style()->standardIcon(
+                QStyle::SP_FileDialogContentsView));
+            addAction(searchAction);
+        }
+    }
+
     // Sidebar toggle
     toggleSidebarAction = new QAction("📋", this);
-    toggleSidebarAction->setToolTip("切换侧边栏 (F9)");
+    applyShortcut(toggleSidebarAction, ActionMap::toggleSideBar, "切换侧边栏");
     toggleSidebarAction->setCheckable(true);
     toggleSidebarAction->setChecked(true);
     addAction(toggleSidebarAction);
@@ -68,9 +82,11 @@ void ToolBar::setupViewActions() {
     viewModeCombo = STYLE.createComboBox(this);
     viewModeCombo->addItem("单页视图");
     viewModeCombo->addItem("连续滚动");
+    viewModeCombo->addItem("双页对开");
+    viewModeCombo->addItem("多页网格");
     viewModeCombo->setCurrentIndex(0);
     viewModeCombo->setToolTip("选择视图模式");
-    viewModeCombo->setFixedWidth(100);
+    viewModeCombo->setFixedWidth(110);
 
     QWidgetAction* viewAction = new QWidgetAction(this);
     viewAction->setDefaultWidget(viewModeCombo);
@@ -85,12 +101,12 @@ void ToolBar::setupViewActions() {
 void ToolBar::setupRotationActions() {
     // Rotate left
     rotateLeftAction = new QAction("↺", this);
-    rotateLeftAction->setToolTip("向左旋转90度 (Ctrl+L)");
+    applyShortcut(rotateLeftAction, ActionMap::rotateLeft, "向左旋转90度");
     addAction(rotateLeftAction);
 
     // Rotate right
     rotateRightAction = new QAction("↻", this);
-    rotateRightAction->setToolTip("向右旋转90度 (Ctrl+R)");
+    applyShortcut(rotateRightAction, ActionMap::rotateRight, "向右旋转90度");
     addAction(rotateRightAction);
 
     connect(rotateLeftAction, &QAction::triggered, this,
@@ -99,10 +115,15 @@ void ToolBar::setupRotationActions() {
             [this]() { emit actionTriggered(ActionMap::rotateRight); });
 }
 
+void ToolBar::setupAnnotationActions() {
+    m_annotationToolbar = new AnnotationToolbar(this);
+    addWidget(m_annotationToolbar);
+}
+
 void ToolBar::setupThemeActions() {
     // Theme toggle
     themeToggleAction = new QAction("🌙", this);
-    themeToggleAction->setToolTip("切换主题 (Ctrl+Shift+T)");
+    applyShortcut(themeToggleAction, ActionMap::toggleTheme, "切换主题");
     addAction(themeToggleAction);
 
     connect(themeToggleAction, &QAction::triggered, this,
@@ -110,6 +131,19 @@ void ToolBar::setupThemeActions() {
 }
 
 void ToolBar::createSeparator() { addSeparator(); }
+
+void ToolBar::applyShortcut(QAction* action, ActionMap actionId,
+                            const QString& tooltipPrefix) {
+    const QList<QKeySequence> shortcuts =
+        m_shortcutManager ? m_shortcutManager->shortcutsFor(actionId)
+                          : QList<QKeySequence>{};
+    if (!shortcuts.isEmpty()) {
+        action->setToolTip(QString("%1 (%2)").arg(
+            tooltipPrefix, shortcuts.first().toString()));
+        return;
+    }
+    action->setToolTip(tooltipPrefix);
+}
 
 void ToolBar::applyToolBarStyle() {
     // Apply toolbar style
@@ -141,17 +175,41 @@ void ToolBar::setActionsEnabled(bool enabled) {
 
     rotateLeftAction->setEnabled(enabled);
     rotateRightAction->setEnabled(enabled);
+    m_annotationToolbar->setEnabled(enabled);
 
     // Sidebar and theme toggle always available
     toggleSidebarAction->setEnabled(true);
     themeToggleAction->setEnabled(true);
 }
 
+void ToolBar::setSidebarChecked(bool checked) {
+    toggleSidebarAction->setChecked(checked);
+}
+
+void ToolBar::setViewModeIndex(int mode) {
+    if (mode < 0 || mode >= viewModeCombo->count()) {
+        return;
+    }
+    const QSignalBlocker blocker(viewModeCombo);
+    viewModeCombo->setCurrentIndex(mode);
+}
+
 void ToolBar::onViewModeChanged() {
     int mode = viewModeCombo->currentIndex();
-    if (mode == 0) {
-        emit actionTriggered(ActionMap::setSinglePageMode);
-    } else if (mode == 1) {
-        emit actionTriggered(ActionMap::setContinuousScrollMode);
+    switch (mode) {
+        case 0:
+            emit actionTriggered(ActionMap::setSinglePageMode);
+            break;
+        case 1:
+            emit actionTriggered(ActionMap::setContinuousScrollMode);
+            break;
+        case 2:
+            emit actionTriggered(ActionMap::setDoublePageMode);
+            break;
+        case 3:
+            emit actionTriggered(ActionMap::setGridViewMode);
+            break;
+        default:
+            break;
     }
 }

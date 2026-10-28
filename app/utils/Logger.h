@@ -227,6 +227,9 @@ public:
     // Get underlying spdlog logger for advanced usage
     std::shared_ptr<spdlog::logger> getSpdlogLogger() const { return m_logger; }
 
+    // Resolve a configured log file name without initializing the singleton.
+    static QString resolveLogFilePath(const QString& logFileName);
+
 signals:
     void logMessage(const QString& message, int level);
 

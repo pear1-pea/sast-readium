@@ -17,6 +17,7 @@
 #include "../../delegate/ThumbnailDelegate.h"
 #include "../../managers/StyleManager.h"
 #include "../../model/ThumbnailModel.h"
+#include "../../rag/ui/AskPdfWidget.h"
 #include "../thumbnail/ThumbnailListView.h"
 
 // 定义静态常量
@@ -30,6 +31,8 @@ SideBar::SideBar(QWidget* parent)
       animation(nullptr),
       settings(nullptr),
       outlineWidget(nullptr),
+      bookmarkWidget(nullptr),
+      askPdfWidget(nullptr),
       thumbnailView(nullptr),
       isCurrentlyVisible(true),
       preferredWidth(defaultWidth),
@@ -61,10 +64,12 @@ void SideBar::initContent() {
     QWidget* thumbnailsTab = createThumbnailsTab();
     QWidget* outlineTab = createOutlineTab();
     QWidget* bookmarksTab = createBookmarksTab();
+    QWidget* askPdfTab = createAskPdfTab();
 
     tabWidget->addTab(thumbnailsTab, "缩略图");
     tabWidget->addTab(outlineTab, "目录");
     tabWidget->addTab(bookmarksTab, "书签");
+    tabWidget->addTab(askPdfTab, "Ask PDF");
 
     QVBoxLayout* mainLayout = new QVBoxLayout(this);
     mainLayout->addWidget(tabWidget);
@@ -112,10 +117,15 @@ QWidget* SideBar::createBookmarksTab() {
     QWidget* bookmarksTab = new QWidget();
     QVBoxLayout* bookmarkLayout = new QVBoxLayout(bookmarksTab);
 
-    // 创建PDF书签组件
-    bookmarkWidget = new PDFBookmarkWidget();
+    // Create the persistent bookmark management widget.
+    bookmarkWidget = new BookmarkWidget();
     bookmarkLayout->addWidget(bookmarkWidget);
     return bookmarksTab;
+}
+
+QWidget* SideBar::createAskPdfTab() {
+    askPdfWidget = new Rag::AskPdfWidget();
+    return askPdfWidget;
 }
 
 void SideBar::initAnimation() {
@@ -238,9 +248,18 @@ void SideBar::setOutlineModel(PDFOutlineModel* model) {
     }
 }
 
-void SideBar::setDocument(std::shared_ptr<Poppler::Document> document) {
+void SideBar::setBookmarkContext(const QString& documentPath, int pageNumber) {
+    if (!bookmarkWidget) {
+        return;
+    }
+    bookmarkWidget->setCurrentDocument(documentPath);
+    bookmarkWidget->setCurrentPage(pageNumber);
+}
+
+void SideBar::setDocument(std::shared_ptr<Poppler::Document> document,
+                          const QVector<QSize>& pageSizes) {
     if (thumbnailModel) {
-        thumbnailModel->setDocument(document);
+        thumbnailModel->setDocument(std::move(document), pageSizes);
     }
 }
 

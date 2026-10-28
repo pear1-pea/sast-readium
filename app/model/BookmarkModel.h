@@ -78,7 +78,8 @@ public:
         CategoryRole
     };
 
-    explicit BookmarkModel(QObject* parent = nullptr);
+    explicit BookmarkModel(QObject* parent = nullptr,
+                           const QString& storageFile = QString());
     ~BookmarkModel() = default;
 
     // QAbstractItemModel interface

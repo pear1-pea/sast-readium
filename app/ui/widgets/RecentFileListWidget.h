@@ -5,8 +5,10 @@
 #include <QFrame>
 #include <QGraphicsOpacityEffect>
 #include <QHBoxLayout>
+#include <QHash>
 #include <QLabel>
 #include <QMouseEvent>
+#include <QPixmap>
 #include <QPropertyAnimation>
 #include <QPushButton>
 #include <QScrollArea>
@@ -15,6 +17,7 @@
 #include <QWidget>
 
 class RecentFilesManager;
+class RecentPdfThumbnailProvider;
 #include "../../managers/RecentFilesManager.h"
 
 /**
@@ -35,6 +38,8 @@ public:
 
     // 主题支持
     void applyTheme();
+    void setThumbnailPlaceholder();
+    void setThumbnail(const QPixmap& pixmap);
 
 signals:
     void clicked(const QString& filePath);
@@ -54,6 +59,7 @@ private:
     void setupUI();
     void setupAnimations();
     void updateDisplay();
+    QPixmap createThumbnailCanvas(const QPixmap& pixmap) const;
     void setHovered(bool hovered);
     void startHoverAnimation(bool hovered);
     void startPressAnimation();
@@ -124,6 +130,8 @@ protected:
 private slots:
     void onItemClicked(const QString& filePath);
     void onItemRemoveRequested(const QString& filePath);
+    void onThumbnailReady(const QString& filePath, const QPixmap& pixmap);
+    void onThumbnailFailed(const QString& filePath);
     void onRefreshTimer();
 
 private:
@@ -136,6 +144,7 @@ private:
 
     // 管理器
     RecentFilesManager* m_recentFilesManager;
+    RecentPdfThumbnailProvider* m_thumbnailProvider;
 
     // UI组件
     QVBoxLayout* m_mainLayout;
@@ -146,6 +155,7 @@ private:
 
     // 文件条目
     QList<RecentFileItemWidget*> m_fileItems;
+    QHash<QString, RecentFileItemWidget*> m_itemsByPath;
 
     // 刷新定时器
     QTimer* m_refreshTimer;

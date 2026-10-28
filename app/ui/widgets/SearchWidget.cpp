@@ -12,6 +12,7 @@ SearchWidget::SearchWidget(QWidget* parent)
       m_document(nullptr),
       m_searchTimer(new QTimer(this)),
       m_optionsVisible(false) {
+    setObjectName(QStringLiteral("searchWidget"));
     setupUI();
     setupConnections();
     setupShortcuts();
@@ -33,6 +34,7 @@ void SearchWidget::setupUI() {
     m_searchLayout = new QHBoxLayout();
 
     m_searchInput = new QLineEdit();
+    m_searchInput->setObjectName(QStringLiteral("searchInput"));
     m_searchInput->setPlaceholderText("搜索文档内容...");
     m_searchInput->setClearButtonEnabled(true);
 
@@ -146,18 +148,6 @@ void SearchWidget::setupConnections() {
 }
 
 void SearchWidget::setupShortcuts() {
-    m_findShortcut = new QShortcut(QKeySequence::Find, this);
-    connect(m_findShortcut, &QShortcut::activated, this,
-            &SearchWidget::focusSearchInput);
-
-    m_findNextShortcut = new QShortcut(QKeySequence::FindNext, this);
-    connect(m_findNextShortcut, &QShortcut::activated, this,
-            &SearchWidget::nextResult);
-
-    m_findPreviousShortcut = new QShortcut(QKeySequence::FindPrevious, this);
-    connect(m_findPreviousShortcut, &QShortcut::activated, this,
-            &SearchWidget::previousResult);
-
     m_escapeShortcut = new QShortcut(QKeySequence(Qt::Key_Escape), this);
     connect(m_escapeShortcut, &QShortcut::activated, this,
             &SearchWidget::searchClosed);

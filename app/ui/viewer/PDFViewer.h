@@ -2,18 +2,35 @@
 
 #include <poppler/qt6/poppler-qt6.h>
 #include <QAbstractScrollArea>
+#include <QColor>
 #include <QEvent>
 #include <QList>
 #include <QWidget>
 #include <memory>
+#include "rag/domain/EvidenceHighlightRequest.h"
 
 #include "ZoomTypes.h"
+#include "model/AnnotationModel.h"
 #include "model/SearchModel.h"
 
+class QDragEnterEvent;
+class QDropEvent;
+
 // 页面查看模式枚举
+// 顺序必须与 ToolBar 的 viewModeCombo 索引一致 (0/1/2/3)，
+// ViewWidget::setCurrentViewMode 依赖 static_cast<PDFViewMode>(index)。
 enum class PDFViewMode {
-    SinglePage,       // 单页视图
-    ContinuousScroll  // 连续滚动视图
+    SinglePage,        // 单页视图 (index 0)
+    ContinuousScroll,  // 连续滚动视图 (index 1)
+    DoublePage,        // 双页对开视图 (index 2)
+    GridView           // 多页网格视图 (index 3)
+};
+
+struct PDFViewerPosition {
+    int page = 0;
+    qreal offsetY = 0.0;
+    qreal zoom = 1.0;
+    PDFViewMode mode = PDFViewMode::SinglePage;
 };
 
 class PDFViewer : public QWidget {
@@ -24,11 +41,14 @@ public:
     ~PDFViewer();
 
     // 文档操作
-    void setDocument(std::shared_ptr<Poppler::Document> document);
+    void setDocument(std::shared_ptr<Poppler::Document> document,
+                     const QString& filePath);
     void clearDocument();
 
     // 页面导航
     void goToPage(int pageNumber);
+    PDFViewerPosition captureViewport() const;
+    void restoreViewport(const PDFViewerPosition& position);
     void nextPage();
     void previousPage();
     void firstPage();
@@ -62,11 +82,15 @@ public:
     void findNext();
     void findPrevious();
     void clearSearch();
+    void copySelectedText();
 
     // Search highlighting functionality
     void setSearchResults(const QList<SearchResult>& results);
     void clearSearchHighlights();
     void highlightCurrentSearchResult(const SearchResult& result);
+    void setEvidenceHighlights(
+        const QVector<Rag::EvidenceHighlightRequest>& highlights);
+    void clearEvidenceHighlights();
 
     // 书签功能
     void addBookmark();
@@ -74,6 +98,19 @@ public:
     void removeBookmark();
     void toggleBookmark();
     bool hasBookmarkForCurrentPage() const;
+
+    // Annotation tools
+    AnnotationModel* annotationModel() const;
+    void setAnnotationStoragePath(const QString& storagePath);
+    bool saveAnnotations();
+    bool loadAnnotations();
+    void clearAnnotations();
+    void setAnnotationTool(AnnotationType tool);
+    void setAnnotationMode(bool enabled);
+    void setAnnotationColor(const QColor& color);
+    void setAnnotationOpacity(double opacity);
+    void setAnnotationLineWidth(double width);
+    void setAnnotationFont(const QString& family, int size);
 
     // 查看模式操作
     void setViewMode(PDFViewMode mode);
@@ -105,10 +142,11 @@ protected:
     void setupViewModes();
     void switchToSinglePageMode();
     void switchToContinuousMode();
-    void updateContinuousView();
+    void updateContinuousView(const char* reason);
     void updateContinuousViewRotation();
-    void createContinuousPages();
-    void rebuildContinuousCanvasBlueprint();
+    void createContinuousPages(const char* reason);
+    void rebuildContinuousCanvasBlueprint(const char* reason);
+    void handleContinuousResize();
     void updateContinuousCanvasGeometry();
 
     // 虚拟化渲染方法
@@ -126,6 +164,8 @@ protected:
     // Search highlighting helper methods
     void updateSearchHighlightsForCurrentPage();
     void updateAllPagesSearchHighlights();
+    void dragEnterEvent(QDragEnterEvent* event) override;
+    void dropEvent(QDropEvent* event) override;
 
 private slots:
     void onScaleChanged(double scale);
@@ -150,4 +190,5 @@ signals:
     void bookmarkRequested(int pageNumber);
     void fullscreenToggled(bool fullscreen);
     void fileDropped(const QString& filePath);
+    void filesDropped(const QStringList& filePaths);
 };

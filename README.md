@@ -5,14 +5,56 @@ A Qt6-based PDF reader application with comprehensive build support for multiple
 ## Features
 
 - Modern Qt6-based PDF viewer
+- Ask PDF evidence search (FTS5); optional local hybrid embedding search
 - Cross-platform support (Windows, Linux, macOS)
 - Multiple build environments:
   - **vcpkg** for dependency management
   - **MSYS2** for Windows Unix-like development
   - **System packages** for native Linux/macOS builds
 
-## Build Environments
+### Local embedding search
 
+Ask PDF works offline with lexical search by default. To enable optional hybrid
+retrieval, run Ollama locally with an embedding model, then open the gear button
+in the Ask PDF sidebar and choose an Embedding model. The environment variables
+below are only used to seed the settings the first time; after that the saved
+values win. For example:
+
+```sh
+ollama pull nomic-embed-text
+READIUM_OLLAMA_EMBED_MODEL=nomic-embed-text READIUM_OLLAMA_EMBED_VERSION=1 ./build/app/app
+```
+
+The app sends text only to the configured loopback endpoint (default
+`127.0.0.1:11434`); remote hosts are rejected. It does not start or download a
+model. Settings migrated
+from the environment keep the configured version, while a model chosen in the
+UI uses the hidden version `1`. Replacing/updating a model under the same Ollama
+tag is not detected; pick a different tag or change the endpoint if you need a
+fresh vector space. Embeddings are generated in batches after the lexical index
+is ready; missing vectors or an unavailable local server do not prevent lexical
+search.
+
+### Ask PDF answers
+
+Choose a Chat model and enable "AI 回答" in the Ask PDF settings, or seed the
+settings with `READIUM_OLLAMA_CHAT_MODEL` before the first launch. Answers stream
+into the Ask PDF sidebar using the retrieved evidence. Validated citations
+navigate to local PDF text. With answers disabled, Ask PDF continues to provide
+evidence search and, when embeddings are ready, semantic retrieval. Chat history
+is bounded, held only in memory per open document, and cleared when its index is
+rebuilt or the Chat model changes. Stop, tab switching, document closing and
+configuration changes cancel the active request without dropping already
+displayed citations. No model is
+downloaded automatically. Extracted text and embeddings are stored locally in
+the Ask PDF index; use the clear-index button in the Ask PDF sidebar to remove
+them. See [Ask PDF](docs/features/ask-pdf.md) for details.
+
+```sh
+READIUM_OLLAMA_CHAT_MODEL=your-installed-model ./build/app/app
+```
+
+## Build Environments
 The project supports **multiple build systems** for maximum flexibility:
 - **CMake** (primary) - Comprehensive build system with extensive configuration
 - **Xmake** (alternative) - Modern Lua-based build system with simpler syntax
@@ -185,9 +227,13 @@ make dev            # Setup development environment
 - [Xmake Build Guide](docs/build-systems/xmake/xmake-build.md) - Modern Lua-based build system instructions (Experimental)
 - [Build System Comparison](docs/build-systems/build-system-comparison.md) - CMake vs xmake feature comparison
 - [clangd Setup Guide](docs/setup/clangd-setup.md) - IDE integration and clangd configuration
-- [clangd Troubleshooting](docs/setup/clangd-troubleshooting.md) - Solutions for common clangd issues
-- [clangd Configuration Options](docs/setup/clangd-config-options.md) - Advanced configuration control
+- [clangd Configuration](docs/clangd-configuration.md) - Qt missing-includes fixes and advanced configuration
+- [Debugging Setup](docs/debugging-setup.md) - Cross-platform VS Code debugging
+- [Logging System](docs/logging-system.md) - spdlog-based logging
+- [Architecture](docs/agent/architecture.md) - Module boundaries and responsibilities
+- [Conventions](docs/agent/conventions.md) - C++/Qt style and logging conventions
 - [Build Troubleshooting](docs/setup/msys2-build.md#troubleshooting) - Common build issues and solutions
+- [AGENTS.md](AGENTS.md) - Agent entry point and docs index
 
 ## Dependencies
 

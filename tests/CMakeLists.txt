@@ -2,7 +2,7 @@
 
 cmake_minimum_required(VERSION 3.16)
 
-find_package(Qt6 REQUIRED COMPONENTS Core Widgets Test Network Concurrent)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Test Network Concurrent Sql)
 find_package(spdlog REQUIRED)
 find_package(PkgConfig REQUIRED)
 
@@ -59,7 +59,10 @@ function(create_integration_test TEST_NAME TEST_SOURCE)
         ../app/ui/viewer/PDFRenderCache.cpp
         ../app/ui/viewer/PDFAnimations.cpp
         ../app/ui/viewer/PDFPrerenderer.cpp
+        ../app/managers/ShortcutManager.cpp
+        ../app/ui/continuous/PDFContinuousLayout.cpp
         ../app/ui/continuous/PDFContinuousBlueprint.cpp
+        ../app/ui/continuous/PDFContinuousCoordinateMapper.cpp
         ../app/ui/continuous/PDFContinuousCanvas.cpp
         ../app/ui/continuous/PDFContinuousImageCache.cpp
         ../app/ui/continuous/PDFContinuousRenderScheduler.cpp
@@ -102,11 +105,136 @@ if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/unit/test_search_controller.cpp)
         ../app/controller/SearchController.cpp)
 endif()
 
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/unit/test_shortcut_manager.cpp)
+    create_unit_test(test_shortcut_manager
+        unit/test_shortcut_manager.cpp)
+    target_sources(test_shortcut_manager PRIVATE
+        ../app/managers/ShortcutManager.cpp)
+endif()
+
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/unit/test_style_manager.cpp)
+    add_executable(test_style_manager
+        unit/test_style_manager.cpp)
+    target_include_directories(test_style_manager PRIVATE ${COMMON_INCLUDE_DIRS})
+    target_link_libraries(test_style_manager PRIVATE
+        Qt6::Core Qt6::Widgets Qt6::Test spdlog::spdlog)
+    target_compile_definitions(test_style_manager PRIVATE ${COMMON_DEFINITIONS})
+    target_sources(test_style_manager PRIVATE
+        ../app/managers/StyleManager.cpp
+        ../app/utils/Logger.cpp)
+    set_target_properties(test_style_manager PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests/unit)
+    add_test(NAME test_style_manager COMMAND test_style_manager)
+    set_tests_properties(test_style_manager PROPERTIES
+        TIMEOUT 30
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+endif()
+
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/unit/test_logger.cpp)
+    add_executable(test_logger
+        unit/test_logger.cpp)
+    target_include_directories(test_logger PRIVATE ${COMMON_INCLUDE_DIRS})
+    target_link_libraries(test_logger PRIVATE
+        Qt6::Core Qt6::Widgets Qt6::Test spdlog::spdlog)
+    target_compile_definitions(test_logger PRIVATE ${COMMON_DEFINITIONS})
+    target_sources(test_logger PRIVATE
+        ../app/utils/Logger.cpp)
+    set_target_properties(test_logger PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests/unit)
+    add_test(NAME test_logger COMMAND test_logger)
+    set_tests_properties(test_logger PROPERTIES
+        TIMEOUT 30
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+endif()
+
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/unit/test_thumbnail_priority.cpp)
+    create_unit_test(test_thumbnail_priority
+        unit/test_thumbnail_priority.cpp)
+endif()
+
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/unit/test_thumbnail_list_copy.cpp)
+    create_unit_test(test_thumbnail_list_copy
+        unit/test_thumbnail_list_copy.cpp)
+    target_sources(test_thumbnail_list_copy PRIVATE
+        ../app/delegate/ThumbnailDelegate.cpp
+        ../app/managers/StyleManager.cpp
+        ../app/model/ThumbnailModel.cpp
+        ../app/ui/thumbnail/ThumbnailGenerator.cpp
+        ../app/ui/thumbnail/ThumbnailListView.cpp
+        ../app/utils/Logger.cpp
+        ../app/utils/LoggingConfig.cpp
+        ../app/utils/LoggingMacros.cpp
+        ../app/utils/LoggingManager.cpp
+        ../app/utils/QtSpdlogBridge.cpp)
+    target_link_libraries(test_thumbnail_list_copy PRIVATE
+        Qt6::Concurrent Qt6::Gui spdlog::spdlog)
+endif()
+
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/unit/test_ask_pdf_model_combo.cpp)
+    create_unit_test(test_ask_pdf_model_combo
+        unit/test_ask_pdf_model_combo.cpp)
+endif()
+
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/unit/test_reading_progress_manager.cpp)
+    create_unit_test(test_reading_progress_manager
+        unit/test_reading_progress_manager.cpp)
+    target_sources(test_reading_progress_manager PRIVATE
+        ../app/managers/ReadingProgressManager.cpp)
+endif()
+
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/unit/test_bookmark_model.cpp)
+    create_unit_test(test_bookmark_model
+        unit/test_bookmark_model.cpp)
+    target_sources(test_bookmark_model PRIVATE
+        ../app/model/BookmarkModel.cpp)
+    set_tests_properties(test_bookmark_model PROPERTIES
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen;HOME=/tmp/sast-readium-test")
+endif()
+
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/unit/test_annotation_model.cpp)
+    create_unit_test(test_annotation_model
+        unit/test_annotation_model.cpp)
+    target_sources(test_annotation_model PRIVATE
+        ../app/model/AnnotationModel.cpp)
+endif()
+
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/unit/test_recent_pdf_thumbnail_provider.cpp)
+    add_executable(test_recent_pdf_thumbnail_provider
+        unit/test_recent_pdf_thumbnail_provider.cpp)
+    target_include_directories(test_recent_pdf_thumbnail_provider PRIVATE
+        ${COMMON_INCLUDE_DIRS})
+    target_link_libraries(test_recent_pdf_thumbnail_provider PRIVATE
+        Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Test Qt6::Concurrent
+        PkgConfig::POPPLER_QT6 spdlog::spdlog)
+    target_compile_definitions(test_recent_pdf_thumbnail_provider PRIVATE
+        ${COMMON_DEFINITIONS})
+    target_sources(test_recent_pdf_thumbnail_provider PRIVATE
+        ../app/ui/thumbnail/RecentPdfThumbnailProvider.cpp
+        ../app/utils/Logger.cpp)
+    set_target_properties(test_recent_pdf_thumbnail_provider PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests/unit)
+    add_test(NAME test_recent_pdf_thumbnail_provider
+        COMMAND test_recent_pdf_thumbnail_provider)
+    set_tests_properties(test_recent_pdf_thumbnail_provider PROPERTIES
+        TIMEOUT 30
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+endif()
+
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/unit/test_pdf_continuous_blueprint.cpp)
     create_unit_test(test_pdf_continuous_blueprint
         unit/test_pdf_continuous_blueprint.cpp)
     target_sources(test_pdf_continuous_blueprint PRIVATE
+        ../app/ui/continuous/PDFContinuousLayout.cpp
         ../app/ui/continuous/PDFContinuousBlueprint.cpp)
+endif()
+
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/unit/test_pdf_continuous_coordinate_mapper.cpp)
+    create_unit_test(test_pdf_continuous_coordinate_mapper
+        unit/test_pdf_continuous_coordinate_mapper.cpp)
+    target_sources(test_pdf_continuous_coordinate_mapper PRIVATE
+        ../app/ui/continuous/PDFContinuousLayout.cpp
+        ../app/ui/continuous/PDFContinuousBlueprint.cpp
+        ../app/ui/continuous/PDFContinuousCoordinateMapper.cpp)
 endif()
 
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/unit/test_pdf_continuous_render_scheduler.cpp)
@@ -118,6 +246,125 @@ if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/unit/test_pdf_continuous_render_scheduler.
         ../app/utils/Logger.cpp)
     target_link_libraries(test_pdf_continuous_render_scheduler PRIVATE
         Qt6::Concurrent spdlog::spdlog)
+endif()
+
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/unit/test_pdf_continuous_image_cache.cpp)
+    create_unit_test(test_pdf_continuous_image_cache
+        unit/test_pdf_continuous_image_cache.cpp)
+    target_sources(test_pdf_continuous_image_cache PRIVATE
+        ../app/ui/continuous/PDFContinuousImageCache.cpp)
+endif()
+
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/unit/test_rag_p0.cpp)
+    create_unit_test(test_rag_p0
+        unit/test_rag_p0.cpp)
+    target_sources(test_rag_p0 PRIVATE
+        ../app/rag/extract/PdfTextExtractor.cpp
+        ../app/rag/extract/PdfChunker.cpp
+        ../app/rag/index/RagIndexStore.cpp)
+    target_link_libraries(test_rag_p0 PRIVATE Qt6::Sql)
+endif()
+
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/unit/test_rag_p1.cpp)
+    create_unit_test(test_rag_p1
+        unit/test_rag_p1.cpp)
+    target_sources(test_rag_p1 PRIVATE
+        ../app/rag/extract/PdfChunker.cpp
+        ../app/rag/index/RagIndexStore.cpp
+        ../app/rag/retrieve/LexicalRetriever.cpp)
+    target_link_libraries(test_rag_p1 PRIVATE Qt6::Concurrent Qt6::Sql)
+endif()
+
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/unit/test_rag_p2.cpp)
+    create_unit_test(test_rag_p2 unit/test_rag_p2.cpp)
+    target_sources(test_rag_p2 PRIVATE
+        ../app/rag/index/RagIndexStore.cpp
+        ../app/rag/retrieve/EvidenceExpander.cpp
+        ../app/rag/retrieve/HybridRetriever.cpp)
+    target_link_libraries(test_rag_p2 PRIVATE Qt6::Sql)
+endif()
+
+create_unit_test(test_rag_p3 unit/test_rag_p3.cpp)
+target_sources(test_rag_p3 PRIVATE
+    ../app/rag/chat/ChatProvider.h
+    ../app/rag/chat/ContextAssembler.cpp
+    ../app/rag/chat/OllamaChatProvider.cpp
+    ../app/rag/embedding/OllamaEmbeddingProvider.cpp
+    ../app/rag/controller/RagConversationModel.cpp
+    ../app/rag/controller/RagConversationModel.h
+    ../app/rag/ui/AskPdfConversationView.cpp
+    ../app/rag/ui/AskPdfConversationView.h
+    ../app/rag/ui/AskPdfProgress.cpp
+    ../app/rag/ui/AskPdfProgress.h
+    ../app/rag/ui/AskPdfState.cpp
+    ../app/rag/ui/AskPdfState.h
+    ../app/rag/ui/AskPdfTurnCard.cpp
+    ../app/rag/ui/AskPdfTurnCard.h
+    ../app/rag/ui/AskPdfWidget.cpp
+    ../app/rag/ui/AskPdfWidget.h)
+target_link_libraries(test_rag_p3 PRIVATE Qt6::Network)
+
+create_unit_test(test_rag_evidence_baseline unit/test_rag_evidence_baseline.cpp)
+target_sources(test_rag_evidence_baseline PRIVATE
+    ../app/rag/extract/PdfChunker.cpp
+    ../app/rag/index/RagIndexStore.cpp
+    ../app/rag/retrieve/EvidenceExpander.cpp
+    ../app/rag/retrieve/HybridRetriever.cpp
+    ../app/rag/chat/ContextAssembler.cpp)
+target_link_libraries(test_rag_evidence_baseline PRIVATE Qt6::Sql)
+
+create_unit_test(test_ollama_embedding unit/test_ollama_embedding.cpp)
+target_sources(test_ollama_embedding PRIVATE
+    ../app/rag/embedding/OllamaEmbeddingProvider.cpp)
+target_link_libraries(test_ollama_embedding PRIVATE Qt6::Network)
+
+create_unit_test(test_chat_budget unit/test_chat_budget.cpp)
+target_sources(test_chat_budget PRIVATE
+    ../app/rag/chat/ContextAssembler.cpp)
+
+
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/unit/test_rag_settings.cpp)
+    create_unit_test(test_rag_settings
+        unit/test_rag_settings.cpp)
+    target_sources(test_rag_settings PRIVATE
+        ../app/rag/config/RagSettings.cpp)
+    target_link_libraries(test_rag_settings PRIVATE Qt6::Network)
+endif()
+
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/unit/test_ollama_probe.cpp)
+    create_unit_test(test_ollama_probe
+        unit/test_ollama_probe.cpp)
+    target_sources(test_ollama_probe PRIVATE
+        ../app/rag/config/RagSettings.cpp
+        ../app/rag/probe/OllamaProbe.cpp)
+    target_link_libraries(test_ollama_probe PRIVATE Qt6::Network)
+endif()
+
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/unit/test_rag_coordinator.cpp)
+    create_unit_test(test_rag_coordinator
+        unit/test_rag_coordinator.cpp)
+    target_sources(test_rag_coordinator PRIVATE
+        ../app/model/DocumentModel.cpp
+        ../app/model/AsyncDocumentLoader.cpp
+        ../app/rag/config/RagSettings.cpp
+        ../app/rag/controller/RagConversationModel.cpp
+        ../app/rag/controller/RagDocumentCoordinator.cpp
+        ../app/rag/conversation/RagConversationStore.cpp
+        ../app/rag/domain/RagConversation.cpp
+        ../app/rag/extract/PdfTextExtractor.cpp
+        ../app/rag/extract/PdfChunker.cpp
+        ../app/rag/index/RagIndexStore.cpp
+        ../app/rag/retrieve/EvidenceExpander.cpp
+        ../app/rag/retrieve/LexicalRetriever.cpp
+        ../app/rag/retrieve/HybridRetriever.cpp
+        ../app/rag/embedding/OllamaEmbeddingProvider.cpp
+        ../app/rag/chat/ChatProvider.h
+        ../app/rag/chat/ContextAssembler.cpp
+        ../app/rag/chat/OllamaChatProvider.cpp
+        ../app/utils/Logger.cpp)
+    target_link_libraries(test_rag_coordinator PRIVATE
+        Qt6::Concurrent Qt6::Network Qt6::Sql spdlog::spdlog)
+    set_tests_properties(test_rag_coordinator PROPERTIES TIMEOUT 90)
 endif()
 
 # ===== Integration Tests =====

@@ -1,19 +1,23 @@
 #pragma once
 
+#include <QHash>
 #include <QStackedWidget>
 #include <QVBoxLayout>
 #include <QWidget>
 #include "../../controller/tool.hpp"
+#include "../../managers/ReadingProgressManager.h"
 #include "../../model/DocumentModel.h"
 #include "../../model/PDFOutlineModel.h"
 #include "../viewer/PDFViewer.h"
 #include "../widgets/DocumentTabWidget.h"
+#include "rag/domain/EvidenceHighlightRequest.h"
 
 class ViewWidget : public QWidget {
     Q_OBJECT
 
 public:
     ViewWidget(DocumentModel* model, QWidget* parent = nullptr);
+    ~ViewWidget() override;
 
     // 设置目录模型（保留，因为目录模型是动态变化的）
     void setOutlineModel(PDFOutlineModel* model);
@@ -39,6 +43,11 @@ public:
     int getCurrentPage() const;
     int getCurrentPageCount() const;
     double getCurrentZoom() const;
+    PDFViewMode getCurrentViewMode() const;
+    PDFViewer* getCurrentViewer() const;
+    void setEvidenceHighlights(
+        const QVector<Rag::EvidenceHighlightRequest>& highlights);
+    void clearEvidenceHighlights();
 
 protected:
     void setupUI();
@@ -64,17 +73,24 @@ private slots:
     // PDF查看器信号处理
     void onPDFPageChanged(int pageNumber);
     void onPDFZoomChanged(double zoomFactor);
+    void onPDFViewModeChanged(PDFViewMode mode);
 
 signals:
     void currentViewerPageChanged(int pageNumber, int totalPages);
     void currentViewerZoomChanged(double zoomFactor);
+    void currentViewerViewModeChanged(PDFViewMode mode);
     void currentOutlineModelChanged(PDFOutlineModel* model);
+    void bookmarkRequested(const QString& documentPath, int pageNumber);
 
     /** Emitted when the user requests to close a tab (via tab bar). */
     void tabCloseRequested(int index);
 
     /** Emitted when the user switches to a different tab. */
     void tabSwitched(int index);
+
+    /** Emitted when the user requests a new tab from the tab bar. */
+    void newTabRequested();
+    void filesDropped(const QStringList& filePaths);
 
 private:
     // UI组件
@@ -94,4 +110,9 @@ private:
     void removePDFViewer(int index);
     void showEmptyState();
     void hideEmptyState();
+
+    void saveReadingProgress(PDFViewer* viewer);
+
+    ReadingProgressManager m_readingProgress;
+    QHash<PDFViewer*, QString> m_viewerFilePaths;
 };

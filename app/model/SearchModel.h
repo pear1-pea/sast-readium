@@ -18,7 +18,7 @@ struct SearchResult {
     int pageNumber;
     QString text;
     QString context;
-    QRectF boundingRect;  // PDF coordinates from Poppler
+    QRectF boundingRect;  // PDF coordinates with a bottom-left origin
     int startIndex;
     int length;
     QRectF widgetRect;     // Transformed widget coordinates for highlighting
@@ -135,6 +135,14 @@ private:
     QList<SearchResult> searchInPage(Poppler::Page* page, int pageNumber,
                                      const QString& query,
                                      const SearchOptions& options);
+    QList<SearchResult> searchPlainTextInPage(Poppler::Page* page,
+                                              int pageNumber,
+                                              const QString& query,
+                                              const QString& pageText,
+                                              const SearchOptions& options);
+    QList<SearchResult> searchRegexInPage(Poppler::Page* page, int pageNumber,
+                                          const QString& pageText,
+                                          const SearchOptions& options);
     QString extractContext(const QString& pageText, int position, int length,
                            int contextLength = 50);
     QRegularExpression createSearchRegex(const QString& query,

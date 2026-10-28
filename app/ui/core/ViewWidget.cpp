@@ -28,6 +28,12 @@ ViewWidget::ViewWidget(DocumentModel* model, QWidget* parent)
     }
 }
 
+ViewWidget::~ViewWidget() {
+    for (PDFViewer* viewer : pdfViewers) {
+        saveReadingProgress(viewer);
+    }
+}
+
 void ViewWidget::setupUI() {
     mainLayout = new QVBoxLayout(this);
     mainLayout->setContentsMargins(0, 0, 0, 0);
@@ -69,6 +75,8 @@ void ViewWidget::setupConnections() {
             &ViewWidget::onTabMoved);
     connect(tabWidget, &DocumentTabWidget::allTabsClosed, this,
             &ViewWidget::onAllDocumentsClosed);
+    connect(tabWidget, &DocumentTabWidget::newTabRequested, this,
+            &ViewWidget::newTabRequested);
 }
 
 void ViewWidget::setOutlineModel(PDFOutlineModel* model) {
@@ -141,11 +149,29 @@ void ViewWidget::executePDFAction(ActionMap action) {
         case ActionMap::rotateRight:
             currentViewer->rotateRight();
             break;
+        case ActionMap::showSearch:
+            currentViewer->showSearch();
+            break;
+        case ActionMap::findNext:
+            currentViewer->findNext();
+            break;
+        case ActionMap::findPrevious:
+            currentViewer->findPrevious();
+            break;
+        case ActionMap::addBookmark:
+            currentViewer->addBookmark();
+            break;
         case ActionMap::setSinglePageMode:
             currentViewer->setViewMode(PDFViewMode::SinglePage);
             break;
         case ActionMap::setContinuousScrollMode:
             currentViewer->setViewMode(PDFViewMode::ContinuousScroll);
+            break;
+        case ActionMap::setDoublePageMode:
+            currentViewer->setViewMode(PDFViewMode::DoublePage);
+            break;
+        case ActionMap::setGridViewMode:
+            currentViewer->setViewMode(PDFViewMode::GridView);
             break;
         default:
             qWarning() << "Unhandled PDF action in ViewWidget:"
@@ -197,6 +223,36 @@ double ViewWidget::getCurrentZoom() const {
     return 1.0;
 }
 
+PDFViewMode ViewWidget::getCurrentViewMode() const {
+    int currentIndex = getCurrentDocumentIndex();
+    if (currentIndex >= 0 && currentIndex < pdfViewers.size()) {
+        PDFViewer* viewer = pdfViewers[currentIndex];
+        return viewer ? viewer->getViewMode() : PDFViewMode::SinglePage;
+    }
+    return PDFViewMode::SinglePage;
+}
+
+PDFViewer* ViewWidget::getCurrentViewer() const {
+    const int currentIndex = getCurrentDocumentIndex();
+    if (currentIndex < 0 || currentIndex >= pdfViewers.size()) {
+        return nullptr;
+    }
+    return pdfViewers.at(currentIndex);
+}
+
+void ViewWidget::setEvidenceHighlights(
+    const QVector<Rag::EvidenceHighlightRequest>& highlights) {
+    if (PDFViewer* viewer = getCurrentViewer()) {
+        viewer->setEvidenceHighlights(highlights);
+    }
+}
+
+void ViewWidget::clearEvidenceHighlights() {
+    if (PDFViewer* viewer = getCurrentViewer()) {
+        viewer->clearEvidenceHighlights();
+    }
+}
+
 void ViewWidget::setCurrentZoom(int percentage) {
     int currentIndex = getCurrentDocumentIndex();
     if (currentIndex >= 0 && currentIndex < pdfViewers.size()) {
@@ -216,7 +272,15 @@ void ViewWidget::onDocumentOpened(int index, const QString& fileName) {
 
     // 创建新的PDF查看器
     PDFViewer* viewer = createPDFViewer();
-    viewer->setDocument(document);
+    m_viewerFilePaths.insert(viewer, filePath);
+    viewer->setDocument(document, filePath);
+    viewer->setAnnotationStoragePath(filePath +
+                                     QStringLiteral(".sast-annotations.json"));
+
+    const int savedPage = m_readingProgress.pageForFile(filePath);
+    if (savedPage > 0 && savedPage < viewer->getPageCount()) {
+        viewer->goToPage(savedPage);
+    }
 
     // 创建目录模型并解析目录
     PDFOutlineModel* docOutlineModel = new PDFOutlineModel(this);
@@ -315,6 +379,7 @@ void ViewWidget::onCurrentDocumentChanged(int index) {
         emit currentViewerPageChanged(viewer->getCurrentPage(),
                                       viewer->getPageCount());
         emit currentViewerZoomChanged(viewer->getCurrentZoom());
+        emit currentViewerViewModeChanged(viewer->getViewMode());
     }
 
     qDebug() << "Current document changed to index" << index;
@@ -323,7 +388,9 @@ void ViewWidget::onCurrentDocumentChanged(int index) {
 void ViewWidget::onAllDocumentsClosed() {
     // 清理所有PDF查看器
     for (PDFViewer* viewer : pdfViewers) {
+        saveReadingProgress(viewer);
         viewerStack->removeWidget(viewer);
+        m_viewerFilePaths.remove(viewer);
         viewer->deleteLater();
     }
     pdfViewers.clear();
@@ -417,6 +484,16 @@ PDFViewer* ViewWidget::createPDFViewer() {
             &ViewWidget::onPDFPageChanged);
     connect(viewer, &PDFViewer::zoomChanged, this,
             &ViewWidget::onPDFZoomChanged);
+    connect(viewer, &PDFViewer::viewModeChanged, this,
+            &ViewWidget::onPDFViewModeChanged);
+    connect(viewer, &PDFViewer::bookmarkRequested, this,
+            [this, viewer](int pageNumber) {
+                const QString filePath = m_viewerFilePaths.value(viewer);
+                if (!filePath.isEmpty()) {
+                    emit bookmarkRequested(filePath, pageNumber);
+                }
+            });
+    connect(viewer, &PDFViewer::filesDropped, this, &ViewWidget::filesDropped);
 
     return viewer;
 }
@@ -457,6 +534,8 @@ void ViewWidget::removePDFViewer(int index) {
         return;
 
     PDFViewer* viewer = pdfViewers.takeAt(index);
+    saveReadingProgress(viewer);
+    m_viewerFilePaths.remove(viewer);
     viewerStack->removeWidget(viewer);
     viewer->deleteLater();
 }
@@ -488,8 +567,20 @@ void ViewWidget::onPDFPageChanged(int pageNumber) {
 
     if (currentIndex >= 0 && currentIndex < pdfViewers.size() &&
         pdfViewers[currentIndex] == sender) {
+        saveReadingProgress(sender);
         int totalPages = getCurrentPageCount();
         emit currentViewerPageChanged(pageNumber, totalPages);
+    }
+}
+
+void ViewWidget::saveReadingProgress(PDFViewer* viewer) {
+    if (!viewer) {
+        return;
+    }
+
+    const QString filePath = m_viewerFilePaths.value(viewer);
+    if (!filePath.isEmpty() && viewer->hasDocument()) {
+        m_readingProgress.savePageForFile(filePath, viewer->getCurrentPage());
     }
 }
 
@@ -501,5 +592,15 @@ void ViewWidget::onPDFZoomChanged(double zoomFactor) {
     if (currentIndex >= 0 && currentIndex < pdfViewers.size() &&
         pdfViewers[currentIndex] == sender) {
         emit currentViewerZoomChanged(zoomFactor);
+    }
+}
+
+void ViewWidget::onPDFViewModeChanged(PDFViewMode mode) {
+    PDFViewer* sender = qobject_cast<PDFViewer*>(QObject::sender());
+    int currentIndex = getCurrentDocumentIndex();
+
+    if (currentIndex >= 0 && currentIndex < pdfViewers.size() &&
+        pdfViewers[currentIndex] == sender) {
+        emit currentViewerViewModeChanged(mode);
     }
 }

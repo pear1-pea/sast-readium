@@ -5,6 +5,7 @@ enum ActionMap {
     openFolder,
     save,
     saveAs,
+    exitApp,
     // 标签页相关操作
     newTab,
     closeTab,
@@ -20,6 +21,8 @@ enum ActionMap {
     // 查看模式相关操作
     setSinglePageMode,
     setContinuousScrollMode,
+    setDoublePageMode,
+    setGridViewMode,
     // 页面导航操作
     firstPage,
     previousPage,
@@ -44,6 +47,8 @@ enum ActionMap {
     findNext,
     findPrevious,
     clearSearch,
+    // 书签操作
+    addBookmark,
     // 文档信息操作
     showDocumentMetadata,
     // 最近文件操作

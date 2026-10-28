@@ -15,6 +15,18 @@ struct PDFPageGeometry {
     QRectF contentRect;
 };
 
+enum class PDFLayoutType {
+    Single,  // Single column (default continuous)
+    Spread,  // Two-page spreads, first page optionally solo
+    Grid,    // Multi-column grid
+};
+
+enum class PDFVerticalAlignment {
+    AlignTop,
+    AlignCenter,
+    AlignBottom,
+};
+
 struct PDFContinuousLayoutOptions {
     double zoom = 1.0;
     int rotation = 0;
@@ -22,6 +34,11 @@ struct PDFContinuousLayoutOptions {
     QMarginsF documentMargins = QMarginsF(12.0, 12.0, 12.0, 12.0);
     qreal viewportWidth = 0.0;
     Qt::Alignment horizontalAlignment = Qt::AlignHCenter;
+    PDFLayoutType layoutType = PDFLayoutType::Single;
+    bool firstPageAlone = false;  // Spread: first page spans full row
+    PDFVerticalAlignment verticalAlignment = PDFVerticalAlignment::AlignTop;
+    int gridColumns = 2;         // Grid: column count
+    qreal columnSpacing = 16.0;  // Grid/Spread: inter-column gap
 };
 
 enum class PageScrollAlignment {

@@ -5,6 +5,9 @@
 class DocumentModel;
 class DocumentOrchestrator;
 class PageModel;
+namespace Rag {
+class RagDocumentCoordinator;
+}
 class RecentFilesManager;
 class RenderModel;
 class ThemeManager;
@@ -24,4 +27,5 @@ struct AppComponents {
     RenderModel* renderModel = nullptr;
 
     RecentFilesManager* recentFilesManager = nullptr;
+    Rag::RagDocumentCoordinator* ragDocumentCoordinator = nullptr;
 };

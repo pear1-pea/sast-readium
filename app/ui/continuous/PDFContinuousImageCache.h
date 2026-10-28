@@ -8,6 +8,7 @@
 #include <cstdint>
 
 struct PDFContinuousRenderKey {
+    std::uint64_t documentToken = 0;
     int pageIndex = -1;
     double zoom = 1.0;
     int rotation = 0;
@@ -20,6 +21,7 @@ struct PDFContinuousRenderRequest {
     PDFContinuousRenderKey key;
     QSize targetPixelSize;
     std::uint64_t generation = 0;
+    int priority = 0;
 };
 
 struct PDFContinuousRenderResult {
@@ -51,6 +53,9 @@ public:
     void setMaxCostBytes(qint64 maxCostBytes);
     qint64 maxCostBytes() const;
     qint64 currentCostBytes() const;
+    quint64 hitCount() const;
+    quint64 missCount() const;
+    void resetStatistics();
 
 private:
     void evictIfNeeded();
@@ -61,4 +66,6 @@ private:
     mutable QList<PDFContinuousRenderKey> m_lruOrder;
     qint64 m_maxCostBytes;
     qint64 m_currentCostBytes = 0;
+    mutable quint64 m_hitCount = 0;
+    mutable quint64 m_missCount = 0;
 };

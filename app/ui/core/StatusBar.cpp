@@ -6,7 +6,19 @@
 #include <QLabel>
 #include <QProgressBar>
 #include <QPropertyAnimation>
+#include "../../managers/ShortcutManager.h"
 #include "../../managers/StyleManager.h"
+
+namespace {
+QString shortcutTooltip(const QString& text, ActionMap action) {
+    const QList<QKeySequence> shortcuts =
+        ShortcutManager::instance().shortcutsFor(action);
+    if (shortcuts.isEmpty()) {
+        return text;
+    }
+    return QString("%1 (%2)").arg(text, shortcuts.first().toString());
+}
+}  // namespace
 
 StatusBar::StatusBar(QWidget* parent)
     : QStatusBar(parent), currentTotalPages(0) {
@@ -51,7 +63,8 @@ void StatusBar::setupSeparators() {
 void StatusBar::setupPageNavigation() {
     // First page button
     QAction* firstPageAction = new QAction("⏮", this);
-    firstPageAction->setToolTip("第一页 (Ctrl+Home)");
+    firstPageAction->setToolTip(
+        shortcutTooltip("第一页", ActionMap::firstPage));
     firstPageBtn = new QToolButton(this);
     firstPageBtn->setDefaultAction(firstPageAction);
     firstPageBtn->setFixedSize(24, 24);
@@ -59,7 +72,8 @@ void StatusBar::setupPageNavigation() {
 
     // Previous page button
     QAction* prevPageAction = new QAction("◀", this);
-    prevPageAction->setToolTip("上一页 (Page Up)");
+    prevPageAction->setToolTip(
+        shortcutTooltip("上一页", ActionMap::previousPage));
     prevPageBtn = new QToolButton(this);
     prevPageBtn->setDefaultAction(prevPageAction);
     prevPageBtn->setFixedSize(24, 24);
@@ -81,7 +95,7 @@ void StatusBar::setupPageNavigation() {
 
     // Next page button
     QAction* nextPageAction = new QAction("▶", this);
-    nextPageAction->setToolTip("下一页 (Page Down)");
+    nextPageAction->setToolTip(shortcutTooltip("下一页", ActionMap::nextPage));
     nextPageBtn = new QToolButton(this);
     nextPageBtn->setDefaultAction(nextPageAction);
     nextPageBtn->setFixedSize(24, 24);
@@ -89,7 +103,8 @@ void StatusBar::setupPageNavigation() {
 
     // Last page button
     QAction* lastPageAction = new QAction("⏭", this);
-    lastPageAction->setToolTip("最后一页 (Ctrl+End)");
+    lastPageAction->setToolTip(
+        shortcutTooltip("最后一页", ActionMap::lastPage));
     lastPageBtn = new QToolButton(this);
     lastPageBtn->setDefaultAction(lastPageAction);
     lastPageBtn->setFixedSize(24, 24);

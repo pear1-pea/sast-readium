@@ -2,19 +2,29 @@
 
 #include <QMainWindow>
 
+#include <QHash>
+#include <QPair>
+#include <QSet>
+#include <QSize>
 #include <QStackedWidget>
+#include <QStringList>
+#include <QThreadPool>
+#include <QVector>
+
+#include <memory>
 #include "controller/DocumentOrchestrator.h"
 #include "controller/tool.hpp"
 #include "core/AppComponents.h"
 #include "managers/LayoutManager.h"
 #include "managers/RecentFilesManager.h"
+#include "managers/ShortcutManager.h"
 #include "managers/StyleManager.h"
 #include "managers/ThemeManager.h"
 #include "model/DocumentModel.h"
 #include "model/PageModel.h"
 #include "model/RenderModel.h"
+#include "rag/controller/RagDocumentCoordinator.h"
 #include "ui/core/MenuBar.h"
-#include "ui/core/RightSideBar.h"
 #include "ui/core/SideBar.h"
 #include "ui/core/StatusBar.h"
 #include "ui/core/ToolBar.h"
@@ -22,12 +32,29 @@
 #include "ui/managers/WelcomeScreenManager.h"
 #include "ui/widgets/WelcomeWidget.h"
 
+class QDragEnterEvent;
+class QDropEvent;
+
+struct ThumbnailDocumentCacheEntry {
+    std::shared_ptr<Poppler::Document> document;
+    QVector<QSize> pageSizes;
+    qint64 fileSize = 0;
+    qint64 modifiedTimeMs = 0;
+    quint64 lastAccess = 0;
+};
+
 class MainWindow : public QMainWindow {
     Q_OBJECT
 
 public:
     MainWindow(const AppComponents& deps, QWidget* parent = nullptr);
     ~MainWindow() noexcept;
+
+    void openFiles(const QStringList& filePaths);
+
+protected:
+    void dragEnterEvent(QDragEnterEvent* event) override;
+    void dropEvent(QDropEvent* event) override;
 
 private slots:
     void onSideBarVisibilityChanged(bool visible);
@@ -44,6 +71,8 @@ private slots:
 
     // 缩略图同步的槽函数
     void onPageChangedForThumbnailSync(int pageNumber, int totalPages);
+    void onBookmarkNavigationRequested(const QString& documentPath,
+                                       int pageNumber);
 
     // Welcome screen slots
     void onWelcomeScreenShowRequested();
@@ -61,6 +90,16 @@ private:
 
     // Route an ActionMap from MenuBar / ToolBar to the right component.
     void routeAction(ActionMap action);
+    void updateShortcutActionStates();
+    void updatePageShortcutActions(int pageNumber, int totalPages);
+    void updateViewModeShortcutActions(PDFViewMode mode);
+    void updateAnnotationToolbarState();
+    void requestThumbnailDocument(const QString& filePath);
+    bool thumbnailDocumentIsFresh(const ThumbnailDocumentCacheEntry& entry,
+                                  const QString& filePath) const;
+    void applyThumbnailDocument(const QString& filePath,
+                                const ThumbnailDocumentCacheEntry& entry);
+    void trimThumbnailDocumentCache();
     // Dialog-based file operations (L5 — needs QWidget* parent).
     void openFileDialog();
     void openFolderDialog();
@@ -74,7 +113,6 @@ private:
     MenuBar* menuBar;
     ToolBar* toolBar;
     SideBar* sideBar;
-    RightSideBar* rightSideBar;
     StatusBar* statusBar;
     ViewWidget* viewWidget;
 
@@ -93,7 +131,24 @@ private:
 
     RecentFilesManager* recentFilesManager;
 
+    ShortcutManager* shortcutManager;
+
     ThemeManager* m_themeManager;
+    Rag::RagDocumentCoordinator* m_ragCoordinator;
+    QString m_ragUiDocumentPath;
+    int m_returnPage = -1;
+    qreal m_returnOffsetY = 0.0;
+
+    QPair<QString, int> m_pendingBookmarkNavigation;
+
+    QHash<QString, ThumbnailDocumentCacheEntry> m_thumbnailDocumentCache;
+    QSet<QString> m_thumbnailLoadsInFlight;
+    QHash<QString, int> m_thumbnailRetries;
+    QString m_thumbnailCurrentPath;
+    quint64 m_thumbnailCacheAccessCounter = 0;
+    QThreadPool m_thumbnailLoadPool;
+    static constexpr int kMaxThumbnailDocuments = 3;
+    bool m_annotationToolbarEnabled = false;
 
 signals:
     void pdfViewerActionRequested(ActionMap action);

@@ -11,9 +11,11 @@
 #include <vector>
 
 #include "PDFContinuousBlueprint.h"
+#include "PDFContinuousCoordinateMapper.h"
 #include "PDFContinuousImageCache.h"
 #include "model/AnnotationModel.h"
 #include "model/SearchModel.h"
+#include "rag/domain/EvidenceHighlightRequest.h"
 
 class PDFContinuousRenderScheduler;
 class QPainter;
@@ -27,6 +29,8 @@ public:
     void setBlueprint(std::shared_ptr<const PDFContinuousBlueprint> blueprint);
     std::shared_ptr<const PDFContinuousBlueprint> blueprint() const;
 
+    void setContentOffsetX(qreal offsetX);
+    qreal contentOffsetX() const;
     void setContentOffsetY(qreal offsetY);
     qreal contentOffsetY() const;
 
@@ -36,9 +40,20 @@ public:
     void requestVisiblePageRenders(qreal devicePixelRatio);
     void setSearchResults(const QHash<int, QList<SearchResult>>& resultsByPage);
     void clearSearchHighlights();
+    void setEvidenceHighlights(
+        const QVector<Rag::EvidenceHighlightRequest>& highlights);
+    void clearEvidenceHighlights();
     void setAnnotations(
         const QHash<int, QList<PDFAnnotation>>& annotationsByPage);
     void clearAnnotationOverlays();
+    void setAnnotationTool(AnnotationType tool);
+    void setAnnotationMode(bool enabled);
+    void setAnnotationColor(const QColor& color);
+    void setAnnotationOpacity(double opacity);
+    void setAnnotationLineWidth(double width);
+    void setAnnotationFont(const QString& family, int size);
+    bool copySelectedText();
+    bool hasTextSelection() const;
 
     QRectF viewportRectInDocument() const;
     QPair<int, int> visiblePageRange(qreal preloadMargin = 0.0) const;
@@ -61,12 +76,15 @@ signals:
     void linkClicked(int pageIndex, const Poppler::Link* link);
     void browseLinkClicked(const QString& url);
     void gotoLinkClicked(int pageIndex);
+    void annotationPlacementRequested(int pageIndex, AnnotationType type,
+                                      const QRectF& normalizedRect);
     void renderApplied(int pageIndex, quint64 generation);
 
 protected:
     void paintEvent(QPaintEvent* event) override;
     void resizeEvent(QResizeEvent* event) override;
     bool event(QEvent* event) override;
+    void keyPressEvent(QKeyEvent* event) override;
     void mouseMoveEvent(QMouseEvent* event) override;
     void mousePressEvent(QMouseEvent* event) override;
     void mouseReleaseEvent(QMouseEvent* event) override;
@@ -79,6 +97,8 @@ private:
     QPointF linkPointForHit(const PDFPageHit& hit) const;
     void drawSearchHighlights(QPainter& painter, int pageIndex,
                               const PDFPageGeometry& geometry);
+    void drawEvidenceHighlights(QPainter& painter, int pageIndex,
+                                const PDFPageGeometry& geometry);
     void drawAnnotationOverlays(QPainter& painter, int pageIndex,
                                 const PDFPageGeometry& geometry);
     void drawTextSelection(QPainter& painter, int pageIndex,
@@ -88,15 +108,26 @@ private:
     QRectF annotationRectToViewportRect(const QRectF& annotationRect,
                                         const PDFPageGeometry& geometry) const;
     void emitTypedLinkClicked(const Poppler::Link* link);
+    void loadPageText(int pageIndex) const;
+    bool textBoxAtViewportPoint(const QPointF& viewportPoint,
+                                int* pageIndex = nullptr) const;
+    QString selectedText() const;
+    QRectF annotationRectInNormalizedCoordinates(int pageIndex) const;
 
     std::shared_ptr<const PDFContinuousBlueprint> m_blueprint;
+    PDFContinuousCoordinateMapper m_coordinateMapper;
     std::shared_ptr<Poppler::Document> m_document;
+    qreal m_contentOffsetX = 0.0;
     qreal m_contentOffsetY = 0.0;
     PDFContinuousImageCache* m_imageCache = nullptr;
     PDFContinuousRenderScheduler* m_renderScheduler = nullptr;
     mutable std::unordered_map<int, std::vector<std::unique_ptr<Poppler::Link>>>
         m_pageLinks;
+    mutable std::unordered_map<int,
+                               std::vector<std::unique_ptr<Poppler::TextBox>>>
+        m_pageText;
     QHash<int, QList<SearchResult>> m_searchResultsByPage;
+    QVector<Rag::EvidenceHighlightRequest> m_evidenceHighlights;
     QHash<int, QList<PDFAnnotation>> m_annotationsByPage;
     qreal m_lastDevicePixelRatio = 1.0;
     QPair<int, int> m_lastVisibleRange{-1, -1};
@@ -106,4 +137,14 @@ private:
     bool m_isSelectingText = false;
     std::optional<PDFPageHit> m_selectionStart;
     std::optional<PDFPageHit> m_selectionEnd;
+    bool m_annotationMode = false;
+    AnnotationType m_annotationTool = AnnotationType::Highlight;
+    QColor m_annotationColor = Qt::yellow;
+    qreal m_annotationOpacity = 0.7;
+    qreal m_annotationLineWidth = 2.0;
+    QString m_annotationFontFamily = QStringLiteral("Arial");
+    int m_annotationFontSize = 12;
+    bool m_isCreatingAnnotation = false;
+    std::optional<PDFPageHit> m_annotationStart;
+    std::optional<PDFPageHit> m_annotationEnd;
 };

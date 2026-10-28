@@ -1,6 +1,7 @@
 #include <poppler/qt6/poppler-qt6.h>
 #include <QCoreApplication>
 #include <QFile>
+#include <QShortcut>
 #include <QSignalSpy>
 #include <QStandardPaths>
 #include <QTextStream>
@@ -90,19 +91,24 @@ class TestPDFViewer : public QObject {
 private:
     PDFViewer* m_viewer = nullptr;
     Poppler::Document* m_doc = nullptr;
+    QString m_pdfPath;
 
 private slots:
     void initTestCase();
     void cleanupTestCase();
 
     void testDocumentLoad();
+    void testCopyShortcutScope();
     void testNavigation();
     void testPageBounds();
     void testZoom();
     void testZoomSignals();
     void testRotation();
     void testViewModeSwitch();
+    void testViewportCaptureRestore();
     void testContinuousModeRendersCanvas();
+    void testSinglePagePaintDoesNotCrash();
+    void testAnnotationPlacementDoesNotCrash();
     void testBookmark();
 };
 
@@ -114,6 +120,7 @@ void TestPDFViewer::initTestCase() {
     QString path =
         QStandardPaths::writableLocation(QStandardPaths::TempLocation) +
         "/pdfviewer_test.pdf";
+    m_pdfPath = path;
     {
         QFile f(path);
         QVERIFY(f.open(QIODevice::WriteOnly));
@@ -124,7 +131,7 @@ void TestPDFViewer::initTestCase() {
     QVERIFY(m_doc != nullptr);
 
     m_viewer = new PDFViewer(nullptr, false);  // no styling
-    m_viewer->setDocument(std::shared_ptr<Poppler::Document>(m_doc));
+    m_viewer->setDocument(std::shared_ptr<Poppler::Document>(m_doc), m_pdfPath);
 }
 
 void TestPDFViewer::cleanupTestCase() {
@@ -139,6 +146,20 @@ void TestPDFViewer::testDocumentLoad() {
     QVERIFY(m_viewer->hasDocument());
     QCOMPARE(m_viewer->getPageCount(), 3);
     QCOMPARE(m_viewer->getCurrentPage(), 0);
+}
+
+void TestPDFViewer::testCopyShortcutScope() {
+    bool found = false;
+    for (QShortcut* shortcut : m_viewer->findChildren<QShortcut*>()) {
+        if (shortcut->key() != QKeySequence(QKeySequence::Copy)) {
+            continue;
+        }
+        found = true;
+        // A window-wide Copy shortcut would steal Ctrl/Cmd+C from the Ask PDF
+        // answer view and any other focusable widget in the same window.
+        QCOMPARE(shortcut->context(), Qt::WidgetWithChildrenShortcut);
+    }
+    QVERIFY(found);
 }
 
 void TestPDFViewer::testNavigation() {
@@ -230,17 +251,63 @@ void TestPDFViewer::testRotation() {
 void TestPDFViewer::testViewModeSwitch() {
     QSignalSpy modeSpy(m_viewer, &PDFViewer::viewModeChanged);
 
+    m_viewer->resize(800, 1000);
+    m_viewer->show();
+    QCoreApplication::processEvents();
+    m_viewer->goToPage(1);
+
     m_viewer->setViewMode(PDFViewMode::ContinuousScroll);
     QCOMPARE(m_viewer->getViewMode(), PDFViewMode::ContinuousScroll);
     QCOMPARE(modeSpy.count(), 1);
+    QCoreApplication::processEvents();
+    QCOMPARE(m_viewer->getCurrentPage(), 1);
+
+    m_viewer->setViewMode(PDFViewMode::DoublePage);
+    QCOMPARE(m_viewer->getViewMode(), PDFViewMode::DoublePage);
+    QCOMPARE(modeSpy.count(), 2);
+    QCoreApplication::processEvents();
+    QCOMPARE(m_viewer->getCurrentPage(), 1);
+
+    m_viewer->setViewMode(PDFViewMode::GridView);
+    QCOMPARE(m_viewer->getViewMode(), PDFViewMode::GridView);
+    QCOMPARE(modeSpy.count(), 3);
+    QCoreApplication::processEvents();
+    QCOMPARE(m_viewer->getCurrentPage(), 1);
 
     m_viewer->setViewMode(PDFViewMode::SinglePage);
     QCOMPARE(m_viewer->getViewMode(), PDFViewMode::SinglePage);
-    QCOMPARE(modeSpy.count(), 2);
+    QCOMPARE(modeSpy.count(), 4);
+    QCOMPARE(m_viewer->getCurrentPage(), 1);
 
     // Same mode → no signal
     m_viewer->setViewMode(PDFViewMode::SinglePage);
-    QCOMPARE(modeSpy.count(), 2);
+    QCOMPARE(modeSpy.count(), 4);
+}
+
+void TestPDFViewer::testViewportCaptureRestore() {
+    m_viewer->resize(800, 1000);
+    m_viewer->show();
+    QCoreApplication::processEvents();
+    m_viewer->setViewMode(PDFViewMode::ContinuousScroll);
+    QCoreApplication::processEvents();
+    m_viewer->goToPage(1);
+    m_viewer->setZoom(1.5);
+    QCoreApplication::processEvents();
+
+    const PDFViewerPosition position = m_viewer->captureViewport();
+    QCOMPARE(position.page, 1);
+    QCOMPARE(position.zoom, 1.5);
+
+    m_viewer->goToPage(0);
+    m_viewer->setZoom(1.0);
+    QCoreApplication::processEvents();
+    m_viewer->restoreViewport(position);
+    QCoreApplication::processEvents();
+
+    const PDFViewerPosition restored = m_viewer->captureViewport();
+    QCOMPARE(restored.page, position.page);
+    QCOMPARE(restored.zoom, position.zoom);
+    QVERIFY(qAbs(restored.offsetY - position.offsetY) <= 5.0);
 }
 
 void TestPDFViewer::testContinuousModeRendersCanvas() {
@@ -262,6 +329,43 @@ void TestPDFViewer::testContinuousModeRendersCanvas() {
     QVERIFY(renderSpy.first().at(0).toInt() >= 0);
 
     m_viewer->setViewMode(PDFViewMode::SinglePage);
+}
+
+void TestPDFViewer::testSinglePagePaintDoesNotCrash() {
+    m_viewer->resize(800, 1000);
+    m_viewer->show();
+    m_viewer->setViewMode(PDFViewMode::SinglePage);
+    m_viewer->goToPage(0);
+    QTest::qWait(250);
+    QCoreApplication::processEvents();
+    QVERIFY(m_viewer->isVisible());
+}
+
+void TestPDFViewer::testAnnotationPlacementDoesNotCrash() {
+    m_viewer->resize(800, 1000);
+    m_viewer->show();
+    m_viewer->setViewMode(PDFViewMode::ContinuousScroll);
+    QTest::qWait(100);
+
+    auto* canvas = m_viewer->findChild<PDFContinuousCanvas*>();
+    QVERIFY(canvas != nullptr);
+    QVERIFY(canvas->width() > 0);
+    QVERIFY(canvas->height() > 0);
+
+    AnnotationModel* model = m_viewer->annotationModel();
+    QVERIFY(model != nullptr);
+    const int initialCount = model->getTotalAnnotationCount();
+
+    m_viewer->setAnnotationTool(AnnotationType::Highlight);
+    const QPoint start(qMax(20, canvas->width() / 4),
+                       qMax(20, canvas->height() / 4));
+    const QPoint end(start.x() + 30, start.y() + 20);
+    QTest::mousePress(canvas, Qt::LeftButton, Qt::NoModifier, start);
+    QTest::mouseMove(canvas, end);
+    QTest::mouseRelease(canvas, Qt::LeftButton, Qt::NoModifier, end);
+    QCoreApplication::processEvents();
+
+    QCOMPARE(model->getTotalAnnotationCount(), initialCount + 1);
 }
 
 void TestPDFViewer::testBookmark() {

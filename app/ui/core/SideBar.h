@@ -9,8 +9,12 @@
 #include "model/PDFOutlineModel.h"
 #include "model/ThumbnailModel.h"
 #include "ui/thumbnail/ThumbnailListView.h"
-#include "ui/viewer/PDFBookmarkWidget.h"
 #include "ui/viewer/PDFOutlineWidget.h"
+#include "ui/widgets/BookmarkWidget.h"
+
+namespace Rag {
+class AskPdfWidget;
+}
 
 // 前向声明
 namespace Poppler {
@@ -41,9 +45,13 @@ public:
     // PDF目录相关
     void setOutlineModel(PDFOutlineModel* model);
     PDFOutlineWidget* getOutlineWidget() const { return outlineWidget; }
+    BookmarkWidget* getBookmarkWidget() const { return bookmarkWidget; }
+    Rag::AskPdfWidget* getAskPdfWidget() const { return askPdfWidget; }
+    void setBookmarkContext(const QString& documentPath, int pageNumber);
 
     // 缩略图相关
-    void setDocument(std::shared_ptr<Poppler::Document> document);
+    void setDocument(std::shared_ptr<Poppler::Document> document,
+                     const QVector<QSize>& pageSizes);
     void setThumbnailSize(const QSize& size);
     void refreshThumbnails();
     ThumbnailListView* getThumbnailView() const { return thumbnailView; }
@@ -71,7 +79,8 @@ private:
     QPropertyAnimation* animation;
     QSettings* settings;
     PDFOutlineWidget* outlineWidget;
-    PDFBookmarkWidget* bookmarkWidget;
+    BookmarkWidget* bookmarkWidget;
+    Rag::AskPdfWidget* askPdfWidget;
 
     // 缩略图组件
     ThumbnailListView* thumbnailView;
@@ -95,4 +104,5 @@ private:
     QWidget* createThumbnailsTab();
     QWidget* createOutlineTab();
     QWidget* createBookmarksTab();
+    QWidget* createAskPdfTab();
 };

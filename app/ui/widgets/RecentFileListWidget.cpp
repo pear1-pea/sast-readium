@@ -15,6 +15,7 @@
 #include "../../managers/FileTypeIconManager.h"
 #include "../../managers/RecentFilesManager.h"
 #include "../../managers/StyleManager.h"
+#include "../thumbnail/RecentPdfThumbnailProvider.h"
 
 // Static const member definitions
 const int RecentFileItemWidget::ITEM_HEIGHT;
@@ -23,6 +24,10 @@ const int RecentFileItemWidget::SPACING;
 
 const int RecentFileListWidget::MAX_VISIBLE_ITEMS;
 const int RecentFileListWidget::REFRESH_DELAY;
+
+namespace {
+constexpr int RECENT_THUMBNAIL_SIZE = 72;
+}
 
 // RecentFileItemWidget Implementation
 RecentFileItemWidget::RecentFileItemWidget(const RecentFileInfo& fileInfo,
@@ -205,8 +210,8 @@ void RecentFileItemWidget::setupUI() {
     // 文件类型图标
     m_fileIconLabel = new QLabel();
     m_fileIconLabel->setObjectName("RecentFileIconLabel");
-    m_fileIconLabel->setFixedSize(32, 32);
-    m_fileIconLabel->setScaledContents(true);
+    m_fileIconLabel->setFixedSize(RECENT_THUMBNAIL_SIZE, RECENT_THUMBNAIL_SIZE);
+    m_fileIconLabel->setScaledContents(false);
     m_fileIconLabel->setAlignment(Qt::AlignCenter);
 
     // 文件信息区域
@@ -238,7 +243,7 @@ void RecentFileItemWidget::setupUI() {
             &RecentFileItemWidget::onRemoveClicked);
 
     // Layout assembly
-    m_mainLayout->addWidget(m_fileIconLabel, 0, Qt::AlignTop);
+    m_mainLayout->addWidget(m_fileIconLabel, 0, Qt::AlignVCenter);
     m_mainLayout->addLayout(m_infoLayout, 1);
     m_mainLayout->addWidget(m_removeButton, 0, Qt::AlignTop);
 }
@@ -256,9 +261,7 @@ void RecentFileItemWidget::updateDisplay() {
         !m_fileIconLabel)
         return;
 
-    // 更新文件类型图标
-    QIcon fileIcon = FILE_ICON_MANAGER.getFileTypeIcon(m_fileInfo.filePath, 32);
-    m_fileIconLabel->setPixmap(fileIcon.pixmap(32, 32));
+    setThumbnailPlaceholder();
 
     // 更新文件名 - VSCode style: just the filename without extension for
     // display
@@ -332,6 +335,51 @@ void RecentFileItemWidget::updateDisplay() {
                         m_fileInfo.lastOpened.toString()));
 }
 
+void RecentFileItemWidget::setThumbnailPlaceholder() {
+    if (!m_fileIconLabel) {
+        return;
+    }
+
+    QIcon fileIcon = FILE_ICON_MANAGER.getFileTypeIcon(m_fileInfo.filePath, 32);
+    m_fileIconLabel->setPixmap(createThumbnailCanvas(fileIcon.pixmap(32, 32)));
+}
+
+void RecentFileItemWidget::setThumbnail(const QPixmap& pixmap) {
+    if (!m_fileIconLabel || pixmap.isNull()) {
+        return;
+    }
+
+    m_fileIconLabel->setPixmap(createThumbnailCanvas(pixmap));
+}
+
+QPixmap RecentFileItemWidget::createThumbnailCanvas(
+    const QPixmap& pixmap) const {
+    QPixmap canvas(RECENT_THUMBNAIL_SIZE, RECENT_THUMBNAIL_SIZE);
+    canvas.fill(Qt::transparent);
+
+    QPainter painter(&canvas);
+    painter.setRenderHint(QPainter::Antialiasing, true);
+
+    const QRect canvasRect = canvas.rect();
+    painter.fillRect(canvasRect, QColor("#ffffff"));
+
+    if (!pixmap.isNull()) {
+        const QRect contentRect = canvasRect.adjusted(1, 1, -1, -1);
+        const QSize scaledSize =
+            pixmap.size().scaled(contentRect.size(), Qt::KeepAspectRatio);
+        const QRect targetRect(
+            contentRect.left() + (contentRect.width() - scaledSize.width()) / 2,
+            contentRect.top() +
+                (contentRect.height() - scaledSize.height()) / 2,
+            scaledSize.width(), scaledSize.height());
+        painter.drawPixmap(targetRect, pixmap);
+    }
+
+    painter.setPen(QColor("#d0d0d0"));
+    painter.drawRect(canvasRect.adjusted(0, 0, -1, -1));
+    return canvas;
+}
+
 void RecentFileItemWidget::setHovered(bool hovered) {
     if (m_isHovered == hovered)
         return;
@@ -373,6 +421,7 @@ void RecentFileItemWidget::startPressAnimation() {
 RecentFileListWidget::RecentFileListWidget(QWidget* parent)
     : QWidget(parent),
       m_recentFilesManager(nullptr),
+      m_thumbnailProvider(nullptr),
       m_mainLayout(nullptr),
       m_scrollArea(nullptr),
       m_contentWidget(nullptr),
@@ -381,6 +430,12 @@ RecentFileListWidget::RecentFileListWidget(QWidget* parent)
       m_refreshTimer(nullptr),
       m_isInitialized(false) {
     setObjectName("RecentFileListWidget");
+
+    m_thumbnailProvider = new RecentPdfThumbnailProvider(this);
+    connect(m_thumbnailProvider, &RecentPdfThumbnailProvider::thumbnailReady,
+            this, &RecentFileListWidget::onThumbnailReady);
+    connect(m_thumbnailProvider, &RecentPdfThumbnailProvider::thumbnailFailed,
+            this, &RecentFileListWidget::onThumbnailFailed);
 
     setupUI();
 
@@ -460,6 +515,7 @@ void RecentFileListWidget::clearList() {
         }
     }
     m_fileItems.clear();
+    m_itemsByPath.clear();
 
     updateEmptyState();
 }
@@ -551,6 +607,20 @@ void RecentFileListWidget::onItemRemoveRequested(const QString& filePath) {
     emit fileRemoveRequested(filePath);
 }
 
+void RecentFileListWidget::onThumbnailReady(const QString& filePath,
+                                            const QPixmap& pixmap) {
+    RecentFileItemWidget* item = m_itemsByPath.value(filePath, nullptr);
+    if (!item || item->fileInfo().filePath != filePath) {
+        return;
+    }
+
+    item->setThumbnail(pixmap);
+}
+
+void RecentFileListWidget::onThumbnailFailed(const QString& filePath) {
+    Q_UNUSED(filePath)
+}
+
 void RecentFileListWidget::onRefreshTimer() { refreshList(); }
 
 void RecentFileListWidget::setupUI() {
@@ -610,6 +680,16 @@ void RecentFileListWidget::addFileItem(const RecentFileInfo& fileInfo) {
 
     m_contentLayout->insertWidget(insertIndex, item);
     m_fileItems.append(item);
+    m_itemsByPath.insert(fileInfo.filePath, item);
+
+    const QSize thumbnailSize(RECENT_THUMBNAIL_SIZE, RECENT_THUMBNAIL_SIZE);
+    QPixmap cached =
+        m_thumbnailProvider->cachedThumbnail(fileInfo.filePath, thumbnailSize);
+    if (!cached.isNull()) {
+        item->setThumbnail(cached);
+    } else {
+        m_thumbnailProvider->requestThumbnail(fileInfo.filePath, thumbnailSize);
+    }
 
     // 应用主题
     item->applyTheme();
@@ -619,6 +699,7 @@ void RecentFileListWidget::removeFileItem(const QString& filePath) {
     for (int i = 0; i < m_fileItems.size(); ++i) {
         RecentFileItemWidget* item = m_fileItems[i];
         if (item->fileInfo().filePath == filePath) {
+            m_itemsByPath.remove(filePath);
             m_contentLayout->removeWidget(qobject_cast<QWidget*>(item));
             m_fileItems.removeAt(i);
             item->deleteLater();

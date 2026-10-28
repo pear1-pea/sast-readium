@@ -3,6 +3,9 @@
 #include "PDFContinuousRenderScheduler.h"
 #include "managers/StyleManager.h"
 
+#include <QApplication>
+#include <QClipboard>
+#include <QKeyEvent>
 #include <QMouseEvent>
 #include <QPaintEvent>
 #include <QPainter>
@@ -27,6 +30,7 @@ QColor canvasShadowColor() {
 
 PDFContinuousCanvas::PDFContinuousCanvas(QWidget* parent) : QWidget(parent) {
     setMouseTracking(true);
+    setFocusPolicy(Qt::StrongFocus);
     setAutoFillBackground(false);
     m_lastDevicePixelRatio = devicePixelRatioF();
 }
@@ -34,7 +38,15 @@ PDFContinuousCanvas::PDFContinuousCanvas(QWidget* parent) : QWidget(parent) {
 void PDFContinuousCanvas::setBlueprint(
     std::shared_ptr<const PDFContinuousBlueprint> blueprint) {
     m_blueprint = std::move(blueprint);
+    if (!m_blueprint) {
+        m_contentOffsetX = 0.0;
+        m_contentOffsetY = 0.0;
+    }
+    m_coordinateMapper.setBlueprint(m_blueprint);
+    m_coordinateMapper.setContentOffset(
+        QPointF(m_contentOffsetX, m_contentOffsetY));
     m_pageLinks.clear();
+    m_pageText.clear();
     if (!m_blueprint) {
         m_annotationsByPage.clear();
     }
@@ -56,12 +68,29 @@ std::shared_ptr<const PDFContinuousBlueprint> PDFContinuousCanvas::blueprint()
     return m_blueprint;
 }
 
+void PDFContinuousCanvas::setContentOffsetX(qreal offsetX) {
+    if (qFuzzyCompare(m_contentOffsetX, offsetX)) {
+        return;
+    }
+
+    m_contentOffsetX = offsetX;
+    m_coordinateMapper.setContentOffset(
+        QPointF(m_contentOffsetX, m_contentOffsetY));
+    updateVisibleRangeSignals();
+    requestVisiblePageRenders(devicePixelRatioF());
+    update();
+}
+
+qreal PDFContinuousCanvas::contentOffsetX() const { return m_contentOffsetX; }
+
 void PDFContinuousCanvas::setContentOffsetY(qreal offsetY) {
     if (qFuzzyCompare(m_contentOffsetY, offsetY)) {
         return;
     }
 
     m_contentOffsetY = offsetY;
+    m_coordinateMapper.setContentOffset(
+        QPointF(m_contentOffsetX, m_contentOffsetY));
     updateVisibleRangeSignals();
     requestVisiblePageRenders(devicePixelRatioF());
     update();
@@ -73,6 +102,7 @@ void PDFContinuousCanvas::setDocument(
     std::shared_ptr<Poppler::Document> document) {
     m_document = std::move(document);
     m_pageLinks.clear();
+    m_pageText.clear();
     if (!m_document) {
         m_annotationsByPage.clear();
     }
@@ -196,6 +226,7 @@ void PDFContinuousCanvas::requestVisiblePageRenders(qreal devicePixelRatio) {
             QSize(qCeil(targetSize.width() * devicePixelRatio),
                   qCeil(targetSize.height() * devicePixelRatio));
         request.generation = generation;
+        request.priority = qAbs(i - (range.first + range.second) / 2);
         if (!m_imageCache->contains(request.key)) {
             requests.push_back(request);
         }
@@ -218,6 +249,17 @@ void PDFContinuousCanvas::clearSearchHighlights() {
     update();
 }
 
+void PDFContinuousCanvas::setEvidenceHighlights(
+    const QVector<Rag::EvidenceHighlightRequest>& highlights) {
+    m_evidenceHighlights = highlights;
+    update();
+}
+
+void PDFContinuousCanvas::clearEvidenceHighlights() {
+    m_evidenceHighlights.clear();
+    update();
+}
+
 void PDFContinuousCanvas::setAnnotations(
     const QHash<int, QList<PDFAnnotation>>& annotationsByPage) {
     m_annotationsByPage = annotationsByPage;
@@ -229,12 +271,71 @@ void PDFContinuousCanvas::clearAnnotationOverlays() {
     update();
 }
 
+void PDFContinuousCanvas::setAnnotationTool(AnnotationType tool) {
+    m_annotationTool = tool;
+    m_annotationMode = true;
+    m_isSelectingText = false;
+    m_selectionStart.reset();
+    m_selectionEnd.reset();
+    update();
+}
+
+void PDFContinuousCanvas::setAnnotationMode(bool enabled) {
+    m_annotationMode = enabled;
+    if (!enabled) {
+        m_isCreatingAnnotation = false;
+        m_annotationStart.reset();
+        m_annotationEnd.reset();
+    }
+    setCursor(enabled ? Qt::CrossCursor : Qt::ArrowCursor);
+    update();
+}
+
+void PDFContinuousCanvas::setAnnotationColor(const QColor& color) {
+    m_annotationColor = color;
+}
+
+void PDFContinuousCanvas::setAnnotationOpacity(double opacity) {
+    m_annotationOpacity = qBound(0.1, opacity, 1.0);
+}
+
+void PDFContinuousCanvas::setAnnotationLineWidth(double width) {
+    m_annotationLineWidth = qMax(1.0, width);
+}
+
+void PDFContinuousCanvas::setAnnotationFont(const QString& family, int size) {
+    m_annotationFontFamily = family;
+    m_annotationFontSize = size;
+}
+
+bool PDFContinuousCanvas::hasTextSelection() const {
+    if (!m_selectionStart || !m_selectionEnd ||
+        m_selectionStart->pageIndex != m_selectionEnd->pageIndex) {
+        return false;
+    }
+    return !selectedText().isEmpty();
+}
+
+bool PDFContinuousCanvas::copySelectedText() {
+    const QString text = selectedText();
+    if (text.isEmpty()) {
+        return false;
+    }
+
+    if (QClipboard* clipboard = QApplication::clipboard()) {
+        clipboard->setText(text);
+        return true;
+    }
+    return false;
+}
+
 QRectF PDFContinuousCanvas::viewportRectInDocument() const {
     if (!m_blueprint) {
         return QRectF();
     }
 
-    return QRectF(QPointF(0.0, m_contentOffsetY), QSizeF(width(), height()));
+    return QRectF(QPointF(m_contentOffsetX, m_contentOffsetY),
+                  QSizeF(width(), height()));
 }
 
 QPair<int, int> PDFContinuousCanvas::visiblePageRange(
@@ -279,7 +380,7 @@ QPointF PDFContinuousCanvas::viewportToDocument(
     if (!m_blueprint) {
         return QPointF();
     }
-    return m_blueprint->viewportToDocument(viewportPoint, m_contentOffsetY);
+    return m_coordinateMapper.viewportToDocument(viewportPoint);
 }
 
 QPointF PDFContinuousCanvas::documentToViewport(
@@ -287,7 +388,7 @@ QPointF PDFContinuousCanvas::documentToViewport(
     if (!m_blueprint) {
         return QPointF();
     }
-    return m_blueprint->documentToViewport(documentPoint, m_contentOffsetY);
+    return m_coordinateMapper.documentToViewport(documentPoint);
 }
 
 std::optional<PDFPageHit> PDFContinuousCanvas::hitTestViewportPoint(
@@ -295,7 +396,7 @@ std::optional<PDFPageHit> PDFContinuousCanvas::hitTestViewportPoint(
     if (!m_blueprint) {
         return std::nullopt;
     }
-    return m_blueprint->hitTest(viewportToDocument(viewportPoint));
+    return m_coordinateMapper.hitTestViewport(viewportPoint);
 }
 
 const Poppler::Link* PDFContinuousCanvas::linkAtViewportPoint(
@@ -406,6 +507,7 @@ void PDFContinuousCanvas::paintEvent(QPaintEvent* event) {
                              QStringLiteral("Page %1").arg(i + 1));
         }
         drawSearchHighlights(painter, i, *geometry);
+        drawEvidenceHighlights(painter, i, *geometry);
         drawAnnotationOverlays(painter, i, *geometry);
         drawTextSelection(painter, i, *geometry);
         painter.setPen(QPen(STYLE.borderColor(), 1.0));
@@ -430,6 +532,16 @@ bool PDFContinuousCanvas::event(QEvent* event) {
 }
 
 void PDFContinuousCanvas::mouseMoveEvent(QMouseEvent* event) {
+    if (m_isCreatingAnnotation) {
+        const auto hit = hitTestViewportPoint(event->position());
+        if (hit && hit->insidePage && m_annotationStart &&
+            hit->pageIndex == m_annotationStart->pageIndex) {
+            m_annotationEnd = hit;
+            update();
+        }
+        return;
+    }
+
     if (m_isSelectingText) {
         const auto hit = hitTestViewportPoint(event->position());
         if (hit && hit->insidePage && m_selectionStart &&
@@ -444,7 +556,15 @@ void PDFContinuousCanvas::mouseMoveEvent(QMouseEvent* event) {
     const auto hit = hitTestViewportPoint(event->position());
     const Poppler::Link* link = linkAtViewportPoint(event->position());
     const int linkPage = hit ? hit->pageIndex : -1;
-    setCursor(link ? Qt::PointingHandCursor : Qt::ArrowCursor);
+    if (m_annotationMode) {
+        setCursor(Qt::CrossCursor);
+    } else if (link) {
+        setCursor(Qt::PointingHandCursor);
+    } else if (textBoxAtViewportPoint(event->position())) {
+        setCursor(Qt::IBeamCursor);
+    } else {
+        setCursor(Qt::ArrowCursor);
+    }
     if (link != m_hoveredLink || linkPage != m_hoveredLinkPage) {
         m_hoveredLink = link;
         m_hoveredLinkPage = link ? linkPage : -1;
@@ -453,10 +573,35 @@ void PDFContinuousCanvas::mouseMoveEvent(QMouseEvent* event) {
     QWidget::mouseMoveEvent(event);
 }
 
+void PDFContinuousCanvas::keyPressEvent(QKeyEvent* event) {
+    if (event->key() == Qt::Key_Escape) {
+        m_isCreatingAnnotation = false;
+        m_annotationStart.reset();
+        m_annotationEnd.reset();
+        m_isSelectingText = false;
+        update();
+        event->accept();
+        return;
+    }
+    QWidget::keyPressEvent(event);
+}
+
 void PDFContinuousCanvas::mousePressEvent(QMouseEvent* event) {
     if (event->button() == Qt::LeftButton) {
-        const Poppler::Link* link = linkAtViewportPoint(event->position());
+        setFocus(Qt::MouseFocusReason);
         const auto hit = hitTestViewportPoint(event->position());
+        if (m_annotationMode && hit && hit->insidePage) {
+            LOG_DEBUG(
+                "[annotation] begin placement page={} tool={} point=({}, {})",
+                hit->pageIndex, static_cast<int>(m_annotationTool),
+                hit->pagePoint.x(), hit->pagePoint.y());
+            m_isCreatingAnnotation = true;
+            m_annotationStart = hit;
+            m_annotationEnd = hit;
+            update();
+            return;
+        }
+        const Poppler::Link* link = linkAtViewportPoint(event->position());
         if (link && hit) {
             emit linkClicked(hit->pageIndex, link);
             emitTypedLinkClicked(link);
@@ -468,12 +613,41 @@ void PDFContinuousCanvas::mousePressEvent(QMouseEvent* event) {
                 update();
             }
             emit pageClicked(hit->pageIndex, hit->pagePoint);
+        } else {
+            m_selectionStart.reset();
+            m_selectionEnd.reset();
+            update();
         }
     }
     QWidget::mousePressEvent(event);
 }
 
 void PDFContinuousCanvas::mouseReleaseEvent(QMouseEvent* event) {
+    if (event->button() == Qt::LeftButton && m_isCreatingAnnotation) {
+        const auto hit = hitTestViewportPoint(event->position());
+        if (hit && hit->insidePage && m_annotationStart &&
+            hit->pageIndex == m_annotationStart->pageIndex) {
+            m_annotationEnd = hit;
+            const QRectF normalizedRect =
+                annotationRectInNormalizedCoordinates(hit->pageIndex);
+            if (!normalizedRect.isEmpty()) {
+                LOG_DEBUG(
+                    "[annotation] placement requested page={} tool={} "
+                    "rect=({}, {}, {}, {})",
+                    hit->pageIndex, static_cast<int>(m_annotationTool),
+                    normalizedRect.x(), normalizedRect.y(),
+                    normalizedRect.width(), normalizedRect.height());
+                emit annotationPlacementRequested(
+                    hit->pageIndex, m_annotationTool, normalizedRect);
+            }
+        }
+        m_isCreatingAnnotation = false;
+        m_annotationStart.reset();
+        m_annotationEnd.reset();
+        update();
+        return;
+    }
+
     if (event->button() == Qt::LeftButton && m_isSelectingText) {
         const auto hit = hitTestViewportPoint(event->position());
         if (hit && hit->insidePage && m_selectionStart &&
@@ -484,6 +658,55 @@ void PDFContinuousCanvas::mouseReleaseEvent(QMouseEvent* event) {
         update();
     }
     QWidget::mouseReleaseEvent(event);
+}
+
+QRectF PDFContinuousCanvas::annotationRectInNormalizedCoordinates(
+    int pageIndex) const {
+    if (!m_annotationStart || !m_annotationEnd || !m_blueprint ||
+        m_annotationStart->pageIndex != pageIndex ||
+        m_annotationEnd->pageIndex != pageIndex) {
+        return QRectF();
+    }
+
+    QRectF displayRect(m_annotationStart->pagePoint,
+                       m_annotationEnd->pagePoint);
+    displayRect = displayRect.normalized();
+    if (displayRect.width() < 2.0 && displayRect.height() < 2.0) {
+        displayRect = QRectF(m_annotationStart->pagePoint - QPointF(12.0, 12.0),
+                             QSizeF(24.0, 24.0));
+    }
+
+    const bool textAnnotation = m_annotationTool == AnnotationType::Highlight ||
+                                m_annotationTool == AnnotationType::Underline ||
+                                m_annotationTool == AnnotationType::StrikeOut;
+    if (!textAnnotation) {
+        return m_coordinateMapper.pageRectToNormalizedOriginal(pageIndex,
+                                                               displayRect);
+    }
+
+    const QRectF selectedPage =
+        m_coordinateMapper.pageRectToOriginalTopLeft(pageIndex, displayRect);
+    loadPageText(pageIndex);
+    const auto it = m_pageText.find(pageIndex);
+    if (it == m_pageText.end()) {
+        return m_coordinateMapper.pageRectToNormalizedOriginal(pageIndex,
+                                                               displayRect);
+    }
+
+    QRectF textBounds;
+    bool foundText = false;
+    for (const auto& textBox : it->second) {
+        if (!textBox || !textBox->boundingBox().intersects(selectedPage)) {
+            continue;
+        }
+        textBounds = foundText ? textBounds.united(textBox->boundingBox())
+                               : textBox->boundingBox();
+        foundText = true;
+    }
+    return foundText ? m_coordinateMapper.originalTopLeftRectToNormalized(
+                           pageIndex, textBounds)
+                     : m_coordinateMapper.pageRectToNormalizedOriginal(
+                           pageIndex, displayRect);
 }
 
 void PDFContinuousCanvas::loadPageLinks(int pageIndex) const {
@@ -499,6 +722,99 @@ void PDFContinuousCanvas::loadPageLinks(int pageIndex) const {
         return;
     }
     m_pageLinks.emplace(pageIndex, page->links());
+}
+
+void PDFContinuousCanvas::loadPageText(int pageIndex) const {
+    if (m_pageText.contains(pageIndex) || !m_document || pageIndex < 0 ||
+        pageIndex >= m_document->numPages()) {
+        return;
+    }
+
+    std::unique_ptr<Poppler::Page> page(m_document->page(pageIndex));
+    if (!page) {
+        m_pageText.emplace(pageIndex,
+                           std::vector<std::unique_ptr<Poppler::TextBox>>{});
+        return;
+    }
+    m_pageText.emplace(pageIndex, page->textList());
+}
+
+QString PDFContinuousCanvas::selectedText() const {
+    if (!m_selectionStart || !m_selectionEnd ||
+        m_selectionStart->pageIndex != m_selectionEnd->pageIndex) {
+        return QString();
+    }
+
+    const int pageIndex = m_selectionStart->pageIndex;
+    const QRectF selection = m_coordinateMapper.pageRectToOriginalTopLeft(
+        pageIndex,
+        QRectF(m_selectionStart->pagePoint, m_selectionEnd->pagePoint)
+            .normalized());
+    if (selection.isEmpty()) {
+        return QString();
+    }
+
+    loadPageText(pageIndex);
+    const auto it = m_pageText.find(pageIndex);
+    if (it == m_pageText.end()) {
+        return QString();
+    }
+
+    QString result;
+    qreal previousTop = 0.0;
+    qreal previousHeight = 0.0;
+    bool hasPrevious = false;
+    for (const std::unique_ptr<Poppler::TextBox>& textBox : it->second) {
+        if (!textBox || !textBox->boundingBox().intersects(selection)) {
+            continue;
+        }
+
+        const QRectF box = textBox->boundingBox();
+        if (hasPrevious) {
+            const qreal lineThreshold = qMax(previousHeight, box.height());
+            if (qAbs(box.top() - previousTop) > lineThreshold * 0.8) {
+                result += QChar('\n');
+            } else if (result.endsWith(QChar('\n')) == false &&
+                       !result.endsWith(QChar(' '))) {
+                result += QChar(' ');
+            }
+        }
+        result += textBox->text();
+        if (textBox->hasSpaceAfter()) {
+            result += QChar(' ');
+        }
+        previousTop = box.top();
+        previousHeight = box.height();
+        hasPrevious = true;
+    }
+
+    return result.trimmed();
+}
+
+bool PDFContinuousCanvas::textBoxAtViewportPoint(const QPointF& viewportPoint,
+                                                 int* pageIndex) const {
+    const auto hit = hitTestViewportPoint(viewportPoint);
+    if (!hit || !hit->insidePage) {
+        return false;
+    }
+
+    loadPageText(hit->pageIndex);
+    const auto it = m_pageText.find(hit->pageIndex);
+    if (it == m_pageText.end()) {
+        return false;
+    }
+
+    const QPointF pagePoint = m_coordinateMapper.pageToOriginalTopLeft(
+        hit->pageIndex, hit->pagePoint);
+    for (const auto& textBox : it->second) {
+        if (textBox && textBox->boundingBox().contains(pagePoint)) {
+            if (pageIndex) {
+                *pageIndex = hit->pageIndex;
+            }
+            return true;
+        }
+    }
+    return false;
 }
 
 QPointF PDFContinuousCanvas::linkPointForHit(const PDFPageHit& hit) const {
@@ -524,25 +840,16 @@ void PDFContinuousCanvas::drawSearchHighlights(
     }
 
     painter.save();
-    const QPointF pageViewportTopLeft =
-        documentToViewport(geometry.contentRect.topLeft());
-    const QSize widgetSize(qRound(geometry.contentRect.width()),
-                           qRound(geometry.contentRect.height()));
-
     for (SearchResult result : it.value()) {
         if (!result.isValidForHighlight()) {
             continue;
         }
 
-        result.transformToWidgetCoordinates(
-            1.0, m_blueprint->layoutOptions().rotation, geometry.originalSize,
-            widgetSize);
-        if (result.widgetRect.isEmpty()) {
+        const QRectF highlightRect = m_coordinateMapper.pdfRectToViewport(
+            pageIndex, result.boundingRect);
+        if (highlightRect.isEmpty()) {
             continue;
         }
-
-        QRectF highlightRect =
-            result.widgetRect.translated(pageViewportTopLeft);
         const QColor color = result.isCurrentResult ? QColor(255, 165, 0, 150)
                                                     : QColor(255, 255, 0, 100);
         painter.fillRect(highlightRect, color);
@@ -555,6 +862,32 @@ void PDFContinuousCanvas::drawSearchHighlights(
     painter.restore();
 }
 
+void PDFContinuousCanvas::drawEvidenceHighlights(
+    QPainter& painter, int pageIndex, const PDFPageGeometry& geometry) {
+    Q_UNUSED(geometry)
+    painter.save();
+    for (const Rag::EvidenceHighlightRequest& request : m_evidenceHighlights) {
+        if (request.pageIndex != pageIndex) {
+            continue;
+        }
+        for (const QRectF& rect : request.originalTopLeftRects) {
+            const QRectF pageRect =
+                m_coordinateMapper.originalTopLeftRectToPage(pageIndex, rect);
+            const QRectF viewportRect =
+                m_coordinateMapper.pageRectToViewport(pageIndex, pageRect);
+            if (viewportRect.isEmpty()) {
+                continue;
+            }
+            painter.fillRect(viewportRect, request.color);
+            if (request.focus) {
+                painter.setPen(QPen(request.color.darker(160), 2));
+                painter.drawRect(viewportRect);
+            }
+        }
+    }
+    painter.restore();
+}
+
 QRectF PDFContinuousCanvas::pageRectToViewportRect(
     const QRectF& pageRect, const PDFPageGeometry& geometry) const {
     return QRectF(
@@ -564,12 +897,9 @@ QRectF PDFContinuousCanvas::pageRectToViewportRect(
 
 QRectF PDFContinuousCanvas::annotationRectToViewportRect(
     const QRectF& annotationRect, const PDFPageGeometry& geometry) const {
-    return pageRectToViewportRect(
-        QRectF(annotationRect.x() * geometry.contentRect.width(),
-               annotationRect.y() * geometry.contentRect.height(),
-               annotationRect.width() * geometry.contentRect.width(),
-               annotationRect.height() * geometry.contentRect.height()),
-        geometry);
+    return m_coordinateMapper.pageRectToViewport(
+        geometry.pageIndex, m_coordinateMapper.normalizedOriginalRectToPage(
+                                geometry.pageIndex, annotationRect));
 }
 
 void PDFContinuousCanvas::drawAnnotationOverlays(
@@ -671,9 +1001,29 @@ void PDFContinuousCanvas::drawTextSelection(QPainter& painter, int pageIndex,
         return;
     }
 
+    const QRectF pageSelection =
+        m_coordinateMapper.pageRectToOriginalTopLeft(pageIndex, selectionRect);
+    loadPageText(pageIndex);
+    const auto it = m_pageText.find(pageIndex);
     painter.save();
-    painter.fillRect(pageRectToViewportRect(selectionRect, geometry),
-                     QColor(64, 128, 255, 90));
+    bool drewText = false;
+    if (it != m_pageText.end()) {
+        for (const auto& textBox : it->second) {
+            if (!textBox || !textBox->boundingBox().intersects(pageSelection)) {
+                continue;
+            }
+            painter.fillRect(
+                m_coordinateMapper.pageRectToViewport(
+                    pageIndex, m_coordinateMapper.originalTopLeftRectToPage(
+                                   pageIndex, textBox->boundingBox())),
+                QColor(64, 128, 255, 115));
+            drewText = true;
+        }
+    }
+    if (!drewText) {
+        painter.fillRect(pageRectToViewportRect(selectionRect, geometry),
+                         QColor(64, 128, 255, 90));
+    }
     painter.restore();
 }
 
@@ -711,6 +1061,9 @@ void PDFContinuousCanvas::updateVisibleRangeSignals() {
 PDFContinuousRenderKey PDFContinuousCanvas::renderKeyForPage(
     int pageIndex, qreal devicePixelRatio) const {
     PDFContinuousRenderKey key;
+    if (m_renderScheduler) {
+        key.documentToken = m_renderScheduler->documentToken();
+    }
     key.pageIndex = pageIndex;
     if (m_blueprint) {
         const PDFContinuousLayoutOptions& options =

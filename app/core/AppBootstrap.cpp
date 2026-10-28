@@ -5,6 +5,9 @@
 #include "model/DocumentModel.h"
 #include "model/PageModel.h"
 #include "model/RenderModel.h"
+#include "rag/config/RagSettings.h"
+#include "rag/controller/RagDocumentCoordinator.h"
+#include "rag/conversation/RagConversationStore.h"
 
 AppComponents AppBootstrap::assemble(double dpiX, double dpiY) {
     AppComponents deps;
@@ -20,6 +23,11 @@ AppComponents AppBootstrap::assemble(double dpiX, double dpiY) {
     deps.documentOrchestrator =
         new DocumentOrchestrator(deps.documentModel, deps.pageModel,
                                  deps.renderModel, deps.recentFilesManager);
+    deps.ragDocumentCoordinator = new Rag::RagDocumentCoordinator(
+        deps.documentModel, {}, deps.documentModel, {}, {},
+        Rag::RagSettings::load(),
+        std::make_shared<Rag::JsonConversationStore>(
+            Rag::JsonConversationStore::defaultPath()));
 
     return deps;
 }

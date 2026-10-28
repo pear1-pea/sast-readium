@@ -148,7 +148,6 @@ target("sast-readium")
         "app/ui/core/SideBar.h",
         "app/ui/core/MenuBar.h",
         "app/ui/core/ToolBar.h",
-        "app/ui/core/RightSideBar.h",
         "app/ui/dialogs/DocumentMetadataDialog.h",
         "app/ui/managers/WelcomeScreenManager.h",
         "app/ui/thumbnail/ThumbnailListView.h",

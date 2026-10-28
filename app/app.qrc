@@ -7,11 +7,11 @@
     </qresource>
 
     <qresource prefix="/images/filetypes">
-        <file alias="pdf">../assets/images/filetypes/pdf.svg</file>
-        <file alias="epub">../assets/images/filetypes/epub.svg</file>
-        <file alias="txt">../assets/images/filetypes/txt.svg</file>
-        <file alias="doc">../assets/images/filetypes/doc.svg</file>
-        <file alias="default">../assets/images/filetypes/default.svg</file>
+        <file alias="pdf.svg">../assets/images/filetypes/pdf.svg</file>
+        <file alias="epub.svg">../assets/images/filetypes/epub.svg</file>
+        <file alias="txt.svg">../assets/images/filetypes/txt.svg</file>
+        <file alias="doc.svg">../assets/images/filetypes/doc.svg</file>
+        <file alias="default.svg">../assets/images/filetypes/default.svg</file>
     </qresource>
 
     <qresource prefix="/images/dark">

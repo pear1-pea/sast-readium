@@ -1,50 +1,45 @@
 # SAST Readium Documentation
 
-Welcome to the comprehensive documentation for SAST Readium, a modern Qt6-based PDF reader application.
+Index of all project documentation. The agent entry point is
+[AGENTS.md](../AGENTS.md).
 
-## Quick Navigation
+## Getting Started
 
-### 🚀 [Getting Started](getting-started/)
+- [Overview](getting-started/index.md)
+- [Dependency Management](getting-started/dependency-management.md) — tiered system-packages vs vcpkg strategy
+- [Platform Support](getting-started/platform-support.md) — supported platforms and architectures
 
-Essential information to get you up and running with SAST Readium:
+## Build Systems
 
-- [Dependency Management](getting-started/dependency-management.md) - Comprehensive dependency strategy
-- [Platform Support](getting-started/platform-support.md) - Supported platforms and architectures
+- [Overview](build-systems/index.md)
+- [CMake vs Xmake](build-systems/build-system-comparison.md) — feature comparison
+- [Xmake](build-systems/xmake/index.md)
+  - [Build Guide](build-systems/xmake/xmake-build.md)
+  - [Status Report](build-systems/xmake/xmake-status.md)
+  - [Final Report](build-systems/xmake/xmake-final-report.md)
 
-### 🔧 [Build Systems](build-systems/)
+## Setup & Configuration
 
-Choose your preferred build system:
+- [Overview](setup/index.md)
+- [MSYS2 Build Setup](setup/msys2-build.md) — Windows MSYS2 environment
+- [clangd IDE Setup](setup/clangd-setup.md) — language server / IDE integration
 
-- [Build System Comparison](build-systems/build-system-comparison.md) - CMake vs Xmake comparison
-- [Xmake Build System](build-systems/xmake/) - Modern Lua-based build system (experimental)
+## Features
 
-### ⚙️ [Setup & Configuration](setup/)
+- [Overview](features/index.md)
+- [Ask PDF](features/ask-pdf.md) — local evidence search, optional embeddings and chat
+- [Thumbnail System](features/thumbnail-system.md) — Chrome-style PDF thumbnails
 
-Development environment setup guides:
+## Development (agent-focused)
 
-- [MSYS2 Build Setup](setup/msys2-build.md) - Windows MSYS2 environment setup
-- [clangd IDE Setup](setup/clangd-setup.md) - IDE integration and language server configuration
-
-### ✨ [Features](features/)
-
-Application features and implementation details:
-
-- [Thumbnail System](features/thumbnail-system.md) - Chrome-style PDF thumbnail system
-
-## About SAST Readium
-
-SAST Readium is a Qt6-based PDF reader application that provides:
-
-- **Modern UI**: Clean, intuitive interface built with Qt6
-- **High Performance**: Optimized rendering with Poppler-Qt6
-- **Cross-Platform**: Support for Windows, Linux, and macOS
-- **Multiple Build Systems**: Choose between CMake and Xmake
-- **Developer-Friendly**: Comprehensive documentation and IDE integration
+- [Architecture](agent/architecture.md) — top-level layout and `app/` boundaries
+- [Conventions](agent/conventions.md) — C++/Qt style, logging, anti-patterns
+- [Build](agent/build.md) — presets and per-platform build matrix
+- [Testing](agent/testing.md) — test layout and commands
+- [Debugging Setup](debugging-setup.md) — VS Code, per-platform debuggers
+- [clangd Configuration](clangd-configuration.md) — Qt "missing-includes" fixes
+- [Logging System](logging-system.md) — spdlog integration and runtime configuration
 
 ## Quick Start
 
-For the fastest way to get started, see our [Getting Started Guide](getting-started/).
-
-## Contributing
-
-This documentation is part of the SAST Readium project. For contribution guidelines and development information, please refer to the main project repository.
+See the main [README](../README.md) and [Getting Started](getting-started/index.md).

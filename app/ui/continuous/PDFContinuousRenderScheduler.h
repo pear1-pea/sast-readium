@@ -1,11 +1,11 @@
 #pragma once
 
 #include <poppler/qt6/poppler-qt6.h>
-#include <QMutex>
 #include <QObject>
 #include <QSet>
-
-#include <memory>
+#include <QString>
+#include <QThreadPool>
+#include <QVector>
 
 #include "PDFContinuousImageCache.h"
 
@@ -15,12 +15,14 @@ class PDFContinuousRenderScheduler : public QObject {
 public:
     explicit PDFContinuousRenderScheduler(QObject* parent = nullptr);
 
-    void setDocument(std::shared_ptr<Poppler::Document> document);
+    void setDocumentSource(const QString& filePath, int pageCount);
+    void clearDocumentSource();
     void requestPage(const PDFContinuousRenderRequest& request);
     void requestPages(const QVector<PDFContinuousRenderRequest>& requests);
     void cancelObsoleteRequests(std::uint64_t currentGeneration);
     void clearPendingRequests();
     std::uint64_t currentGeneration() const;
+    std::uint64_t documentToken() const;
     int pendingRequestCount() const;
 
 signals:
@@ -28,12 +30,17 @@ signals:
 
 private:
     static PDFContinuousRenderResult renderPage(
-        std::shared_ptr<Poppler::Document> document,
-        const PDFContinuousRenderRequest& request,
-        std::shared_ptr<QMutex> renderMutex);
+        const QString& documentPath, std::uint64_t documentToken,
+        const PDFContinuousRenderRequest& request);
+    void dispatchPendingRequests();
 
-    std::shared_ptr<Poppler::Document> m_document;
+    QString m_documentPath;
+    int m_pageCount = 0;
     QSet<PDFContinuousPendingKey> m_pendingKeys;
+    QSet<PDFContinuousPendingKey> m_inFlightKeys;
+    QVector<PDFContinuousRenderRequest> m_pendingRequests;
     std::uint64_t m_currentGeneration = 0;
-    std::shared_ptr<QMutex> m_renderMutex = std::make_shared<QMutex>();
+    std::uint64_t m_documentToken = 0;
+    QThreadPool m_renderPool;
+    static constexpr int kMaxInFlightRenders = 2;
 };

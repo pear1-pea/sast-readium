@@ -154,6 +154,12 @@ void BookmarkWidget::setupConnections() {
                 m_countLabel->setText(QString("%1 个书签").arg(count));
                 updateCategoryFilter();
             });
+    connect(m_bookmarkModel, &BookmarkModel::bookmarkAdded, this,
+            [this](const Bookmark&) { refreshView(); });
+    connect(m_bookmarkModel, &BookmarkModel::bookmarkRemoved, this,
+            [this](const QString&) { refreshView(); });
+    connect(m_bookmarkModel, &BookmarkModel::bookmarkUpdated, this,
+            [this](const Bookmark&) { refreshView(); });
 }
 
 void BookmarkWidget::setupContextMenu() {
@@ -200,7 +206,22 @@ void BookmarkWidget::setupContextMenu() {
 
 void BookmarkWidget::setCurrentDocument(const QString& documentPath) {
     m_currentDocument = documentPath;
+    if (documentPath.isEmpty()) {
+        m_currentPage = -1;
+    }
     m_addButton->setEnabled(!documentPath.isEmpty());
+}
+
+void BookmarkWidget::setCurrentPage(int pageNumber) {
+    m_currentPage = qMax(-1, pageNumber);
+}
+
+void BookmarkWidget::addCurrentBookmark() {
+    if (m_currentDocument.isEmpty() || m_currentPage < 0) {
+        QMessageBox::warning(this, "无法添加书签", "当前没有可用的PDF页面");
+        return;
+    }
+    addBookmark(m_currentDocument, m_currentPage);
 }
 
 bool BookmarkWidget::addBookmark(const QString& documentPath, int pageNumber,
@@ -275,21 +296,7 @@ void BookmarkWidget::onBookmarkDoubleClicked(const QModelIndex& index) {
 
 void BookmarkWidget::onBookmarkSelectionChanged() { updateBookmarkActions(); }
 
-void BookmarkWidget::onAddBookmarkRequested() {
-    if (m_currentDocument.isEmpty()) {
-        QMessageBox::warning(this, "无法添加书签", "请先打开一个PDF文档");
-        return;
-    }
-
-    // This would typically get the current page from the parent viewer
-    // For now, we'll ask the user
-    bool ok;
-    int pageNumber =
-        QInputDialog::getInt(this, "添加书签", "页码:", 1, 1, 9999, 1, &ok) - 1;
-    if (ok) {
-        addBookmark(m_currentDocument, pageNumber);
-    }
-}
+void BookmarkWidget::onAddBookmarkRequested() { addCurrentBookmark(); }
 
 void BookmarkWidget::onRemoveBookmarkRequested() {
     Bookmark bookmark = getSelectedBookmark();

@@ -3,6 +3,7 @@
 #include <QDebug>
 #include <QFontDatabase>
 #include <QStyle>
+#include "../../managers/StyleManager.h"
 
 AnnotationToolbar::AnnotationToolbar(QWidget* parent)
     : QWidget(parent),
@@ -16,99 +17,135 @@ AnnotationToolbar::AnnotationToolbar(QWidget* parent)
     setupUI();
     setupConnections();
     resetToDefaults();
+    applyTheme();
+    connect(&STYLE, &StyleManager::themeChanged, this,
+            &AnnotationToolbar::applyTheme);
 }
 
 void AnnotationToolbar::setupUI() {
     QHBoxLayout* mainLayout = new QHBoxLayout(this);
-    mainLayout->setContentsMargins(6, 6, 6, 6);
-    mainLayout->setSpacing(8);
+    mainLayout->setContentsMargins(2, 2, 2, 2);
+    mainLayout->setSpacing(4);
 
     // Tool selection group
-    m_toolGroup = new QGroupBox("注释工具", this);
+    m_toolGroup = new QGroupBox(this);
+    m_toolGroup->setFlat(true);
     m_toolLayout = new QHBoxLayout(m_toolGroup);
+    m_toolLayout->setContentsMargins(0, 0, 0, 0);
+    m_toolLayout->setSpacing(2);
     m_toolButtonGroup = new QButtonGroup(this);
 
+    m_selectBtn = new QToolButton();
+    m_selectBtn->setText("选择");
+    m_selectBtn->setCheckable(true);
+    m_selectBtn->setChecked(true);
+    m_selectBtn->setToolButtonStyle(Qt::ToolButtonTextOnly);
+    m_selectBtn->setToolTip("选择文本或页面内容");
+    m_toolLayout->addWidget(m_selectBtn);
+
     // Create tool buttons
-    m_highlightBtn = new QPushButton("高亮");
+    m_highlightBtn = new QToolButton();
+    m_highlightBtn->setText("高亮");
     m_highlightBtn->setCheckable(true);
+    m_highlightBtn->setToolButtonStyle(Qt::ToolButtonTextOnly);
     m_highlightBtn->setToolTip("文本高亮");
     m_highlightBtn->setProperty("tool",
                                 static_cast<int>(AnnotationType::Highlight));
 
-    m_noteBtn = new QPushButton("便签");
+    m_noteBtn = new QToolButton();
+    m_noteBtn->setText("便签");
     m_noteBtn->setCheckable(true);
+    m_noteBtn->setToolButtonStyle(Qt::ToolButtonTextOnly);
     m_noteBtn->setToolTip("添加便签");
     m_noteBtn->setProperty("tool", static_cast<int>(AnnotationType::Note));
 
-    m_freeTextBtn = new QPushButton("文本");
+    m_freeTextBtn = new QToolButton();
+    m_freeTextBtn->setText("文本");
     m_freeTextBtn->setCheckable(true);
+    m_freeTextBtn->setToolButtonStyle(Qt::ToolButtonTextOnly);
     m_freeTextBtn->setToolTip("自由文本");
     m_freeTextBtn->setProperty("tool",
                                static_cast<int>(AnnotationType::FreeText));
 
-    m_underlineBtn = new QPushButton("下划线");
+    m_underlineBtn = new QToolButton();
+    m_underlineBtn->setText("下划线");
     m_underlineBtn->setCheckable(true);
+    m_underlineBtn->setToolButtonStyle(Qt::ToolButtonTextOnly);
     m_underlineBtn->setToolTip("文本下划线");
     m_underlineBtn->setProperty("tool",
                                 static_cast<int>(AnnotationType::Underline));
 
-    m_strikeOutBtn = new QPushButton("删除线");
+    m_strikeOutBtn = new QToolButton();
+    m_strikeOutBtn->setText("删除线");
     m_strikeOutBtn->setCheckable(true);
+    m_strikeOutBtn->setToolButtonStyle(Qt::ToolButtonTextOnly);
     m_strikeOutBtn->setToolTip("文本删除线");
     m_strikeOutBtn->setProperty("tool",
                                 static_cast<int>(AnnotationType::StrikeOut));
 
-    m_rectangleBtn = new QPushButton("矩形");
+    m_rectangleBtn = new QToolButton();
+    m_rectangleBtn->setText("矩形");
     m_rectangleBtn->setCheckable(true);
+    m_rectangleBtn->setToolButtonStyle(Qt::ToolButtonTextOnly);
     m_rectangleBtn->setToolTip("绘制矩形");
     m_rectangleBtn->setProperty("tool",
                                 static_cast<int>(AnnotationType::Rectangle));
 
-    m_circleBtn = new QPushButton("圆形");
+    m_circleBtn = new QToolButton();
+    m_circleBtn->setText("圆形");
     m_circleBtn->setCheckable(true);
+    m_circleBtn->setToolButtonStyle(Qt::ToolButtonTextOnly);
     m_circleBtn->setToolTip("绘制圆形");
     m_circleBtn->setProperty("tool", static_cast<int>(AnnotationType::Circle));
 
-    m_lineBtn = new QPushButton("直线");
+    m_lineBtn = new QToolButton();
+    m_lineBtn->setText("直线");
     m_lineBtn->setCheckable(true);
+    m_lineBtn->setToolButtonStyle(Qt::ToolButtonTextOnly);
     m_lineBtn->setToolTip("绘制直线");
     m_lineBtn->setProperty("tool", static_cast<int>(AnnotationType::Line));
 
-    m_arrowBtn = new QPushButton("箭头");
+    m_arrowBtn = new QToolButton();
+    m_arrowBtn->setText("箭头");
     m_arrowBtn->setCheckable(true);
+    m_arrowBtn->setToolButtonStyle(Qt::ToolButtonTextOnly);
     m_arrowBtn->setToolTip("绘制箭头");
     m_arrowBtn->setProperty("tool", static_cast<int>(AnnotationType::Arrow));
 
-    m_inkBtn = new QPushButton("手绘");
+    m_inkBtn = new QToolButton();
+    m_inkBtn->setText("手绘");
     m_inkBtn->setCheckable(true);
+    m_inkBtn->setToolButtonStyle(Qt::ToolButtonTextOnly);
     m_inkBtn->setToolTip("自由手绘");
     m_inkBtn->setProperty("tool", static_cast<int>(AnnotationType::Ink));
 
     // Add buttons to group and layout
-    QList<QPushButton*> toolButtons = {
+    QList<QToolButton*> toolButtons = {
         m_highlightBtn, m_noteBtn,      m_freeTextBtn, m_underlineBtn,
         m_strikeOutBtn, m_rectangleBtn, m_circleBtn,   m_lineBtn,
         m_arrowBtn,     m_inkBtn};
 
-    for (QPushButton* btn : toolButtons) {
+    for (QToolButton* btn : toolButtons) {
         m_toolButtonGroup->addButton(btn);
         m_toolLayout->addWidget(btn);
-        btn->setMinimumSize(60, 30);
+        btn->setMinimumHeight(28);
     }
 
     m_highlightBtn->setChecked(true);  // Default selection
 
     // Properties group
-    m_propertiesGroup = new QGroupBox("属性", this);
-    m_propertiesLayout = new QVBoxLayout(m_propertiesGroup);
+    m_propertiesGroup = new QGroupBox(this);
+    m_propertiesGroup->setFlat(true);
+    m_propertiesLayout = new QHBoxLayout(m_propertiesGroup);
+    m_propertiesLayout->setContentsMargins(0, 0, 0, 0);
+    m_propertiesLayout->setSpacing(2);
 
     // Color selection
     QHBoxLayout* colorLayout = new QHBoxLayout();
     colorLayout->addWidget(new QLabel("颜色:"));
-    m_colorButton = new QPushButton();
-    m_colorButton->setMinimumSize(40, 25);
-    m_colorButton->setMaximumSize(40, 25);
-    m_colorButton->setStyleSheet("border: 1px solid gray;");
+    m_colorButton = new QToolButton();
+    m_colorButton->setFixedSize(28, 28);
+    m_colorButton->setToolTip("注释颜色");
     colorLayout->addWidget(m_colorButton);
     colorLayout->addStretch();
     m_propertiesLayout->addLayout(colorLayout);
@@ -117,7 +154,7 @@ void AnnotationToolbar::setupUI() {
     QHBoxLayout* opacityLayout = new QHBoxLayout();
     m_opacityLabel = new QLabel("透明度: 70%");
     opacityLayout->addWidget(m_opacityLabel);
-    m_opacitySlider = new QSlider(Qt::Horizontal);
+    m_opacitySlider = STYLE.createSlider(Qt::Horizontal, this);
     m_opacitySlider->setRange(10, 100);
     m_opacitySlider->setValue(70);
     opacityLayout->addWidget(m_opacitySlider);
@@ -127,7 +164,7 @@ void AnnotationToolbar::setupUI() {
     QHBoxLayout* lineWidthLayout = new QHBoxLayout();
     m_lineWidthLabel = new QLabel("线宽:");
     lineWidthLayout->addWidget(m_lineWidthLabel);
-    m_lineWidthSpinBox = new QSpinBox();
+    m_lineWidthSpinBox = STYLE.createSpinBox(this);
     m_lineWidthSpinBox->setRange(1, 10);
     m_lineWidthSpinBox->setValue(2);
     m_lineWidthSpinBox->setSuffix(" px");
@@ -139,7 +176,7 @@ void AnnotationToolbar::setupUI() {
     QHBoxLayout* fontSizeLayout = new QHBoxLayout();
     m_fontSizeLabel = new QLabel("字号:");
     fontSizeLayout->addWidget(m_fontSizeLabel);
-    m_fontSizeSpinBox = new QSpinBox();
+    m_fontSizeSpinBox = STYLE.createSpinBox(this);
     m_fontSizeSpinBox->setRange(8, 72);
     m_fontSizeSpinBox->setValue(12);
     m_fontSizeSpinBox->setSuffix(" pt");
@@ -151,27 +188,36 @@ void AnnotationToolbar::setupUI() {
     QHBoxLayout* fontFamilyLayout = new QHBoxLayout();
     m_fontFamilyLabel = new QLabel("字体:");
     fontFamilyLayout->addWidget(m_fontFamilyLabel);
-    m_fontFamilyCombo = new QComboBox();
+    m_fontFamilyCombo = STYLE.createComboBox(this);
     m_fontFamilyCombo->addItems(QFontDatabase::families());
     m_fontFamilyCombo->setCurrentText("Arial");
     fontFamilyLayout->addWidget(m_fontFamilyCombo);
     m_propertiesLayout->addLayout(fontFamilyLayout);
 
     // Actions group
-    m_actionsGroup = new QGroupBox("操作", this);
+    m_actionsGroup = new QGroupBox(this);
+    m_actionsGroup->setFlat(true);
     m_actionsLayout = new QHBoxLayout(m_actionsGroup);
+    m_actionsLayout->setContentsMargins(0, 0, 0, 0);
+    m_actionsLayout->setSpacing(2);
 
-    m_clearAllBtn = new QPushButton("清除全部");
+    m_clearAllBtn = new QToolButton();
+    m_clearAllBtn->setText("清除");
+    m_clearAllBtn->setToolButtonStyle(Qt::ToolButtonTextOnly);
     m_clearAllBtn->setIcon(
         QApplication::style()->standardIcon(QStyle::SP_DialogDiscardButton));
     m_clearAllBtn->setToolTip("清除所有注释");
 
-    m_saveBtn = new QPushButton("保存");
+    m_saveBtn = new QToolButton();
+    m_saveBtn->setText("保存");
+    m_saveBtn->setToolButtonStyle(Qt::ToolButtonTextOnly);
     m_saveBtn->setIcon(
         QApplication::style()->standardIcon(QStyle::SP_DialogSaveButton));
-    m_saveBtn->setToolTip("保存注释到文档");
+    m_saveBtn->setToolTip("保存批注到伴随文件");
 
-    m_loadBtn = new QPushButton("加载");
+    m_loadBtn = new QToolButton();
+    m_loadBtn->setText("加载");
+    m_loadBtn->setToolButtonStyle(Qt::ToolButtonTextOnly);
     m_loadBtn->setIcon(
         QApplication::style()->standardIcon(QStyle::SP_DialogOpenButton));
     m_loadBtn->setToolTip("从文档加载注释");
@@ -181,10 +227,9 @@ void AnnotationToolbar::setupUI() {
     m_actionsLayout->addWidget(m_loadBtn);
 
     // Add groups to main layout
-    mainLayout->addWidget(m_toolGroup);
-    mainLayout->addWidget(m_propertiesGroup);
-    mainLayout->addWidget(m_actionsGroup);
-    mainLayout->addStretch();
+    mainLayout->addWidget(m_toolGroup, 0, Qt::AlignVCenter);
+    mainLayout->addWidget(m_propertiesGroup, 0, Qt::AlignVCenter);
+    mainLayout->addWidget(m_actionsGroup, 0, Qt::AlignVCenter);
 
     updateColorButton();
     updatePropertyControls();
@@ -195,9 +240,11 @@ void AnnotationToolbar::setupConnections() {
     connect(m_toolButtonGroup,
             QOverload<QAbstractButton*>::of(&QButtonGroup::buttonClicked), this,
             &AnnotationToolbar::onToolButtonClicked);
+    connect(m_selectBtn, &QToolButton::clicked, this,
+            [this]() { setAnnotationMode(false); });
 
     // Color selection
-    connect(m_colorButton, &QPushButton::clicked, this,
+    connect(m_colorButton, &QToolButton::clicked, this,
             &AnnotationToolbar::onColorButtonClicked);
 
     // Property controls
@@ -211,11 +258,11 @@ void AnnotationToolbar::setupConnections() {
             &AnnotationToolbar::onFontFamilyChanged);
 
     // Actions
-    connect(m_clearAllBtn, &QPushButton::clicked, this,
+    connect(m_clearAllBtn, &QToolButton::clicked, this,
             &AnnotationToolbar::clearAllAnnotations);
-    connect(m_saveBtn, &QPushButton::clicked, this,
+    connect(m_saveBtn, &QToolButton::clicked, this,
             &AnnotationToolbar::saveAnnotations);
-    connect(m_loadBtn, &QPushButton::clicked, this,
+    connect(m_loadBtn, &QToolButton::clicked, this,
             &AnnotationToolbar::loadAnnotations);
 }
 
@@ -226,6 +273,17 @@ void AnnotationToolbar::setCurrentTool(AnnotationType tool) {
         updatePropertyControls();
         emit toolChanged(tool);
     }
+}
+
+void AnnotationToolbar::setAnnotationMode(bool enabled) {
+    if (m_annotationMode == enabled) {
+        updateToolButtons();
+        return;
+    }
+
+    m_annotationMode = enabled;
+    updateToolButtons();
+    emit annotationModeChanged(enabled);
 }
 
 void AnnotationToolbar::setCurrentColor(const QColor& color) {
@@ -274,8 +332,33 @@ void AnnotationToolbar::setEnabled(bool enabled) {
     QWidget::setEnabled(enabled);
 }
 
+void AnnotationToolbar::setUnavailableReason(const QString& reason) {
+    auto applyToButton = [&reason](QToolButton* button) {
+        if (!button) {
+            return;
+        }
+        if (reason.isEmpty()) {
+            const QString normal = button->property("normalToolTip").toString();
+            if (!normal.isEmpty()) {
+                button->setToolTip(normal);
+            }
+            return;
+        }
+        if (button->property("normalToolTip").toString().isEmpty()) {
+            button->setProperty("normalToolTip", button->toolTip());
+        }
+        button->setToolTip(reason);
+    };
+
+    for (QAbstractButton* button : m_toolButtonGroup->buttons()) {
+        applyToButton(qobject_cast<QToolButton*>(button));
+    }
+    applyToButton(m_selectBtn);
+}
+
 void AnnotationToolbar::resetToDefaults() {
     setCurrentTool(AnnotationType::Highlight);
+    setAnnotationMode(false);
     setCurrentColor(Qt::yellow);
     setCurrentOpacity(0.7);
     setCurrentLineWidth(2.0);
@@ -284,10 +367,11 @@ void AnnotationToolbar::resetToDefaults() {
 }
 
 void AnnotationToolbar::onToolButtonClicked() {
-    QPushButton* button = qobject_cast<QPushButton*>(sender());
+    QToolButton* button = qobject_cast<QToolButton*>(sender());
     if (button) {
         int toolValue = button->property("tool").toInt();
         setCurrentTool(static_cast<AnnotationType>(toolValue));
+        setAnnotationMode(true);
     }
 }
 
@@ -321,21 +405,29 @@ void AnnotationToolbar::onFontFamilyChanged(const QString& family) {
 }
 
 void AnnotationToolbar::updateToolButtons() {
+    if (m_selectBtn) {
+        m_selectBtn->setChecked(!m_annotationMode);
+    }
+
     // Find and check the button corresponding to current tool
     for (QAbstractButton* button : m_toolButtonGroup->buttons()) {
-        QPushButton* pushButton = qobject_cast<QPushButton*>(button);
+        QToolButton* pushButton = qobject_cast<QToolButton*>(button);
         if (pushButton) {
             int toolValue = pushButton->property("tool").toInt();
-            pushButton->setChecked(static_cast<AnnotationType>(toolValue) ==
-                                   m_currentTool);
+            pushButton->setChecked(m_annotationMode &&
+                                   static_cast<AnnotationType>(toolValue) ==
+                                       m_currentTool);
         }
     }
 }
 
 void AnnotationToolbar::updateColorButton() {
-    QString colorStyle =
-        QString("background-color: %1; border: 1px solid gray;")
-            .arg(m_currentColor.name());
+    QString colorStyle = QString(
+                             "QToolButton { background-color: %1; border: 1px "
+                             "solid %2; border-radius: %3px; }")
+                             .arg(m_currentColor.name())
+                             .arg(STYLE.borderColor().name())
+                             .arg(STYLE.borderRadius());
     m_colorButton->setStyleSheet(colorStyle);
 }
 
@@ -357,4 +449,14 @@ void AnnotationToolbar::updatePropertyControls() {
     m_fontSizeSpinBox->setVisible(showFontControls);
     m_fontFamilyLabel->setVisible(showFontControls);
     m_fontFamilyCombo->setVisible(showFontControls);
+}
+
+void AnnotationToolbar::applyTheme() {
+    const QString buttonStyle = STYLE.getButtonStyleSheet();
+    for (QToolButton* button : findChildren<QToolButton*>()) {
+        if (button != m_colorButton) {
+            button->setStyleSheet(buttonStyle);
+        }
+    }
+    updateColorButton();
 }

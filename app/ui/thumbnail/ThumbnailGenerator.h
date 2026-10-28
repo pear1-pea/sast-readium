@@ -4,12 +4,13 @@
 #include <QDateTime>
 #include <QFuture>
 #include <QFutureWatcher>
+#include <QImage>
 #include <QMutex>
 #include <QObject>
-#include <QPixmap>
 #include <QQueue>
 #include <QSize>
 #include <QThread>
+#include <QThreadPool>
 #include <QTimer>
 #include <QWaitCondition>
 #include <memory>
@@ -53,12 +54,11 @@ public:
               retryCount(0) {}
 
         bool operator<(const GenerationRequest& other) const {
-            // 优先级队列：优先级数值小的优先，时间戳早的优先
+            // std::sort keeps lower priority values at the front.
             if (priority != other.priority) {
-                return priority >
-                       other.priority;  // 注意：这里是>，因为QQueue是最小堆
+                return priority < other.priority;
             }
-            return timestamp > other.timestamp;
+            return timestamp < other.timestamp;
         }
     };
 
@@ -90,7 +90,7 @@ public:
                                 double quality = -1.0);
 
     // 队列管理
-    void clearQueue();
+    QVector<int> clearQueue();
     void cancelRequest(int pageNumber);
     void setPriority(int pageNumber, int priority);
 
@@ -109,7 +109,7 @@ public:
     bool isRunning() const { return m_running; }
 
 signals:
-    void thumbnailGenerated(int pageNumber, const QPixmap& pixmap);
+    void thumbnailGenerated(int pageNumber, const QImage& image);
     void thumbnailError(int pageNumber, const QString& error);
     void queueSizeChanged(int size);
     void activeJobsChanged(int count);
@@ -123,8 +123,9 @@ private slots:
 private:
     struct GenerationJob {
         GenerationRequest request;
-        QFuture<QPixmap> future;
-        QFutureWatcher<QPixmap>* watcher;
+        QFuture<QImage> future;
+        QFutureWatcher<QImage>* watcher;
+        bool cancelled = false;
 
         GenerationJob() : watcher(nullptr) {}
         ~GenerationJob() { delete watcher; }
@@ -136,9 +137,9 @@ private:
     void handleJobCompletion(GenerationJob* job);
     void handleJobError(GenerationJob* job, const QString& error);
 
-    QPixmap generatePixmap(const GenerationRequest& request);
-    QPixmap renderPageToPixmap(Poppler::Page* page, const QSize& size,
-                               double quality);
+    QImage generatePixmap(const GenerationRequest& request);
+    QImage renderPageToPixmap(Poppler::Page* page, const QSize& size,
+                              double quality);
     double calculateOptimalDPI(const QSize& targetSize, const QSizeF& pageSize,
                                double quality);
 
@@ -146,8 +147,8 @@ private:
     void logPerformance(const GenerationRequest& request, qint64 duration);
 
     // 优化方法
-    QPixmap renderPageToPixmapOptimized(Poppler::Page* page, const QSize& size,
-                                        double quality);
+    QImage renderPageToPixmapOptimized(Poppler::Page* page, const QSize& size,
+                                       double quality);
     double getCachedDPI(const QSize& targetSize, const QSizeF& pageSize,
                         double quality);
     void cacheDPI(const QSize& targetSize, const QSizeF& pageSize,
@@ -157,6 +158,7 @@ private:
 
     // 数据成员
     std::shared_ptr<Poppler::Document> m_document;
+    QThreadPool m_thumbnailPool;
     mutable QMutex m_documentMutex;
 
     // DPI缓存优化
@@ -196,7 +198,7 @@ private:
     static constexpr int DEFAULT_THUMBNAIL_WIDTH = 120;
     static constexpr int DEFAULT_THUMBNAIL_HEIGHT = 160;
     static constexpr double DEFAULT_QUALITY = 1.0;
-    static constexpr int DEFAULT_MAX_CONCURRENT_JOBS = 6;  // 增加并发数
+    static constexpr int DEFAULT_MAX_CONCURRENT_JOBS = 2;
     static constexpr int DEFAULT_MAX_RETRIES = 2;
     static constexpr int DEFAULT_BATCH_SIZE = 8;       // 增加批处理大小
     static constexpr int DEFAULT_BATCH_INTERVAL = 50;  // 减少批处理间隔

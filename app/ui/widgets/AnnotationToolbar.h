@@ -8,10 +8,10 @@
 #include <QGroupBox>
 #include <QHBoxLayout>
 #include <QLabel>
-#include <QPushButton>
 #include <QSlider>
 #include <QSpinBox>
 #include <QToolBar>
+#include <QToolButton>
 #include <QVBoxLayout>
 #include <QWidget>
 #include "../../model/AnnotationModel.h"
@@ -29,6 +29,8 @@ public:
     // Tool selection
     AnnotationType getCurrentTool() const { return m_currentTool; }
     void setCurrentTool(AnnotationType tool);
+    bool isAnnotationMode() const { return m_annotationMode; }
+    void setAnnotationMode(bool enabled);
 
     // Tool properties
     QColor getCurrentColor() const { return m_currentColor; }
@@ -48,10 +50,12 @@ public:
 
     // UI state
     void setEnabled(bool enabled);
+    void setUnavailableReason(const QString& reason);
     void resetToDefaults();
 
 signals:
     void toolChanged(AnnotationType tool);
+    void annotationModeChanged(bool enabled);
     void colorChanged(const QColor& color);
     void opacityChanged(double opacity);
     void lineWidthChanged(double width);
@@ -75,28 +79,30 @@ private:
     void updateToolButtons();
     void updateColorButton();
     void updatePropertyControls();
+    void applyTheme();
 
     // Tool selection
     QGroupBox* m_toolGroup;
     QHBoxLayout* m_toolLayout;
     QButtonGroup* m_toolButtonGroup;
+    QToolButton* m_selectBtn;
 
-    QPushButton* m_highlightBtn;
-    QPushButton* m_noteBtn;
-    QPushButton* m_freeTextBtn;
-    QPushButton* m_underlineBtn;
-    QPushButton* m_strikeOutBtn;
-    QPushButton* m_rectangleBtn;
-    QPushButton* m_circleBtn;
-    QPushButton* m_lineBtn;
-    QPushButton* m_arrowBtn;
-    QPushButton* m_inkBtn;
+    QToolButton* m_highlightBtn;
+    QToolButton* m_noteBtn;
+    QToolButton* m_freeTextBtn;
+    QToolButton* m_underlineBtn;
+    QToolButton* m_strikeOutBtn;
+    QToolButton* m_rectangleBtn;
+    QToolButton* m_circleBtn;
+    QToolButton* m_lineBtn;
+    QToolButton* m_arrowBtn;
+    QToolButton* m_inkBtn;
 
     // Properties
     QGroupBox* m_propertiesGroup;
-    QVBoxLayout* m_propertiesLayout;
+    QHBoxLayout* m_propertiesLayout;
 
-    QPushButton* m_colorButton;
+    QToolButton* m_colorButton;
     QColorDialog* m_colorDialog;
 
     QLabel* m_opacityLabel;
@@ -115,9 +121,9 @@ private:
     QGroupBox* m_actionsGroup;
     QHBoxLayout* m_actionsLayout;
 
-    QPushButton* m_clearAllBtn;
-    QPushButton* m_saveBtn;
-    QPushButton* m_loadBtn;
+    QToolButton* m_clearAllBtn;
+    QToolButton* m_saveBtn;
+    QToolButton* m_loadBtn;
 
     // Current state
     AnnotationType m_currentTool;
@@ -126,4 +132,5 @@ private:
     double m_currentLineWidth;
     int m_currentFontSize;
     QString m_currentFontFamily;
+    bool m_annotationMode = false;
 };
