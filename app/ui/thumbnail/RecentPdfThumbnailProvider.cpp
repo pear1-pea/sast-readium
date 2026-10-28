@@ -88,8 +88,7 @@ QPixmap RecentPdfThumbnailProvider::cachedThumbnail(const QString& filePath,
         return {};
     }
     return cachedThumbnailWithMetadata(
-        filePath, size,
-        sourceInfo.lastModified(QTimeZone::UTC).toMSecsSinceEpoch(),
+        filePath, size, sourceInfo.lastModified().toMSecsSinceEpoch(),
         sourceInfo.size());
 }
 
@@ -163,7 +162,7 @@ void RecentPdfThumbnailProvider::requestThumbnail(const QString& filePath,
         return;
     }
     const qint64 sourceModifiedTimeMs =
-        sourceInfo.lastModified(QTimeZone::UTC).toMSecsSinceEpoch();
+        sourceInfo.lastModified().toMSecsSinceEpoch();
     const qint64 sourceSize = sourceInfo.size();
 
     const QString key = cacheKey(filePath, size);
@@ -185,56 +184,56 @@ void RecentPdfThumbnailProvider::requestThumbnail(const QString& filePath,
     }
 
     auto* watcher = new QFutureWatcher<QImage>(this);
-    connect(
-        watcher, &QFutureWatcher<QImage>::finished, this,
-        [this, watcher, filePath, key, cachePath, sourceModifiedTimeMs,
-         sourceSize]() {
-            QImage image = watcher->result();
-            watcher->deleteLater();
+    connect(watcher, &QFutureWatcher<QImage>::finished, this,
+            [this, watcher, filePath, key, cachePath, sourceModifiedTimeMs,
+             sourceSize]() {
+                QImage image = watcher->result();
+                watcher->deleteLater();
 
-            {
-                QMutexLocker locker(&m_mutex);
-                m_pendingRequests.remove(key);
-            }
+                {
+                    QMutexLocker locker(&m_mutex);
+                    m_pendingRequests.remove(key);
+                }
 
-            if (image.isNull()) {
-                LOG_DEBUG("RecentPdfThumbnailProvider: failed to render {}",
-                          filePath.toStdString());
-                emit thumbnailFailed(filePath);
-                return;
-            }
+                if (image.isNull()) {
+                    LOG_DEBUG("RecentPdfThumbnailProvider: failed to render {}",
+                              filePath.toStdString());
+                    emit thumbnailFailed(filePath);
+                    return;
+                }
 
-            const QFileInfo currentInfo(filePath);
-            if (!currentInfo.exists() || !currentInfo.isFile() ||
-                currentInfo.size() != sourceSize ||
-                currentInfo.lastModified(QTimeZone::UTC).toMSecsSinceEpoch() !=
-                    sourceModifiedTimeMs) {
-                LOG_DEBUG(
-                    "RecentPdfThumbnailProvider: source changed during "
-                    "render: {}",
-                    filePath.toStdString());
-                emit thumbnailFailed(filePath);
-                return;
-            }
+                const QFileInfo currentInfo(filePath);
+                if (!currentInfo.exists() || !currentInfo.isFile() ||
+                    currentInfo.size() != sourceSize ||
+                    currentInfo.lastModified().toMSecsSinceEpoch() !=
+                        sourceModifiedTimeMs) {
+                    LOG_DEBUG(
+                        "RecentPdfThumbnailProvider: source changed during "
+                        "render: {}",
+                        filePath.toStdString());
+                    emit thumbnailFailed(filePath);
+                    return;
+                }
 
-            image.setText(kThumbMTimeKey,
-                          QString::number(sourceModifiedTimeMs));
-            image.setText(kThumbSizeKey, QString::number(sourceSize));
+                image.setText(kThumbMTimeKey,
+                              QString::number(sourceModifiedTimeMs));
+                image.setText(kThumbSizeKey, QString::number(sourceSize));
 
-            QPixmap pixmap = QPixmap::fromImage(image);
-            if (pixmap.isNull()) {
-                emit thumbnailFailed(filePath);
-                return;
-            }
+                QPixmap pixmap = QPixmap::fromImage(image);
+                if (pixmap.isNull()) {
+                    emit thumbnailFailed(filePath);
+                    return;
+                }
 
-            insertMemoryCache(key, pixmap, sourceModifiedTimeMs, sourceSize);
-            ensureCacheDirectory();
-            // QPixmap::save() drops QImage text metadata. Save the QImage
-            // so the PNG keeps the Thumb::MTime/Thumb::Size fields.
-            image.save(cachePath, "PNG");
-            trimDiskCache();
-            emit thumbnailReady(filePath, pixmap);
-        });
+                insertMemoryCache(key, pixmap, sourceModifiedTimeMs,
+                                  sourceSize);
+                ensureCacheDirectory();
+                // QPixmap::save() drops QImage text metadata. Save the QImage
+                // so the PNG keeps the Thumb::MTime/Thumb::Size fields.
+                image.save(cachePath, "PNG");
+                trimDiskCache();
+                emit thumbnailReady(filePath, pixmap);
+            });
 
     watcher->setFuture(QtConcurrent::run([filePath, size]() {
         return renderFirstPageTopSquare(filePath, size);
@@ -292,8 +291,7 @@ bool RecentPdfThumbnailProvider::isDiskCacheFresh(const QString& sourcePath,
     const qint64 cachedMTime = cachedMTimeText.toLongLong(&mtimeOk);
     const qint64 cachedSize = cachedSizeText.toLongLong(&sizeOk);
     return mtimeOk && sizeOk &&
-           cachedMTime ==
-               sourceInfo.lastModified(QTimeZone::UTC).toMSecsSinceEpoch() &&
+           cachedMTime == sourceInfo.lastModified().toMSecsSinceEpoch() &&
            cachedSize == sourceInfo.size();
 }
 

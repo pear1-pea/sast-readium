@@ -897,8 +897,7 @@ bool MainWindow::thumbnailDocumentIsFresh(
     const ThumbnailDocumentCacheEntry& entry, const QString& filePath) const {
     const QFileInfo info(filePath);
     return info.exists() && info.isFile() && info.size() == entry.fileSize &&
-           info.lastModified(QTimeZone::UTC).toMSecsSinceEpoch() ==
-               entry.modifiedTimeMs;
+           info.lastModified().toMSecsSinceEpoch() == entry.modifiedTimeMs;
 }
 
 void MainWindow::applyThumbnailDocument(
@@ -939,8 +938,7 @@ void MainWindow::requestThumbnailDocument(const QString& filePath) {
             const bool stale =
                 !info.exists() || !info.isFile() ||
                 info.size() != entry.fileSize ||
-                info.lastModified(QTimeZone::UTC).toMSecsSinceEpoch() !=
-                    entry.modifiedTimeMs;
+                info.lastModified().toMSecsSinceEpoch() != entry.modifiedTimeMs;
             if (stale) {
                 LOG_DEBUG(
                     "MainWindow: discarded stale thumbnail document for {}",
@@ -976,8 +974,7 @@ void MainWindow::requestThumbnailDocument(const QString& filePath) {
             return entry;
         }
         entry.fileSize = info.size();
-        entry.modifiedTimeMs =
-            info.lastModified(QTimeZone::UTC).toMSecsSinceEpoch();
+        entry.modifiedTimeMs = info.lastModified().toMSecsSinceEpoch();
 
         std::unique_ptr<Poppler::Document> document =
             Poppler::Document::load(filePath);

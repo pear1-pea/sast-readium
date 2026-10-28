@@ -9,7 +9,6 @@
 #include <QSignalSpy>
 #include <QTemporaryDir>
 #include <QTest>
-#include <QTimeZone>
 #include "ui/thumbnail/RecentPdfThumbnailProvider.h"
 
 class RecentPdfThumbnailProviderTest : public QObject {
@@ -100,8 +99,7 @@ void RecentPdfThumbnailProviderTest::diskCacheFreshnessUsesSourceMetadata() {
     sourceFile.close();
 
     const QFileInfo sourceInfo(sourcePath);
-    const qint64 mtime =
-        sourceInfo.lastModified(QTimeZone::UTC).toMSecsSinceEpoch();
+    const qint64 mtime = sourceInfo.lastModified().toMSecsSinceEpoch();
     const qint64 size = sourceInfo.size();
 
     QImage image(2, 2, QImage::Format_RGB32);
