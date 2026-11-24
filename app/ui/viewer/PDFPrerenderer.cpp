@@ -36,8 +36,6 @@ PDFPrerenderer::~PDFPrerenderer() {
 }
 
 void PDFPrerenderer::setDocument(Poppler::Document* document) {
-    QMutexLocker locker(&m_queueMutex);
-
     m_document = document;
 
     // Configure document for optimal rendering
@@ -63,37 +61,47 @@ void PDFPrerenderer::setStrategy(PrerenderStrategy strategy) {
 }
 
 void PDFPrerenderer::requestPrerender(int pageNumber, double scaleFactor,
-                                      int rotation, int priority) {
+                                      int rotation, quint64 documentToken,
+                                      double devicePixelRatio, int priority) {
     if (!m_document || pageNumber < 0 || pageNumber >= m_document->numPages()) {
         return;
     }
 
     // Check if already cached in shared render cache
-    if (m_renderCache &&
-        m_renderCache->contains({pageNumber, scaleFactor, rotation})) {
+    if (m_renderCache && m_renderCache->contains(PDFRenderCache::CacheKey::make(
+                             documentToken, pageNumber, scaleFactor, rotation,
+                             devicePixelRatio))) {
         return;
-    }
-
-    QMutexLocker locker(&m_queueMutex);
-
-    // Check if already in queue
-    for (const RenderRequest& req : m_renderQueue) {
-        if (req.pageNumber == pageNumber &&
-            qAbs(req.scaleFactor - scaleFactor) < 0.001 &&
-            req.rotation == rotation) {
-            return;  // Already queued
-        }
     }
 
     RenderRequest request;
     request.pageNumber = pageNumber;
     request.scaleFactor = scaleFactor;
     request.rotation = rotation;
+    request.documentToken = documentToken;
+    request.devicePixelRatio = devicePixelRatio;
     request.priority = priority;
     request.timestamp = QDateTime::currentMSecsSinceEpoch();
 
-    m_renderQueue.enqueue(request);
-    m_queueCondition.wakeOne();
+    if (m_workers.isEmpty()) {
+        return;
+    }
+
+    // The renderer keeps per-worker queues, so requests must be handed to a
+    // worker here; enqueueing them on the manager left them unprocessed.
+    PDFRenderWorker* bestWorker = m_workers.first();
+    int bestPending = bestWorker->pendingCount();
+    for (PDFRenderWorker* worker : m_workers) {
+        const int pending = worker->pendingCount();
+        if (pending < bestPending) {
+            bestPending = pending;
+            bestWorker = worker;
+        }
+    }
+    if (bestWorker->contains(request)) {
+        return;
+    }
+    bestWorker->addRenderRequest(request);
 }
 
 void PDFPrerenderer::startPrerendering() {
@@ -172,7 +180,7 @@ void PDFPrerenderer::scheduleAdaptivePrerendering(int currentPage) {
         int priority = calculatePriority(pageNum, currentPage);
 
         // Use current zoom and rotation settings
-        requestPrerender(pageNum, 1.0, 0, priority);
+        requestPrerender(pageNum, 1.0, 0, 0, 1.0, priority);
     }
 }
 
@@ -269,7 +277,6 @@ void PDFPrerenderer::setupWorkerThreads() {
                 &PDFRenderWorker::processRenderQueue);
         connect(worker, &PDFRenderWorker::pageRendered, this,
                 &PDFPrerenderer::onRenderCompleted);
-
         m_workerThreads.append(thread);
         m_workers.append(worker);
     }
@@ -288,13 +295,18 @@ void PDFPrerenderer::cleanupWorkerThreads() {
 }
 
 void PDFPrerenderer::onRenderCompleted(int pageNumber, const QPixmap& pixmap,
-                                       double scaleFactor, int rotation) {
+                                       double scaleFactor, int rotation,
+                                       quint64 documentToken,
+                                       double devicePixelRatio) {
     if (pixmap.isNull())
         return;
 
     // Store in shared render cache
     if (m_renderCache) {
-        m_renderCache->insert({pageNumber, scaleFactor, rotation}, pixmap);
+        m_renderCache->insert(PDFRenderCache::CacheKey::make(
+                                  documentToken, pageNumber, scaleFactor,
+                                  rotation, devicePixelRatio),
+                              pixmap);
     }
 
     emit pagePrerendered(pageNumber, scaleFactor, rotation);
@@ -304,10 +316,7 @@ void PDFPrerenderer::onAdaptiveAnalysis() { analyzeReadingPatterns(); }
 
 void PDFPrerenderer::pausePrerendering() { m_isPaused = true; }
 
-void PDFPrerenderer::resumePrerendering() {
-    m_isPaused = false;
-    m_queueCondition.wakeAll();
-}
+void PDFPrerenderer::resumePrerendering() { m_isPaused = false; }
 
 void PDFPrerenderer::setMaxWorkerThreads(int maxThreads) {
     m_maxWorkerThreads = qBound(1, maxThreads, QThread::idealThreadCount());
@@ -351,19 +360,42 @@ void PDFRenderWorker::setDocument(Poppler::Document* document) {
 void PDFRenderWorker::addRenderRequest(
     const PDFPrerenderer::RenderRequest& request) {
     QMutexLocker locker(&m_queueMutex);
-    m_localQueue.enqueue(request);
+    m_localQueue.push(request);
     m_queueCondition.wakeOne();
 }
 
 void PDFRenderWorker::clearQueue() {
     QMutexLocker locker(&m_queueMutex);
-    m_localQueue.clear();
+    m_localQueue = {};
 }
 
 void PDFRenderWorker::stop() {
     QMutexLocker locker(&m_queueMutex);
     m_shouldStop = true;
     m_queueCondition.wakeOne();
+}
+
+int PDFRenderWorker::pendingCount() const {
+    QMutexLocker locker(&m_queueMutex);
+    return int(m_localQueue.size());
+}
+
+bool PDFRenderWorker::contains(
+    const PDFPrerenderer::RenderRequest& request) const {
+    QMutexLocker locker(&m_queueMutex);
+    auto queue = m_localQueue;
+    while (!queue.empty()) {
+        const PDFPrerenderer::RenderRequest& queued = queue.top();
+        if (queued.pageNumber == request.pageNumber &&
+            queued.rotation == request.rotation &&
+            queued.documentToken == request.documentToken &&
+            qAbs(queued.scaleFactor - request.scaleFactor) < 0.0001 &&
+            qAbs(queued.devicePixelRatio - request.devicePixelRatio) < 0.0001) {
+            return true;
+        }
+        queue.pop();
+    }
+    return false;
 }
 
 void PDFRenderWorker::processRenderQueue() {
@@ -373,7 +405,7 @@ void PDFRenderWorker::processRenderQueue() {
         {
             QMutexLocker locker(&m_queueMutex);
 
-            while (m_localQueue.isEmpty() && !m_shouldStop) {
+            while (m_localQueue.empty() && !m_shouldStop) {
                 m_queueCondition.wait(&m_queueMutex);
             }
 
@@ -381,14 +413,17 @@ void PDFRenderWorker::processRenderQueue() {
                 break;
             }
 
-            request = m_localQueue.dequeue();
+            request = m_localQueue.top();
+            m_localQueue.pop();
         }
 
         try {
             QPixmap pixmap = renderPage(request);
             if (!pixmap.isNull()) {
                 emit pageRendered(request.pageNumber, pixmap,
-                                  request.scaleFactor, request.rotation);
+                                  request.scaleFactor, request.rotation,
+                                  request.documentToken,
+                                  request.devicePixelRatio);
             }
         } catch (const std::exception& e) {
             emit renderError(request.pageNumber,
@@ -408,7 +443,8 @@ QPixmap PDFRenderWorker::renderPage(
         return QPixmap();
     }
 
-    double dpi = calculateOptimalDPI(request.scaleFactor);
+    double dpi =
+        calculateOptimalDPI(request.scaleFactor, request.devicePixelRatio);
 
     QImage image = page->renderToImage(
         dpi, dpi, -1, -1, -1, -1,
@@ -421,8 +457,8 @@ QPixmap PDFRenderWorker::renderPage(
     return QPixmap::fromImage(image);
 }
 
-double PDFRenderWorker::calculateOptimalDPI(double scaleFactor) {
-    double baseDpi = 72.0;
-    double deviceRatio = qApp->devicePixelRatio();
-    return baseDpi * scaleFactor * deviceRatio;
+double PDFRenderWorker::calculateOptimalDPI(double scaleFactor,
+                                            double devicePixelRatio) {
+    const double baseDpi = 72.0;
+    return qMin(baseDpi * scaleFactor * devicePixelRatio, 300.0);
 }

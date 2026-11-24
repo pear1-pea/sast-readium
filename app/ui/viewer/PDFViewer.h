@@ -5,6 +5,7 @@
 #include <QColor>
 #include <QEvent>
 #include <QList>
+#include <QPointF>
 #include <QWidget>
 #include <memory>
 #include "rag/domain/EvidenceHighlightRequest.h"
@@ -29,7 +30,10 @@ enum class PDFViewMode {
 struct PDFViewerPosition {
     int page = 0;
     qreal offsetY = 0.0;
+    qreal offsetX = 0.0;
     qreal zoom = 1.0;
+    int rotation = 0;
+    QPointF pagePoint;  // single-page anchor in page points, top-left origin
     PDFViewMode mode = PDFViewMode::SinglePage;
 };
 
@@ -160,6 +164,11 @@ protected:
     // 缩放相关方法
     void saveZoomSettings();
     void loadZoomSettings();
+    void applyFitZoom();
+    void applySinglePageAnchor(const QPointF& pagePoint,
+                               const QPoint& viewportPosition);
+    void applyPendingSinglePageAnchor();
+    bool isFitZoomType() const;
 
     // Search highlighting helper methods
     void updateSearchHighlightsForCurrentPage();

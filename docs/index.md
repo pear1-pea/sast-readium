@@ -29,6 +29,7 @@ Index of all project documentation. The agent entry point is
 - [Overview](features/index.md)
 - [Ask PDF](features/ask-pdf.md) — local evidence search, optional embeddings and chat
 - [Thumbnail System](features/thumbnail-system.md) — Chrome-style PDF thumbnails
+- [Single-page View Design](features/single-page-view-design.md) — scenarios, execution flows, data contracts, and test evidence
 
 ## Development (agent-focused)
 

@@ -26,6 +26,9 @@ public:
 
 signals:
     void zoomChanged(double factor);
+    // Emitted once the user stops changing the zoom; expensive final
+    // rendering should wait for this instead of every intermediate value.
+    void zoomSettled(double factor);
     void zoomTypeChanged(ZoomType type);
 
 private slots:

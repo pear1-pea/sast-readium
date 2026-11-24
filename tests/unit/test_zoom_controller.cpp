@@ -1,6 +1,7 @@
 #include <QApplication>
 #include <QSignalSpy>
 #include <QtTest/QtTest>
+#include <limits>
 #include "../../app/controller/ZoomController.h"
 
 class TestZoomController : public QObject {
@@ -16,6 +17,9 @@ private slots:
     void testZoomType();
     void testFromPercentage();
     void testPersistence();
+    void testNonFiniteZoomIsRejected();
+    void testRapidInputEmitsEveryValueAndSettlesOnce();
+    void testSettledCarriesFinalValue();
 };
 
 void TestZoomController::initTestCase() {
@@ -108,6 +112,51 @@ void TestZoomController::testPersistence() {
     restored.loadSettings();
     QCOMPARE(restored.currentZoom(), 2.5);
     QCOMPARE(restored.zoomType(), ZoomType::FitWidth);
+}
+
+void TestZoomController::testNonFiniteZoomIsRejected() {
+    ZoomController ctrl;
+    QSignalSpy spy(&ctrl, &ZoomController::zoomChanged);
+
+    const double original = ctrl.currentZoom();
+    ctrl.setZoom(std::numeric_limits<double>::quiet_NaN());
+    ctrl.setZoom(std::numeric_limits<double>::infinity());
+    ctrl.setZoom(-std::numeric_limits<double>::infinity());
+
+    QCOMPARE(ctrl.currentZoom(), original);
+    QCOMPARE(spy.count(), 0);
+}
+
+void TestZoomController::testRapidInputEmitsEveryValueAndSettlesOnce() {
+    ZoomController ctrl;
+    QSignalSpy changedSpy(&ctrl, &ZoomController::zoomChanged);
+    QSignalSpy settledSpy(&ctrl, &ZoomController::zoomSettled);
+
+    for (int i = 1; i <= 10; ++i) {
+        ctrl.setZoom(1.0 + i * 0.01);
+    }
+
+    // The view follows the input immediately instead of waiting for a timer
+    // that was never started.
+    QCOMPARE(changedSpy.count(), 10);
+    QVERIFY(qAbs(ctrl.currentZoom() - 1.10) < 1e-9);
+    QCOMPARE(settledSpy.count(), 0);
+
+    QVERIFY(settledSpy.wait(1000));
+    QCOMPARE(settledSpy.count(), 1);
+}
+
+void TestZoomController::testSettledCarriesFinalValue() {
+    ZoomController ctrl;
+    QSignalSpy settledSpy(&ctrl, &ZoomController::zoomSettled);
+
+    ctrl.setZoom(1.2);
+    ctrl.setZoom(1.4);
+    ctrl.setZoom(1.6);
+
+    QVERIFY(settledSpy.wait(1000));
+    QCOMPARE(settledSpy.count(), 1);
+    QCOMPARE(settledSpy.first().at(0).toDouble(), 1.6);
 }
 
 QTEST_MAIN(TestZoomController)
