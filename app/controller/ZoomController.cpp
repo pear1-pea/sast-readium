@@ -2,6 +2,7 @@
 #include <qdebug.h>
 #include <QSettings>
 #include <QtGlobal>
+#include <cmath>
 
 ZoomController::ZoomController(QObject* parent) : QObject(parent) {
     m_timer = new QTimer(this);
@@ -12,6 +13,9 @@ ZoomController::ZoomController(QObject* parent) : QObject(parent) {
 }
 
 void ZoomController::setZoom(double factor, ZoomType type) {
+    if (!std::isfinite(factor)) {
+        return;
+    }
     m_type = type;
     factor = qBound(MIN_ZOOM, factor, MAX_ZOOM);
 
@@ -19,24 +23,12 @@ void ZoomController::setZoom(double factor, ZoomType type) {
         return;
     }
 
-    // Debounce: small changes while timer is active get coalesced
-    bool shouldDebounce = false;
-    if (type == ZoomType::FixedValue) {
-        double changeMagnitude = qAbs(factor - m_factor);
-        shouldDebounce = (changeMagnitude < 0.15 && m_timer->isActive());
-    }
-
-    if (shouldDebounce) {
-        m_pendingFactor = factor;
-        m_isPending = true;
-        m_timer->start();
-    } else {
-        if (m_timer->isActive()) {
-            m_timer->stop();
-        }
-        m_isPending = false;
-        apply(factor);
-    }
+    // Apply immediately so the view reflects the input, and only debounce the
+    // settled notification used for expensive final rendering.
+    apply(factor);
+    m_pendingFactor = factor;
+    m_isPending = true;
+    m_timer->start();
 }
 
 void ZoomController::zoomIn() {
@@ -61,9 +53,8 @@ void ZoomController::apply(double factor) {
 
 void ZoomController::onDebounceTimeout() {
     if (m_isPending) {
-        double factor = m_pendingFactor;
         m_isPending = false;
-        apply(factor);
+        emit zoomSettled(m_pendingFactor);
     }
 }
 

@@ -91,6 +91,13 @@ function(create_integration_test TEST_NAME TEST_SOURCE)
 endfunction()
 
 # ===== Unit Tests =====
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/unit/test_pdf_render_cache.cpp)
+    create_unit_test(test_pdf_render_cache
+        unit/test_pdf_render_cache.cpp)
+    target_sources(test_pdf_render_cache PRIVATE
+        ../app/ui/viewer/PDFRenderCache.cpp)
+endif()
+
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/unit/test_zoom_controller.cpp)
     create_unit_test(test_zoom_controller
         unit/test_zoom_controller.cpp)

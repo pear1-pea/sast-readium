@@ -6,10 +6,10 @@
 #include <QMutex>
 #include <QObject>
 #include <QPixmap>
-#include <QQueue>
 #include <QThread>
 #include <QTimer>
 #include <QWaitCondition>
+#include <queue>
 
 class PDFRenderCache;
 
@@ -25,14 +25,18 @@ public:
         int pageNumber;
         double scaleFactor;
         int rotation;
+        quint64 documentToken = 0;
+        double devicePixelRatio = 1.0;
         int priority;  // Lower number = higher priority
         qint64 timestamp;
 
         bool operator<(const RenderRequest& other) const {
+            // std::priority_queue keeps the largest element on top; invert the
+            // comparison so lower priority values are dispatched first.
             if (priority != other.priority) {
-                return priority < other.priority;
+                return priority > other.priority;
             }
-            return timestamp < other.timestamp;
+            return timestamp > other.timestamp;
         }
     };
 
@@ -53,7 +57,8 @@ public:
 
     // Prerendering control
     void requestPrerender(int pageNumber, double scaleFactor, int rotation,
-                          int priority = 5);
+                          quint64 documentToken = 0,
+                          double devicePixelRatio = 1.0, int priority = 5);
     void prioritizePages(const QList<int>& pageNumbers);
     void cancelPrerenderingForPage(int pageNumber);
     void clearPrerenderQueue();
@@ -73,7 +78,8 @@ public slots:
 
 private slots:
     void onRenderCompleted(int pageNumber, const QPixmap& pixmap,
-                           double scaleFactor, int rotation);
+                           double scaleFactor, int rotation,
+                           quint64 documentToken, double devicePixelRatio);
     void onAdaptiveAnalysis();
 
 private:
@@ -94,9 +100,6 @@ private:
     int m_maxWorkerThreads;
 
     // Request management
-    QQueue<RenderRequest> m_renderQueue;
-    QMutex m_queueMutex;
-    QWaitCondition m_queueCondition;
     bool m_isRunning;
     bool m_isPaused;
 
@@ -131,22 +134,25 @@ public:
     void addRenderRequest(const PDFPrerenderer::RenderRequest& request);
     void clearQueue();
     void stop();
+    int pendingCount() const;
+    bool contains(const PDFPrerenderer::RenderRequest& request) const;
 
 public slots:
     void processRenderQueue();
 
 private:
     QPixmap renderPage(const PDFPrerenderer::RenderRequest& request);
-    double calculateOptimalDPI(double scaleFactor);
+    double calculateOptimalDPI(double scaleFactor, double devicePixelRatio);
 
     Poppler::Document* m_document;
-    QQueue<PDFPrerenderer::RenderRequest> m_localQueue;
-    QMutex m_queueMutex;
+    std::priority_queue<PDFPrerenderer::RenderRequest> m_localQueue;
+    mutable QMutex m_queueMutex;
     QWaitCondition m_queueCondition;
     bool m_shouldStop;
 
 signals:
     void pageRendered(int pageNumber, const QPixmap& pixmap, double scaleFactor,
-                      int rotation);
+                      int rotation, quint64 documentToken,
+                      double devicePixelRatio);
     void renderError(int pageNumber, const QString& error);
 };

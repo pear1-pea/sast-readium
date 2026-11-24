@@ -17,6 +17,11 @@ Local document evidence search with optional Ollama embeddings and chat:
 - Optional local answer generation with validated page citations
 - Persistent index with explicit clearing and privacy notes
 
+### [Single-page View Design](single-page-view-design.md)
+
+Behavioral expectations, corner cases, execution flows, data constraints, and an
+explicit comparison with the assertions in existing tests.
+
 ### [Thumbnail System](thumbnail-system.md)
 
 Comprehensive documentation of the Chrome-style PDF thumbnail system:

@@ -25,7 +25,9 @@
 #include <QtCore>
 #include <QtGlobal>
 #include <QtWidgets>
+#include <atomic>
 #include <chrono>
+#include <cmath>
 #include <memory>
 #include <stdexcept>
 #include "../page/PDFPageWidget.h"
@@ -73,6 +75,14 @@ int normalizeRotation(int rotation) {
 int quantizeLayoutValue(qreal value) { return qRound(value * 1000.0); }
 
 int quantizeZoom(double zoom) { return qRound(zoom * 10000.0); }
+
+std::atomic<quint64> g_nextDocumentToken{0};
+
+QSizeF rotatedPageSizeF(const QSizeF& pageSize, int rotation) {
+    return (rotation == 90 || rotation == 270)
+               ? QSizeF(pageSize.height(), pageSize.width())
+               : pageSize;
+}
 
 // All modes except SinglePage render on the continuous canvas (viewStack
 // index 1); they differ only in PDFContinuousLayoutOptions.
@@ -171,9 +181,17 @@ struct PDFViewer::Private {
     // 文档数据
     std::shared_ptr<Poppler::Document> document;
     QString documentPath;
+    quint64 documentToken = 0;
     int currentPageNumber = 0;
     PDFViewMode currentViewMode = PDFViewMode::SinglePage;
     int currentRotation = 0;
+
+    // 单页缩放与位置锚点
+    bool hasPendingSinglePageAnchor = false;
+    PDFViewerPosition pendingSinglePageAnchor;
+    bool hasZoomAnchor = false;
+    QPointF zoomAnchorPagePoint;
+    QPoint zoomAnchorViewportPosition;
 
     // 缩放控制
     ZoomController* zoomController = nullptr;
@@ -369,8 +387,12 @@ void PDFViewer::setupViewModes() {
     d->singlePageWidget = new PDFPageWidget(d->singlePageScrollArea);
     d->singlePageWidget->setRenderCache(&d->m_renderCache);  // 设置缓存
     d->singlePageScrollArea->setWidget(d->singlePageWidget);
-    d->singlePageScrollArea->setWidgetResizable(true);
+    // The widget owns its exact logical page size, so the scroll area must not
+    // stretch it to fill the viewport.
+    d->singlePageScrollArea->setWidgetResizable(false);
     d->singlePageScrollArea->setAlignment(Qt::AlignCenter);
+    d->singlePageScrollArea->installEventFilter(this);
+    d->singlePageScrollArea->viewport()->installEventFilter(this);
 
     // 应用样式
     if (d->m_enableStyling) {
@@ -432,18 +454,40 @@ void PDFViewer::setupConnections() {
     }
 
     // 缩放信号 — ZoomController 触发后应用到控件
-    connect(d->zoomController, &ZoomController::zoomChanged, this,
-            [this](double factor) {
-                if (d->currentViewMode == PDFViewMode::SinglePage) {
-                    d->singlePageWidget->blockSignals(true);
-                    d->singlePageWidget->setScaleFactor(factor);
-                    d->singlePageWidget->blockSignals(false);
-                } else {
-                    updateContinuousView("zoom");
+    connect(
+        d->zoomController, &ZoomController::zoomChanged, this,
+        [this](double factor) {
+            if (d->currentViewMode == PDFViewMode::SinglePage) {
+                const bool hasAnchor = d->hasZoomAnchor;
+                QPointF anchorPagePoint = d->zoomAnchorPagePoint;
+                QPoint anchorViewportPosition = d->zoomAnchorViewportPosition;
+                if (!hasAnchor && d->singlePageWidget) {
+                    const QPoint viewportCenter =
+                        d->singlePageScrollArea->viewport()->rect().center();
+                    const QPoint widgetPoint = d->singlePageWidget->mapFrom(
+                        d->singlePageScrollArea->viewport(), viewportCenter);
+                    anchorPagePoint =
+                        d->singlePageWidget->pagePointAtWidgetPoint(
+                            widgetPoint);
+                    anchorViewportPosition = viewportCenter;
                 }
-                d->zoomController->saveSettings();
-                emit zoomChanged(factor);
-            });
+                d->hasZoomAnchor = false;
+
+                d->singlePageWidget->blockSignals(true);
+                d->singlePageWidget->setScaleFactor(factor);
+                d->singlePageWidget->blockSignals(false);
+
+                if (!anchorPagePoint.isNull()) {
+                    applySinglePageAnchor(anchorPagePoint,
+                                          anchorViewportPosition);
+                }
+            } else {
+                updateContinuousView("zoom");
+            }
+            emit zoomChanged(factor);
+        });
+    connect(d->zoomController, &ZoomController::zoomSettled, this,
+            [this](double) { d->zoomController->saveSettings(); });
     connect(d->scrollTimer, &QTimer::timeout, this,
             &PDFViewer::onScrollChanged);
     connect(d->continuousResizeTimer, &QTimer::timeout, this,
@@ -604,6 +648,30 @@ void PDFViewer::setupConnections() {
     connect(d->singlePageWidget, &PDFPageWidget::scaleChanged, this,
             &PDFViewer::onScaleChanged);
 
+    connect(d->singlePageWidget, &PDFPageWidget::zoomAnchorRequested, this,
+            [this](const QPointF& pagePoint, const QPoint& viewportPosition) {
+                d->hasZoomAnchor = true;
+                d->zoomAnchorPagePoint = pagePoint;
+                d->zoomAnchorViewportPosition = viewportPosition;
+            });
+
+    connect(d->singlePageWidget, &PDFPageWidget::frameCommitted, this,
+            [this](int pageIndex) {
+                applyPendingSinglePageAnchor();
+                if (pageIndex == d->currentPageNumber) {
+                    updateSearchHighlightsForCurrentPage();
+                }
+                if (isFitZoomType()) {
+                    applyFitZoom();
+                }
+            });
+
+    connect(d->singlePageWidget, &PDFPageWidget::renderFailed, this,
+            [](int pageIndex, const QString& error) {
+                LOG_WARNING("[single-page] render failed page={} error={}",
+                            pageIndex, error.toStdString());
+            });
+
     // 监听 StyleManager 的样式表应用信号，确保在主题样式表应用后再更新组件
     connect(&StyleManager::instance(), &StyleManager::styleSheetApplied, this,
             [this]() { updateThemeUI(); });
@@ -718,6 +786,10 @@ void PDFViewer::setDocument(std::shared_ptr<Poppler::Document> doc,
                                                                 numPages);
             }
 
+            d->documentToken = ++g_nextDocumentToken;
+            d->singlePageWidget->setDocumentSource(d->documentPath,
+                                                   d->documentToken);
+
             updatePageDisplay();
 
             // 如果是连续模式，创建所有页面
@@ -730,7 +802,9 @@ void PDFViewer::setDocument(std::shared_ptr<Poppler::Document> doc,
 
         } else {
             d->documentPath.clear();
-            d->singlePageWidget->setPage(nullptr);
+            d->documentToken = ++g_nextDocumentToken;
+            d->singlePageWidget->setDocumentSource(QString(), d->documentToken);
+            d->singlePageWidget->setPage(std::unique_ptr<Poppler::Page>());
             d->continuousImageCache.clear();
             if (d->continuousRenderScheduler) {
                 d->continuousRenderScheduler->clearDocumentSource();
@@ -757,7 +831,9 @@ void PDFViewer::setDocument(std::shared_ptr<Poppler::Document> doc,
         // 文档加载失败，清理状态
         d->document = nullptr;
         d->documentPath.clear();
-        d->singlePageWidget->setPage(nullptr);
+        d->documentToken = ++g_nextDocumentToken;
+        d->singlePageWidget->setDocumentSource(QString(), d->documentToken);
+        d->singlePageWidget->setPage(std::unique_ptr<Poppler::Page>());
         d->continuousImageCache.clear();
         if (d->continuousRenderScheduler) {
             d->continuousRenderScheduler->clearDocumentSource();
@@ -879,6 +955,10 @@ bool PDFViewer::goToPageWithValidation(int pageNumber, bool showMessage) {
 
     updatePageDisplay();
 
+    if (d->currentViewMode == PDFViewMode::SinglePage && isFitZoomType()) {
+        applyFitZoom();
+    }
+
     // Update search highlights for the new page
     updateSearchHighlightsForCurrentPage();
 
@@ -896,10 +976,19 @@ PDFViewerPosition PDFViewer::captureViewport() const {
     position.page = d->currentPageNumber;
     position.mode = getViewMode();
     position.zoom = d->zoomController ? d->zoomController->currentZoom() : 1.0;
+    position.rotation = d->currentRotation;
     if (getViewMode() == PDFViewMode::ContinuousScroll &&
         d->continuousScrollArea) {
         position.offsetY =
             d->continuousScrollArea->verticalScrollBar()->value();
+    } else if (getViewMode() == PDFViewMode::SinglePage &&
+               d->singlePageWidget && d->singlePageWidget->isFrameReady()) {
+        const QPoint viewportCenter =
+            d->singlePageScrollArea->viewport()->rect().center();
+        const QPoint widgetPoint = d->singlePageWidget->mapFrom(
+            d->singlePageScrollArea->viewport(), viewportCenter);
+        position.pagePoint =
+            d->singlePageWidget->pagePointAtWidgetPoint(widgetPoint);
     }
     return position;
 }
@@ -909,7 +998,15 @@ void PDFViewer::restoreViewport(const PDFViewerPosition& position) {
         qAbs(d->zoomController->currentZoom() - position.zoom) > 0.001) {
         setZoom(position.zoom);
     }
+    if (getViewMode() == PDFViewMode::SinglePage &&
+        !position.pagePoint.isNull()) {
+        d->pendingSinglePageAnchor = position;
+        d->hasPendingSinglePageAnchor = true;
+    }
     goToPage(position.page);
+    if (getViewMode() == PDFViewMode::SinglePage) {
+        applyPendingSinglePageAnchor();
+    }
     if (getViewMode() == position.mode &&
         getViewMode() == PDFViewMode::ContinuousScroll &&
         d->continuousScrollArea) {
@@ -950,48 +1047,21 @@ void PDFViewer::zoomIn() { d->zoomController->zoomIn(); }
 void PDFViewer::zoomOut() { d->zoomController->zoomOut(); }
 
 void PDFViewer::zoomToFit() {
-    if (!d->document)
+    if (!d->document) {
         return;
-
-    // 获取当前视图的viewport大小
-    QAbstractScrollArea* currentScrollArea =
-        (d->currentViewMode == PDFViewMode::SinglePage)
-            ? d->singlePageScrollArea
-            : d->continuousScrollArea;
-    QSize viewportSize = currentScrollArea->viewport()->size();
-
-    if (d->document->numPages() > 0) {
-        std::unique_ptr<Poppler::Page> page(
-            d->document->page(d->currentPageNumber));
-        if (page) {
-            QSizeF pageSize = page->pageSizeF();
-            double scaleX = viewportSize.width() / pageSize.width();
-            double scaleY = viewportSize.height() / pageSize.height();
-            d->zoomController->setZoom(qMin(scaleX, scaleY) * 0.9,
-                                       ZoomType::FitPage);
-        }
     }
+    d->zoomController->setZoom(d->zoomController->currentZoom(),
+                               ZoomType::FitPage);
+    applyFitZoom();
 }
 
 void PDFViewer::zoomToWidth() {
-    if (!d->document)
+    if (!d->document) {
         return;
-
-    QAbstractScrollArea* currentScrollArea =
-        (d->currentViewMode == PDFViewMode::SinglePage)
-            ? d->singlePageScrollArea
-            : d->continuousScrollArea;
-    QSize viewportSize = currentScrollArea->viewport()->size();
-
-    if (d->document->numPages() > 0) {
-        std::unique_ptr<Poppler::Page> page(
-            d->document->page(d->currentPageNumber));
-        if (page) {
-            QSizeF pageSize = page->pageSizeF();
-            double scale = viewportSize.width() / pageSize.width();
-            d->zoomController->setZoom(scale * 0.95, ZoomType::FitWidth);
-        }
     }
+    d->zoomController->setZoom(d->zoomController->currentZoom(),
+                               ZoomType::FitWidth);
+    applyFitZoom();
 }
 
 void PDFViewer::setZoom(double factor) { d->zoomController->setZoom(factor); }
@@ -1014,8 +1084,9 @@ void PDFViewer::updatePageDisplay() {
     if (!d->document || d->currentPageNumber < 0 ||
         d->currentPageNumber >= d->document->numPages()) {
         if (d->currentViewMode == PDFViewMode::SinglePage) {
-            d->singlePageWidget->setPage(
-                nullptr, d->zoomController->currentZoom(), d->currentRotation);
+            d->singlePageWidget->setPage(std::unique_ptr<Poppler::Page>(),
+                                         d->zoomController->currentZoom(),
+                                         d->currentRotation);
         }
         return;
     }
@@ -1032,7 +1103,7 @@ void PDFViewer::updatePageDisplay() {
         std::unique_ptr<Poppler::Page> page(
             d->document->page(d->currentPageNumber));
         if (page) {
-            d->singlePageWidget->setPage(page.release(),
+            d->singlePageWidget->setPage(std::move(page),
                                          d->zoomController->currentZoom(),
                                          d->currentRotation);
         }
@@ -1079,6 +1150,7 @@ void PDFViewer::setViewMode(PDFViewMode mode) {
     // 保存当前状态
     int savedPageNumber = d->currentPageNumber;
     int savedRotation = d->currentRotation;
+    const PDFViewerPosition savedViewport = captureViewport();
 
     PDFViewMode oldMode = d->currentViewMode;
     d->currentViewMode = mode;
@@ -1106,6 +1178,14 @@ void PDFViewer::setViewMode(PDFViewMode mode) {
             d->currentRotation = savedRotation;
             switchToSinglePageMode();
             updatePageDisplay();
+            if (isFitZoomType()) {
+                applyFitZoom();
+            }
+            if (!savedViewport.pagePoint.isNull()) {
+                d->pendingSinglePageAnchor = savedViewport;
+                d->hasPendingSinglePageAnchor = true;
+                applyPendingSinglePageAnchor();
+            }
         } else {
             d->currentPageNumber = savedPageNumber;
             d->currentRotation = savedRotation;
@@ -1395,24 +1475,119 @@ void PDFViewer::setZoomWithType(double factor, ZoomType type) {
 }
 
 void PDFViewer::zoomToHeight() {
-    if (!d->document)
+    if (!d->document) {
         return;
-
-    QAbstractScrollArea* currentScrollArea =
-        (d->currentViewMode == PDFViewMode::SinglePage)
-            ? d->singlePageScrollArea
-            : d->continuousScrollArea;
-    QSize viewportSize = currentScrollArea->viewport()->size();
-
-    if (d->document->numPages() > 0) {
-        std::unique_ptr<Poppler::Page> page(
-            d->document->page(d->currentPageNumber));
-        if (page) {
-            QSizeF pageSize = page->pageSizeF();
-            double scale = viewportSize.height() / pageSize.height();
-            d->zoomController->setZoom(scale * 0.95, ZoomType::FitHeight);
-        }
     }
+    d->zoomController->setZoom(d->zoomController->currentZoom(),
+                               ZoomType::FitHeight);
+    applyFitZoom();
+}
+
+bool PDFViewer::isFitZoomType() const {
+    const ZoomType type = d->zoomController->zoomType();
+    return type == ZoomType::FitPage || type == ZoomType::FitWidth ||
+           type == ZoomType::FitHeight;
+}
+
+void PDFViewer::applyFitZoom() {
+    if (!d->document) {
+        return;
+    }
+    const ZoomType type = d->zoomController->zoomType();
+    if (type != ZoomType::FitPage && type != ZoomType::FitWidth &&
+        type != ZoomType::FitHeight) {
+        return;
+    }
+
+    QAbstractScrollArea* area = (d->currentViewMode == PDFViewMode::SinglePage)
+                                    ? d->singlePageScrollArea
+                                    : d->continuousScrollArea;
+    if (!area || !area->viewport()) {
+        return;
+    }
+    const QSize viewportSize = area->viewport()->size();
+    if (viewportSize.width() <= 0 || viewportSize.height() <= 0) {
+        return;
+    }
+
+    std::unique_ptr<Poppler::Page> page(
+        d->document->page(d->currentPageNumber));
+    if (!page) {
+        return;
+    }
+    const QSizeF pageSize =
+        rotatedPageSizeF(page->pageSizeF(), d->currentRotation);
+    if (pageSize.width() <= 0 || pageSize.height() <= 0) {
+        return;
+    }
+
+    constexpr double kFitMargin = 0.98;
+    const int scrollBarExtent =
+        area->style()->pixelMetric(QStyle::PM_ScrollBarExtent, nullptr, area);
+    double scale = 1.0;
+    switch (type) {
+        case ZoomType::FitPage:
+            scale = qMin(viewportSize.width() / pageSize.width(),
+                         viewportSize.height() / pageSize.height()) *
+                    kFitMargin;
+            break;
+        case ZoomType::FitWidth:
+            scale = viewportSize.width() / pageSize.width() * kFitMargin;
+            // The fitted page is usually taller than the viewport, so the
+            // vertical bar will appear. Reserve its extent up front; otherwise
+            // the bar toggles the viewport width and the fit value oscillates.
+            if (pageSize.height() * scale > viewportSize.height() &&
+                viewportSize.width() > scrollBarExtent) {
+                scale = (viewportSize.width() - scrollBarExtent) /
+                        pageSize.width() * kFitMargin;
+            }
+            break;
+        case ZoomType::FitHeight:
+            scale = viewportSize.height() / pageSize.height() * kFitMargin;
+            if (pageSize.width() * scale > viewportSize.width() &&
+                viewportSize.height() > scrollBarExtent) {
+                scale = (viewportSize.height() - scrollBarExtent) /
+                        pageSize.height() * kFitMargin;
+            }
+            break;
+        default:
+            return;
+    }
+    d->zoomController->setZoom(scale, type);
+}
+
+void PDFViewer::applySinglePageAnchor(const QPointF& pagePoint,
+                                      const QPoint& viewportPosition) {
+    if (!d->singlePageWidget || d->currentViewMode != PDFViewMode::SinglePage) {
+        return;
+    }
+    QTimer::singleShot(0, this, [this, pagePoint, viewportPosition]() {
+        if (!d->document || d->currentViewMode != PDFViewMode::SinglePage) {
+            return;
+        }
+        const QPointF widgetPoint =
+            d->singlePageWidget->widgetPointForPagePoint(pagePoint);
+        if (widgetPoint.isNull()) {
+            return;
+        }
+        QScrollBar* horizontal = d->singlePageScrollArea->horizontalScrollBar();
+        QScrollBar* vertical = d->singlePageScrollArea->verticalScrollBar();
+        horizontal->setValue(qRound(widgetPoint.x() - viewportPosition.x()));
+        vertical->setValue(qRound(widgetPoint.y() - viewportPosition.y()));
+    });
+}
+
+void PDFViewer::applyPendingSinglePageAnchor() {
+    if (!d->hasPendingSinglePageAnchor ||
+        d->currentViewMode != PDFViewMode::SinglePage) {
+        return;
+    }
+    if (d->pendingSinglePageAnchor.page != d->currentPageNumber) {
+        return;
+    }
+    d->hasPendingSinglePageAnchor = false;
+    applySinglePageAnchor(d->pendingSinglePageAnchor.pagePoint,
+                          d->singlePageScrollArea->viewport()->rect().center());
 }
 
 void PDFViewer::saveZoomSettings() { d->zoomController->saveSettings(); }
@@ -1420,10 +1595,15 @@ void PDFViewer::saveZoomSettings() { d->zoomController->saveSettings(); }
 void PDFViewer::loadZoomSettings() { d->zoomController->loadSettings(); }
 
 bool PDFViewer::eventFilter(QObject* object, QEvent* event) {
+    // During construction the single-page area installs this filter before the
+    // continuous area exists, and styling can deliver polish events to it.
+    QAbstractScrollArea* continuousArea = d->continuousScrollArea;
+    const bool fromContinuousArea =
+        continuousArea &&
+        (object == continuousArea || object == continuousArea->viewport());
+
     // 处理连续滚动区域的Ctrl+滚轮缩放
-    if ((object == d->continuousScrollArea ||
-         object == d->continuousScrollArea->viewport()) &&
-        event->type() == QEvent::Wheel) {
+    if (fromContinuousArea && event->type() == QEvent::Wheel) {
         QWheelEvent* wheelEvent = static_cast<QWheelEvent*>(event);
         if (wheelEvent->modifiers() & Qt::ControlModifier) {
             int delta = wheelEvent->angleDelta().y();
@@ -1436,9 +1616,7 @@ bool PDFViewer::eventFilter(QObject* object, QEvent* event) {
         }
     }
 
-    if ((object == d->continuousScrollArea ||
-         object == d->continuousScrollArea->viewport()) &&
-        event->type() == QEvent::Resize &&
+    if (fromContinuousArea && event->type() == QEvent::Resize &&
         isContinuousMode(d->currentViewMode) && d->document) {
         QResizeEvent* resizeEvent = static_cast<QResizeEvent*>(event);
         const char* resizeObject =
@@ -1471,6 +1649,16 @@ bool PDFViewer::eventFilter(QObject* object, QEvent* event) {
             d->continuousLayoutFingerprint.viewportWidth,
             resizeFingerprint.zoomKey, d->continuousLayoutFingerprint.zoomKey);
         d->continuousResizeTimer->start();
+    }
+
+    QAbstractScrollArea* singleArea = d->singlePageScrollArea;
+    if (singleArea &&
+        (object == singleArea || object == singleArea->viewport()) &&
+        event->type() == QEvent::Resize &&
+        d->currentViewMode == PDFViewMode::SinglePage && d->document &&
+        isFitZoomType()) {
+        // Recompute fit after the viewport has its new size.
+        QTimer::singleShot(0, this, &PDFViewer::applyFitZoom);
     }
 
     return QWidget::eventFilter(object, event);
@@ -1533,7 +1721,7 @@ void PDFViewer::setRotation(int degrees) {
                         d->document->page(d->currentPageNumber));
                     if (page) {
                         d->singlePageWidget->setPage(
-                            page.release(), d->zoomController->currentZoom(),
+                            std::move(page), d->zoomController->currentZoom(),
                             d->currentRotation);
                     } else {
                         throw std::runtime_error(
@@ -1543,6 +1731,11 @@ void PDFViewer::setRotation(int degrees) {
             } else {
                 // 更新连续视图中的所有页面
                 updateContinuousViewRotation();
+            }
+
+            if (d->currentViewMode == PDFViewMode::SinglePage &&
+                isFitZoomType()) {
+                applyFitZoom();
             }
 
             emit rotationChanged(d->currentRotation);

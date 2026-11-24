@@ -211,6 +211,9 @@ void MainWindow::initContent() {
     if (m_welcomeScreenManager &&
         m_welcomeScreenManager->shouldShowWelcomeScreen()) {
         m_contentStack->setCurrentIndex(0);
+        // Keep the manager's visible flag in sync with the stack; otherwise it
+        // never hides the welcome screen when the first document opens.
+        m_welcomeScreenManager->showWelcomeScreen();
     } else {
         m_contentStack->setCurrentIndex(1);
     }
