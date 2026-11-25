@@ -3,18 +3,41 @@
 #include <QMutexLocker>
 #include <QtGlobal>
 
+#include <cmath>
+
+namespace {
+
+constexpr int kZoomQuantize = 10000;
+constexpr int kDprQuantize = 100;
+
+// Equality and hashing must agree on the same integer quantization.
+// Floating-point tolerances are not transitive and break hash lookup.
+int quantizedZoom(double zoom) {
+    return std::isfinite(zoom) ? qMax(1, qRound(zoom * kZoomQuantize)) : 1;
+}
+
+int quantizedDpr(double devicePixelRatio) {
+    return std::isfinite(devicePixelRatio)
+               ? qMax(1, qRound(devicePixelRatio * kDprQuantize))
+               : kDprQuantize;
+}
+
+}  // namespace
+
 bool PDFContinuousRenderKey::operator==(
     const PDFContinuousRenderKey& other) const {
     return documentToken == other.documentToken &&
-           pageIndex == other.pageIndex && qAbs(zoom - other.zoom) < 0.0001 &&
+           pageIndex == other.pageIndex &&
+           quantizedZoom(zoom) == quantizedZoom(other.zoom) &&
            rotation == other.rotation &&
-           qAbs(devicePixelRatio - other.devicePixelRatio) < 0.0001;
+           quantizedDpr(devicePixelRatio) ==
+               quantizedDpr(other.devicePixelRatio);
 }
 
 size_t qHash(const PDFContinuousRenderKey& key, size_t seed) {
     return qHashMulti(seed, key.documentToken, key.pageIndex,
-                      static_cast<int>(key.zoom * 10000), key.rotation,
-                      static_cast<int>(key.devicePixelRatio * 10000));
+                      quantizedZoom(key.zoom), key.rotation,
+                      quantizedDpr(key.devicePixelRatio));
 }
 
 bool PDFContinuousPendingKey::operator==(
@@ -27,7 +50,7 @@ size_t qHash(const PDFContinuousPendingKey& key, size_t seed) {
 }
 
 PDFContinuousImageCache::PDFContinuousImageCache(qint64 maxCostBytes)
-    : m_maxCostBytes(maxCostBytes) {}
+    : m_cache(qMax<qint64>(0, maxCostBytes)) {}
 
 void PDFContinuousImageCache::insert(const PDFContinuousRenderKey& key,
                                      const QImage& image) {
@@ -36,58 +59,53 @@ void PDFContinuousImageCache::insert(const PDFContinuousRenderKey& key,
     }
 
     QMutexLocker locker(&m_mutex);
-    if (m_images.contains(key)) {
-        m_currentCostBytes -= imageCost(m_images.value(key));
-        m_lruOrder.removeAll(key);
+    const qint64 cost = imageCost(image);
+    // An entry larger than the whole budget would evict every other frame and
+    // still not fit; keep it out of the cache instead.
+    if (cost <= 0 || cost > m_cache.maxCost()) {
+        return;
     }
-
-    m_images.insert(key, image);
-    m_lruOrder.push_back(key);
-    m_currentCostBytes += imageCost(image);
-    evictIfNeeded();
+    m_cache.insert(key, new QImage(image), cost);
 }
 
 QImage PDFContinuousImageCache::get(const PDFContinuousRenderKey& key) const {
     QMutexLocker locker(&m_mutex);
-    auto it = m_images.find(key);
-    if (it == m_images.end()) {
+    // object() relinks the entry to the front, which makes it the most
+    // recently used one.
+    QImage* image = m_cache.object(key);
+    if (!image) {
         ++m_missCount;
         return QImage();
     }
 
     ++m_hitCount;
-    m_lruOrder.removeAll(key);
-    m_lruOrder.push_back(key);
-    return it.value();
+    return *image;
 }
 
 bool PDFContinuousImageCache::contains(
     const PDFContinuousRenderKey& key) const {
     QMutexLocker locker(&m_mutex);
-    return m_images.contains(key);
+    return m_cache.contains(key);
 }
 
 void PDFContinuousImageCache::clear() {
     QMutexLocker locker(&m_mutex);
-    m_images.clear();
-    m_lruOrder.clear();
-    m_currentCostBytes = 0;
+    m_cache.clear();
 }
 
 void PDFContinuousImageCache::setMaxCostBytes(qint64 maxCostBytes) {
     QMutexLocker locker(&m_mutex);
-    m_maxCostBytes = maxCostBytes;
-    evictIfNeeded();
+    m_cache.setMaxCost(qMax<qint64>(0, maxCostBytes));
 }
 
 qint64 PDFContinuousImageCache::maxCostBytes() const {
     QMutexLocker locker(&m_mutex);
-    return m_maxCostBytes;
+    return m_cache.maxCost();
 }
 
 qint64 PDFContinuousImageCache::currentCostBytes() const {
     QMutexLocker locker(&m_mutex);
-    return m_currentCostBytes;
+    return m_cache.totalCost();
 }
 
 quint64 PDFContinuousImageCache::hitCount() const {
@@ -104,18 +122,6 @@ void PDFContinuousImageCache::resetStatistics() {
     QMutexLocker locker(&m_mutex);
     m_hitCount = 0;
     m_missCount = 0;
-}
-
-void PDFContinuousImageCache::evictIfNeeded() {
-    while (m_currentCostBytes > m_maxCostBytes && !m_lruOrder.isEmpty()) {
-        const PDFContinuousRenderKey oldest = m_lruOrder.takeFirst();
-        auto it = m_images.find(oldest);
-        if (it == m_images.end()) {
-            continue;
-        }
-        m_currentCostBytes -= imageCost(it.value());
-        m_images.erase(it);
-    }
 }
 
 qint64 PDFContinuousImageCache::imageCost(const QImage& image) {
