@@ -1,9 +1,8 @@
 #pragma once
 
-#include <QHash>
+#include <QCache>
 #include <QImage>
 #include <QMutex>
-#include <QSet>
 
 #include <cstdint>
 
@@ -58,14 +57,12 @@ public:
     void resetStatistics();
 
 private:
-    void evictIfNeeded();
     static qint64 imageCost(const QImage& image);
 
     mutable QMutex m_mutex;
-    QHash<PDFContinuousRenderKey, QImage> m_images;
-    mutable QList<PDFContinuousRenderKey> m_lruOrder;
-    qint64 m_maxCostBytes;
-    qint64 m_currentCostBytes = 0;
+    // QCache keeps a doubly linked LRU list, so lookup, refresh and eviction
+    // are all O(1).
+    QCache<PDFContinuousRenderKey, QImage> m_cache;
     mutable quint64 m_hitCount = 0;
     mutable quint64 m_missCount = 0;
 };
